@@ -105,9 +105,11 @@ impl PostgresStore {
             LEFT JOIN upstream_account_oauth_credentials c ON c.account_id = a.id
             LEFT JOIN upstream_account_rate_limit_snapshots rl ON rl.account_id = a.id
             WHERE a.id = $1
+              AND a.pool_state = $2
             "#,
         )
         .bind(account_id)
+        .bind(POOL_STATE_ACTIVE)
         .fetch_optional(&self.pool)
         .await
         .context("failed to load account for data-plane outbox event")?;

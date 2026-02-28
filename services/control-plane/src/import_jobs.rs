@@ -21,7 +21,7 @@ use tokio::time::{sleep, Duration};
 use uuid::Uuid;
 
 use crate::store::UpsertOneTimeSessionAccountRequest;
-use crate::store::{ControlPlaneStore, OAuthUpsertResult};
+use crate::store::ControlPlaneStore;
 
 const DEFAULT_BASE_URL: &str = "https://chatgpt.com/backend-api/codex";
 const DB_STATUS_QUEUED: &str = "queued";
@@ -91,6 +91,13 @@ pub struct ImportJobTask {
     pub request: ImportTaskRequest,
 }
 
+#[derive(Debug, Clone)]
+pub struct ImportTaskSuccess {
+    pub created: bool,
+    pub account_id: Option<Uuid>,
+    pub chatgpt_account_id: Option<String>,
+}
+
 #[async_trait]
 pub trait OAuthImportJobStore: Send + Sync {
     async fn create_job(
@@ -115,7 +122,7 @@ pub trait OAuthImportJobStore: Send + Sync {
         &self,
         job_id: Uuid,
         item_id: u64,
-        upserted: &OAuthUpsertResult,
+        outcome: &ImportTaskSuccess,
     ) -> Result<()>;
 
     async fn mark_item_failed(
@@ -291,7 +298,7 @@ impl OAuthImportJobStore for InMemoryOAuthImportJobStore {
         &self,
         job_id: Uuid,
         item_id: u64,
-        upserted: &OAuthUpsertResult,
+        outcome: &ImportTaskSuccess,
     ) -> Result<()> {
         let job = self
             .jobs
@@ -307,13 +314,13 @@ impl OAuthImportJobStore for InMemoryOAuthImportJobStore {
             .iter_mut()
             .find(|item| item.item.item_id == item_id)
         {
-            state.item.status = if upserted.created {
+            state.item.status = if outcome.created {
                 OAuthImportItemStatus::Created
             } else {
                 OAuthImportItemStatus::Updated
             };
-            state.item.account_id = Some(upserted.account.id);
-            state.item.chatgpt_account_id = upserted.account.chatgpt_account_id.clone();
+            state.item.account_id = outcome.account_id;
+            state.item.chatgpt_account_id = outcome.chatgpt_account_id.clone();
             state.item.error_code = None;
             state.item.error_message = None;
             state.normalized_record = Some(serde_json::to_value(&state.request)?);

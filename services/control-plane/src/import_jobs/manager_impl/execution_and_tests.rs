@@ -1,16 +1,28 @@
 async fn execute_import_with_retry(
     data_store: Arc<dyn ControlPlaneStore>,
     request: ImportTaskRequest,
-) -> Result<OAuthUpsertResult> {
+) -> Result<ImportTaskSuccess> {
     const MAX_ATTEMPTS: u32 = 3;
 
     let mut attempt = 0_u32;
     loop {
         attempt = attempt.saturating_add(1);
-        let result = match request.clone() {
-            ImportTaskRequest::OAuthRefresh(req) => data_store.upsert_oauth_refresh_token(req).await,
+        let result: Result<ImportTaskSuccess> = match request.clone() {
+            ImportTaskRequest::OAuthRefresh(req) => {
+                let created = data_store.queue_oauth_refresh_token(req.clone()).await?;
+                Ok(ImportTaskSuccess {
+                    created,
+                    account_id: None,
+                    chatgpt_account_id: req.chatgpt_account_id,
+                })
+            }
             ImportTaskRequest::OneTimeAccessToken(req) => {
-                data_store.upsert_one_time_session_account(req).await
+                let upserted = data_store.upsert_one_time_session_account(req).await?;
+                Ok(ImportTaskSuccess {
+                    created: upserted.created,
+                    account_id: Some(upserted.account.id),
+                    chatgpt_account_id: upserted.account.chatgpt_account_id,
+                })
             }
             ImportTaskRequest::ManualRefreshAccount(req) => {
                 data_store.refresh_oauth_account(req.account_id).await?;
@@ -20,9 +32,10 @@ async fn execute_import_with_retry(
                     .into_iter()
                     .find(|item| item.id == req.account_id)
                     .ok_or_else(|| anyhow!("account not found"))?;
-                Ok(OAuthUpsertResult {
-                    account,
+                Ok(ImportTaskSuccess {
                     created: false,
+                    account_id: Some(account.id),
+                    chatgpt_account_id: account.chatgpt_account_id,
                 })
             }
         };

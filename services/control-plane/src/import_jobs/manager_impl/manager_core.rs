@@ -241,9 +241,9 @@ impl OAuthImportJobManager {
                     let job_store = job_store.clone();
                     async move {
                         match result {
-                            Ok(upserted) => {
+                            Ok(outcome) => {
                                 let _ = job_store
-                                    .mark_item_success(job_id, item_id, &upserted)
+                                    .mark_item_success(job_id, item_id, &outcome)
                                     .await;
                             }
                             Err(err) => {
@@ -268,4 +268,3 @@ impl OAuthImportJobManager {
         Ok(())
     }
 }
-

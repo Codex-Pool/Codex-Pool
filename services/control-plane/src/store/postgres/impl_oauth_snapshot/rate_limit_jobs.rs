@@ -353,8 +353,9 @@ impl PostgresStore {
             LEFT JOIN upstream_account_rate_limit_snapshots rl ON rl.account_id = a.id
             WHERE
                 a.auth_provider = $1
+                AND a.pool_state = $2
                 AND a.enabled = true
-                AND c.token_expires_at > $2
+                AND c.token_expires_at > $3
                 AND COALESCE(c.refresh_reused_detected, false) = false
                 AND NOT (
                     c.last_refresh_status = 'failed'
@@ -366,12 +367,13 @@ impl PostgresStore {
                         'unauthorized_client'
                     )
                 )
-                AND (rl.expires_at IS NULL OR rl.expires_at <= $3)
+                AND (rl.expires_at IS NULL OR rl.expires_at <= $4)
             ORDER BY COALESCE(rl.expires_at, 'epoch'::timestamptz) ASC, a.created_at ASC
-            LIMIT $4
+            LIMIT $5
             "#,
         )
         .bind(AUTH_PROVIDER_OAUTH_REFRESH_TOKEN)
+        .bind(POOL_STATE_ACTIVE)
         .bind(now + Duration::seconds(OAUTH_MIN_VALID_SEC))
         .bind(now)
         .bind(i64::try_from(limit).unwrap_or(i64::MAX))
@@ -408,8 +410,9 @@ impl PostgresStore {
             INNER JOIN upstream_account_oauth_credentials c ON c.account_id = a.id
             WHERE
                 a.auth_provider = $1
+                AND a.pool_state = $2
                 AND a.enabled = true
-                AND c.token_expires_at > $2
+                AND c.token_expires_at > $3
                 AND COALESCE(c.refresh_reused_detected, false) = false
                 AND NOT (
                     c.last_refresh_status = 'failed'
@@ -421,12 +424,13 @@ impl PostgresStore {
                         'unauthorized_client'
                     )
                 )
-                AND ($3::uuid IS NULL OR a.id > $3)
+                AND ($4::uuid IS NULL OR a.id > $4)
             ORDER BY a.id ASC
-            LIMIT $4
+            LIMIT $5
             "#,
         )
         .bind(AUTH_PROVIDER_OAUTH_REFRESH_TOKEN)
+        .bind(POOL_STATE_ACTIVE)
         .bind(now + Duration::seconds(OAUTH_MIN_VALID_SEC))
         .bind(after_id)
         .bind(i64::try_from(limit).unwrap_or(i64::MAX))
@@ -586,11 +590,13 @@ impl PostgresStore {
             WHERE
                 a.id = $1
                 AND a.auth_provider = $2
+                AND a.pool_state = $3
                 AND a.enabled = true
             "#,
         )
         .bind(account_id)
         .bind(AUTH_PROVIDER_OAUTH_REFRESH_TOKEN)
+        .bind(POOL_STATE_ACTIVE)
         .fetch_optional(&self.pool)
         .await
         .context("failed to load oauth rate-limit refresh target by account id")?

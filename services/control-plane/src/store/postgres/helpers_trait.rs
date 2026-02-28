@@ -367,6 +367,10 @@ impl ControlPlaneStore for PostgresStore {
         self.upsert_oauth_account(req).await
     }
 
+    async fn queue_oauth_refresh_token(&self, req: ImportOAuthRefreshTokenRequest) -> Result<bool> {
+        self.queue_oauth_refresh_token_vault_inner(req).await
+    }
+
     async fn upsert_one_time_session_account(
         &self,
         req: UpsertOneTimeSessionAccountRequest,
@@ -409,6 +413,10 @@ impl ControlPlaneStore for PostgresStore {
 
     async fn refresh_expiring_oauth_accounts(&self) -> Result<()> {
         self.refresh_expiring_oauth_accounts_inner().await
+    }
+
+    async fn activate_oauth_refresh_token_vault(&self) -> Result<u64> {
+        self.activate_oauth_refresh_token_vault_inner().await
     }
 
     async fn refresh_due_oauth_rate_limit_caches(&self) -> Result<u64> {

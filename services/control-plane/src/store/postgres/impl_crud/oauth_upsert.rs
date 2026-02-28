@@ -144,6 +144,88 @@ impl PostgresStore {
         })
     }
 
+    async fn queue_oauth_refresh_token_vault_inner(
+        &self,
+        req: ImportOAuthRefreshTokenRequest,
+    ) -> Result<bool> {
+        let cipher = self.require_credential_cipher()?;
+        let refresh_token = req.refresh_token.trim();
+        if refresh_token.is_empty() {
+            return Err(anyhow!("refresh token is empty"));
+        }
+        let refresh_token_enc = cipher.encrypt(refresh_token)?;
+        let refresh_token_sha256 = refresh_token_sha256(refresh_token);
+        let desired_mode = resolve_oauth_import_mode(req.mode.clone(), req.source_type.as_deref());
+        let now = Utc::now();
+
+        let row = sqlx::query(
+            r#"
+            INSERT INTO oauth_refresh_token_vault (
+                id,
+                refresh_token_enc,
+                refresh_token_sha256,
+                base_url,
+                label,
+                email,
+                chatgpt_account_id,
+                chatgpt_plan_type,
+                source_type,
+                desired_mode,
+                desired_enabled,
+                desired_priority,
+                status,
+                failure_count,
+                backoff_until,
+                next_attempt_at,
+                last_error_code,
+                last_error_message,
+                created_at,
+                updated_at
+            )
+            VALUES (
+                $1, $2, $3, $4, $5, NULL, $6, $7, $8, $9, $10, $11, 'queued', 0, NULL, $12, NULL, NULL, $12, $12
+            )
+            ON CONFLICT (refresh_token_sha256) DO UPDATE
+            SET
+                refresh_token_enc = EXCLUDED.refresh_token_enc,
+                base_url = EXCLUDED.base_url,
+                label = EXCLUDED.label,
+                chatgpt_account_id = COALESCE(EXCLUDED.chatgpt_account_id, oauth_refresh_token_vault.chatgpt_account_id),
+                chatgpt_plan_type = COALESCE(EXCLUDED.chatgpt_plan_type, oauth_refresh_token_vault.chatgpt_plan_type),
+                source_type = COALESCE(EXCLUDED.source_type, oauth_refresh_token_vault.source_type),
+                desired_mode = EXCLUDED.desired_mode,
+                desired_enabled = EXCLUDED.desired_enabled,
+                desired_priority = EXCLUDED.desired_priority,
+                status = 'queued',
+                failure_count = 0,
+                backoff_until = NULL,
+                next_attempt_at = EXCLUDED.next_attempt_at,
+                last_error_code = NULL,
+                last_error_message = NULL,
+                updated_at = EXCLUDED.updated_at
+            RETURNING (xmax = 0) AS inserted
+            "#,
+        )
+        .bind(Uuid::new_v4())
+        .bind(refresh_token_enc)
+        .bind(refresh_token_sha256)
+        .bind(req.base_url)
+        .bind(req.label)
+        .bind(req.chatgpt_account_id)
+        .bind(req.chatgpt_plan_type)
+        .bind(req.source_type)
+        .bind(upstream_mode_to_db(&desired_mode))
+        .bind(req.enabled.unwrap_or(true))
+        .bind(req.priority.unwrap_or(100))
+        .bind(now)
+        .fetch_one(&self.pool)
+        .await
+        .context("failed to queue oauth refresh token into vault")?;
+
+        row.try_get::<bool, _>("inserted")
+            .context("failed to read vault inserted flag")
+    }
+
     async fn insert_oauth_account(
         &self,
         req: ImportOAuthRefreshTokenRequest,
@@ -193,10 +275,11 @@ impl PostgresStore {
                 chatgpt_account_id,
                 auth_provider,
                 enabled,
+                pool_state,
                 priority,
                 created_at
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
             RETURNING id, label, mode, base_url, bearer_token, chatgpt_account_id, enabled, priority, created_at
             "#,
         )
@@ -208,6 +291,7 @@ impl PostgresStore {
         .bind(resolved_chatgpt_account_id.clone())
         .bind(AUTH_PROVIDER_OAUTH_REFRESH_TOKEN)
         .bind(enabled)
+        .bind(POOL_STATE_ACTIVE)
         .bind(priority)
         .bind(created_at)
         .fetch_one(tx.as_mut())
@@ -383,7 +467,8 @@ impl PostgresStore {
                     chatgpt_account_id = $6,
                     auth_provider = $7,
                     enabled = $8,
-                    priority = $9
+                    pool_state = $9,
+                    priority = $10
                 WHERE id = $1
                 "#,
             )
@@ -395,6 +480,7 @@ impl PostgresStore {
             .bind(target_chatgpt_account_id.clone())
             .bind(AUTH_PROVIDER_OAUTH_REFRESH_TOKEN)
             .bind(enabled)
+            .bind(POOL_STATE_ACTIVE)
             .bind(priority)
             .execute(tx.as_mut())
             .await

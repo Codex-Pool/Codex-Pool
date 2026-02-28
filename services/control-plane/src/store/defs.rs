@@ -150,6 +150,13 @@ pub trait ControlPlaneStore: Send + Sync {
     ) -> Result<OAuthUpsertResult> {
         Err(anyhow!("oauth account upsert is not implemented"))
     }
+    async fn queue_oauth_refresh_token(
+        &self,
+        req: ImportOAuthRefreshTokenRequest,
+    ) -> Result<bool> {
+        let upserted = self.upsert_oauth_refresh_token(req).await?;
+        Ok(upserted.created)
+    }
     async fn upsert_one_time_session_account(
         &self,
         _req: UpsertOneTimeSessionAccountRequest,
@@ -191,6 +198,9 @@ pub trait ControlPlaneStore: Send + Sync {
     }
     async fn refresh_expiring_oauth_accounts(&self) -> Result<()> {
         Ok(())
+    }
+    async fn activate_oauth_refresh_token_vault(&self) -> Result<u64> {
+        Ok(0)
     }
     async fn refresh_due_oauth_rate_limit_caches(&self) -> Result<u64> {
         Ok(0)

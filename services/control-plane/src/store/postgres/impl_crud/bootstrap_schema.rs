@@ -559,6 +559,7 @@ impl PostgresStore {
                 bearer_token TEXT NOT NULL,
                 chatgpt_account_id TEXT NULL,
                 enabled BOOLEAN NOT NULL,
+                pool_state TEXT NOT NULL DEFAULT 'active',
                 priority INT NOT NULL,
                 created_at TIMESTAMPTZ NOT NULL
             )
@@ -577,6 +578,86 @@ impl PostgresStore {
         .execute(tx.as_mut())
         .await
         .context("failed to add upstream_accounts.auth_provider column")?;
+
+        sqlx::query(
+            r#"
+            ALTER TABLE upstream_accounts
+            ADD COLUMN IF NOT EXISTS pool_state TEXT NOT NULL DEFAULT 'active'
+            "#,
+        )
+        .execute(tx.as_mut())
+        .await
+        .context("failed to add upstream_accounts.pool_state column")?;
+
+        sqlx::query(
+            r#"
+            CREATE INDEX IF NOT EXISTS idx_upstream_accounts_pool_state_created_at
+            ON upstream_accounts (pool_state, created_at)
+            "#,
+        )
+        .execute(tx.as_mut())
+        .await
+        .context("failed to create upstream_accounts pool_state index")?;
+
+        sqlx::query(
+            r#"
+            CREATE TABLE IF NOT EXISTS oauth_refresh_token_vault (
+                id UUID PRIMARY KEY,
+                refresh_token_enc TEXT NOT NULL,
+                refresh_token_sha256 TEXT NOT NULL DEFAULT '',
+                base_url TEXT NOT NULL,
+                label TEXT NOT NULL,
+                email TEXT NULL,
+                chatgpt_account_id TEXT NULL,
+                chatgpt_plan_type TEXT NULL,
+                source_type TEXT NULL,
+                desired_mode TEXT NOT NULL DEFAULT 'chat_gpt_session',
+                desired_enabled BOOLEAN NOT NULL DEFAULT true,
+                desired_priority INT NOT NULL DEFAULT 100,
+                status TEXT NOT NULL DEFAULT 'queued',
+                failure_count INT NOT NULL DEFAULT 0,
+                backoff_until TIMESTAMPTZ NULL,
+                next_attempt_at TIMESTAMPTZ NULL,
+                last_error_code TEXT NULL,
+                last_error_message TEXT NULL,
+                created_at TIMESTAMPTZ NOT NULL,
+                updated_at TIMESTAMPTZ NOT NULL
+            )
+            "#,
+        )
+        .execute(tx.as_mut())
+        .await
+        .context("failed to create oauth_refresh_token_vault table")?;
+
+        sqlx::query(
+            r#"
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_oauth_refresh_token_vault_hash
+            ON oauth_refresh_token_vault (refresh_token_sha256)
+            "#,
+        )
+        .execute(tx.as_mut())
+        .await
+        .context("failed to create oauth_refresh_token_vault hash index")?;
+
+        sqlx::query(
+            r#"
+            CREATE INDEX IF NOT EXISTS idx_oauth_refresh_token_vault_status_next_attempt
+            ON oauth_refresh_token_vault (status, next_attempt_at, id)
+            "#,
+        )
+        .execute(tx.as_mut())
+        .await
+        .context("failed to create oauth_refresh_token_vault status-next index")?;
+
+        sqlx::query(
+            r#"
+            CREATE INDEX IF NOT EXISTS idx_oauth_refresh_token_vault_chatgpt_account_id
+            ON oauth_refresh_token_vault (chatgpt_account_id)
+            "#,
+        )
+        .execute(tx.as_mut())
+        .await
+        .context("failed to create oauth_refresh_token_vault chatgpt_account index")?;
 
         sqlx::query(
             r#"

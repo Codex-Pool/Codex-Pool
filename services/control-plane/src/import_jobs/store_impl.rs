@@ -340,7 +340,7 @@ impl OAuthImportJobStore for PostgresOAuthImportJobStore {
         &self,
         job_id: Uuid,
         item_id: u64,
-        upserted: &OAuthUpsertResult,
+        outcome: &ImportTaskSuccess,
     ) -> Result<()> {
         let mut tx = self
             .pool
@@ -348,7 +348,7 @@ impl OAuthImportJobStore for PostgresOAuthImportJobStore {
             .await
             .context("failed to start mark_item_success transaction")?;
 
-        let status = if upserted.created {
+        let status = if outcome.created {
             DB_ITEM_CREATED
         } else {
             DB_ITEM_UPDATED
@@ -372,8 +372,8 @@ impl OAuthImportJobStore for PostgresOAuthImportJobStore {
         .bind(job_id)
         .bind(i64::try_from(item_id).unwrap_or(i64::MAX))
         .bind(status)
-        .bind(upserted.account.id)
-        .bind(upserted.account.chatgpt_account_id.clone())
+        .bind(outcome.account_id)
+        .bind(outcome.chatgpt_account_id.clone())
         .bind(DB_ITEM_PROCESSING)
         .execute(tx.as_mut())
         .await
@@ -381,7 +381,7 @@ impl OAuthImportJobStore for PostgresOAuthImportJobStore {
         .rows_affected();
 
         if updated > 0 {
-            let counter_col = if upserted.created {
+            let counter_col = if outcome.created {
                 "created_count"
             } else {
                 "updated_count"

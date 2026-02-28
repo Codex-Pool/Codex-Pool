@@ -31,6 +31,7 @@ const SCHEMA_MIGRATION_LOCK_ID: i64 = 42_037_001;
 const AUTH_PROVIDER_LEGACY_BEARER: &str = "legacy_bearer";
 const AUTH_PROVIDER_OAUTH_REFRESH_TOKEN: &str = "oauth_refresh_token";
 const OAUTH_MANAGED_BEARER_SENTINEL: &str = "__managed_oauth__";
+const POOL_STATE_ACTIVE: &str = "active";
 const OUTBOX_EVENT_ACCOUNT_UPSERT: &str = "account_upsert";
 const OUTBOX_EVENT_ACCOUNT_DELETE: &str = "account_delete";
 const OAUTH_REFRESH_WINDOW_SEC: i64 = 300;
@@ -71,6 +72,27 @@ const RATE_LIMIT_REFRESH_ERROR_BACKOFF_SEC_ENV: &str =
 const DEFAULT_RATE_LIMIT_REFRESH_ERROR_BACKOFF_SEC: i64 = 60;
 const MIN_RATE_LIMIT_REFRESH_ERROR_BACKOFF_SEC: i64 = 5;
 const MAX_RATE_LIMIT_REFRESH_ERROR_BACKOFF_SEC: i64 = 3_600;
+const OAUTH_VAULT_ACTIVATE_BATCH_SIZE_ENV: &str = "CONTROL_PLANE_VAULT_ACTIVATE_BATCH_SIZE";
+const DEFAULT_OAUTH_VAULT_ACTIVATE_BATCH_SIZE: usize = 200;
+const MIN_OAUTH_VAULT_ACTIVATE_BATCH_SIZE: usize = 1;
+const MAX_OAUTH_VAULT_ACTIVATE_BATCH_SIZE: usize = 2_000;
+const OAUTH_VAULT_ACTIVATE_CONCURRENCY_ENV: &str =
+    "CONTROL_PLANE_VAULT_ACTIVATE_CONCURRENCY";
+const DEFAULT_OAUTH_VAULT_ACTIVATE_CONCURRENCY: usize = 8;
+const MIN_OAUTH_VAULT_ACTIVATE_CONCURRENCY: usize = 1;
+const MAX_OAUTH_VAULT_ACTIVATE_CONCURRENCY: usize = 64;
+const OAUTH_VAULT_ACTIVATE_MAX_RPS_ENV: &str = "CONTROL_PLANE_VAULT_ACTIVATE_MAX_RPS";
+const DEFAULT_OAUTH_VAULT_ACTIVATE_MAX_RPS: u32 = 1;
+const MIN_OAUTH_VAULT_ACTIVATE_MAX_RPS: u32 = 1;
+const MAX_OAUTH_VAULT_ACTIVATE_MAX_RPS: u32 = 100;
+const ACTIVE_POOL_TARGET_ENV: &str = "CONTROL_PLANE_ACTIVE_POOL_TARGET";
+const DEFAULT_ACTIVE_POOL_TARGET: usize = 5_000;
+const MIN_ACTIVE_POOL_TARGET: usize = 1;
+const MAX_ACTIVE_POOL_TARGET: usize = 100_000;
+const ACTIVE_POOL_MIN_ENV: &str = "CONTROL_PLANE_ACTIVE_POOL_MIN";
+const DEFAULT_ACTIVE_POOL_MIN: usize = 4_500;
+const MIN_ACTIVE_POOL_MIN: usize = 1;
+const MAX_ACTIVE_POOL_MIN: usize = 100_000;
 
 fn postgres_max_connections_from_env() -> u32 {
     std::env::var(DB_MAX_CONNECTIONS_ENV)
@@ -143,6 +165,52 @@ fn rate_limit_refresh_error_backoff_sec_from_env() -> i64 {
             MIN_RATE_LIMIT_REFRESH_ERROR_BACKOFF_SEC,
             MAX_RATE_LIMIT_REFRESH_ERROR_BACKOFF_SEC,
         )
+}
+
+fn oauth_vault_activate_batch_size_from_env() -> usize {
+    std::env::var(OAUTH_VAULT_ACTIVATE_BATCH_SIZE_ENV)
+        .ok()
+        .and_then(|raw| raw.parse::<usize>().ok())
+        .unwrap_or(DEFAULT_OAUTH_VAULT_ACTIVATE_BATCH_SIZE)
+        .clamp(
+            MIN_OAUTH_VAULT_ACTIVATE_BATCH_SIZE,
+            MAX_OAUTH_VAULT_ACTIVATE_BATCH_SIZE,
+        )
+}
+
+fn oauth_vault_activate_concurrency_from_env() -> usize {
+    std::env::var(OAUTH_VAULT_ACTIVATE_CONCURRENCY_ENV)
+        .ok()
+        .and_then(|raw| raw.parse::<usize>().ok())
+        .unwrap_or(DEFAULT_OAUTH_VAULT_ACTIVATE_CONCURRENCY)
+        .clamp(
+            MIN_OAUTH_VAULT_ACTIVATE_CONCURRENCY,
+            MAX_OAUTH_VAULT_ACTIVATE_CONCURRENCY,
+        )
+}
+
+fn oauth_vault_activate_max_rps_from_env() -> u32 {
+    std::env::var(OAUTH_VAULT_ACTIVATE_MAX_RPS_ENV)
+        .ok()
+        .and_then(|raw| raw.parse::<u32>().ok())
+        .unwrap_or(DEFAULT_OAUTH_VAULT_ACTIVATE_MAX_RPS)
+        .clamp(MIN_OAUTH_VAULT_ACTIVATE_MAX_RPS, MAX_OAUTH_VAULT_ACTIVATE_MAX_RPS)
+}
+
+fn active_pool_target_from_env() -> usize {
+    std::env::var(ACTIVE_POOL_TARGET_ENV)
+        .ok()
+        .and_then(|raw| raw.parse::<usize>().ok())
+        .unwrap_or(DEFAULT_ACTIVE_POOL_TARGET)
+        .clamp(MIN_ACTIVE_POOL_TARGET, MAX_ACTIVE_POOL_TARGET)
+}
+
+fn active_pool_min_from_env() -> usize {
+    std::env::var(ACTIVE_POOL_MIN_ENV)
+        .ok()
+        .and_then(|raw| raw.parse::<usize>().ok())
+        .unwrap_or(DEFAULT_ACTIVE_POOL_MIN)
+        .clamp(MIN_ACTIVE_POOL_MIN, MAX_ACTIVE_POOL_MIN)
 }
 
 pub struct PostgresStore {

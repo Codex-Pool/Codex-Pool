@@ -289,8 +289,9 @@ impl PostgresStore {
                 INNER JOIN upstream_account_oauth_credentials c ON c.account_id = a.id
                 WHERE
                     a.auth_provider = $1
+                    AND a.pool_state = $2
                     AND a.enabled = true
-                    AND c.token_expires_at > $2
+                    AND c.token_expires_at > $3
                     AND COALESCE(c.refresh_reused_detected, false) = false
                     AND NOT (
                         c.last_refresh_status = 'failed'
@@ -305,6 +306,7 @@ impl PostgresStore {
                 "#,
             )
             .bind(AUTH_PROVIDER_OAUTH_REFRESH_TOKEN)
+            .bind(POOL_STATE_ACTIVE)
             .bind(Utc::now() + Duration::seconds(OAUTH_MIN_VALID_SEC))
             .fetch_one(&self.pool)
             .await
@@ -377,6 +379,7 @@ impl PostgresStore {
                 WHERE
                     a.auth_provider = $1
                     AND a.enabled = true
+                    AND a.pool_state = $2
                     AND COALESCE(c.refresh_reused_detected, false) = false
                     AND NOT (
                         c.last_refresh_status = 'failed'
@@ -392,16 +395,17 @@ impl PostgresStore {
                         (c.next_refresh_at IS NOT NULL AND c.next_refresh_at <= $3)
                         OR (
                             c.next_refresh_at IS NULL
-                            AND c.token_expires_at <= $2
+                            AND c.token_expires_at <= $3
                         )
                     )
-                    AND (c.refresh_backoff_until IS NULL OR c.refresh_backoff_until <= $3)
-                    AND (c.refresh_inflight_until IS NULL OR c.refresh_inflight_until <= $3)
+                    AND (c.refresh_backoff_until IS NULL OR c.refresh_backoff_until <= $4)
+                    AND (c.refresh_inflight_until IS NULL OR c.refresh_inflight_until <= $4)
                 ORDER BY COALESCE(c.next_refresh_at, c.token_expires_at) ASC
-                LIMIT $4
+                LIMIT $5
                 "#,
             )
             .bind(AUTH_PROVIDER_OAUTH_REFRESH_TOKEN)
+            .bind(POOL_STATE_ACTIVE)
             .bind(now + Duration::seconds(OAUTH_REFRESH_WINDOW_SEC))
             .bind(now)
             .bind(i64::try_from(batch_size).unwrap_or(i64::MAX))
@@ -700,9 +704,11 @@ impl PostgresStore {
             FROM upstream_accounts a
             LEFT JOIN upstream_account_oauth_credentials c ON c.account_id = a.id
             LEFT JOIN upstream_account_rate_limit_snapshots rl ON rl.account_id = a.id
+            WHERE a.pool_state = $1
             ORDER BY a.created_at ASC
             "#,
         )
+        .bind(POOL_STATE_ACTIVE)
         .fetch_all(&self.pool)
         .await
         .context("failed to load upstream accounts snapshot rows")?;
