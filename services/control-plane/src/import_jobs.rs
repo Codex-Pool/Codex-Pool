@@ -20,8 +20,8 @@ use tokio::sync::{Mutex, RwLock};
 use tokio::time::{sleep, Duration};
 use uuid::Uuid;
 
-use crate::store::UpsertOneTimeSessionAccountRequest;
 use crate::store::ControlPlaneStore;
+use crate::store::UpsertOneTimeSessionAccountRequest;
 
 const DEFAULT_BASE_URL: &str = "https://chatgpt.com/backend-api/codex";
 const DB_STATUS_QUEUED: &str = "queued";

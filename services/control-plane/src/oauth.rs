@@ -175,8 +175,8 @@ impl OpenAiOAuthClient {
             .map(str::trim)
             .filter(|value| !value.is_empty())
             .ok_or(OAuthTokenClientError::NotConfigured)?;
-        let mut url =
-            reqwest::Url::parse(&self.authorize_url).map_err(|_| OAuthTokenClientError::NotConfigured)?;
+        let mut url = reqwest::Url::parse(&self.authorize_url)
+            .map_err(|_| OAuthTokenClientError::NotConfigured)?;
         {
             let mut query = url.query_pairs_mut();
             query.append_pair("response_type", "code");
@@ -189,10 +189,7 @@ impl OpenAiOAuthClient {
             query.append_pair("prompt", "login");
             query.append_pair("id_token_add_organizations", "true");
             query.append_pair("codex_cli_simplified_flow", "true");
-            if let Some(scope) = scope
-                .map(str::trim)
-                .filter(|value| !value.is_empty())
-            {
+            if let Some(scope) = scope.map(str::trim).filter(|value| !value.is_empty()) {
                 query.append_pair("scope", scope);
             }
         }
@@ -263,10 +260,11 @@ impl OpenAiOAuthClient {
             .filter(|value| *value > 0)
             .unwrap_or(DEFAULT_OAUTH_EXPIRES_IN_SEC);
         let id_token_claims = payload.id_token.as_deref().and_then(parse_id_token_claims);
-        let chatgpt_account_id = payload
-            .chatgpt_account_id
-            .clone()
-            .or_else(|| id_token_claims.as_ref().and_then(|claims| claims.chatgpt_account_id.clone()));
+        let chatgpt_account_id = payload.chatgpt_account_id.clone().or_else(|| {
+            id_token_claims
+                .as_ref()
+                .and_then(|claims| claims.chatgpt_account_id.clone())
+        });
 
         Ok(OAuthCodeExchangeInfo {
             access_token: payload.access_token,
@@ -433,10 +431,11 @@ impl OAuthTokenClient for OpenAiOAuthClient {
             .filter(|value| *value > 0)
             .unwrap_or(DEFAULT_OAUTH_EXPIRES_IN_SEC);
         let id_token_claims = payload.id_token.as_deref().and_then(parse_id_token_claims);
-        let chatgpt_account_id = payload
-            .chatgpt_account_id
-            .clone()
-            .or_else(|| id_token_claims.as_ref().and_then(|claims| claims.chatgpt_account_id.clone()));
+        let chatgpt_account_id = payload.chatgpt_account_id.clone().or_else(|| {
+            id_token_claims
+                .as_ref()
+                .and_then(|claims| claims.chatgpt_account_id.clone())
+        });
         let chatgpt_plan_type = id_token_claims
             .as_ref()
             .and_then(|claims| claims.chatgpt_plan_type.clone());
@@ -747,8 +746,7 @@ fn classify_oauth_error_code(
 mod tests {
     use super::{
         classify_oauth_error_code, parse_id_token_claims, resolve_usage_endpoint,
-        OAuthRefreshErrorCode,
-        OAuthTokenEndpointError,
+        OAuthRefreshErrorCode, OAuthTokenEndpointError,
     };
     use base64::Engine;
     use reqwest::StatusCode;

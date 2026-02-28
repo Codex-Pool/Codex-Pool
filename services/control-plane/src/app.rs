@@ -1,4 +1,5 @@
 use std::collections::{HashMap, VecDeque};
+use std::net::SocketAddr;
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 use std::time::Duration;
@@ -93,6 +94,9 @@ const MIN_IMPORT_JOB_CLAIM_BATCH_SIZE: usize = 1;
 const MAX_IMPORT_JOB_CLAIM_BATCH_SIZE: usize = 2000;
 const OAUTH_LOGIN_SESSION_TTL_SEC: i64 = 10 * 60;
 const OAUTH_LOGIN_SESSION_RETENTION_SEC: i64 = 30 * 60;
+const CODEX_OAUTH_CALLBACK_LISTEN_MODE_ENV: &str = "CODEX_OAUTH_CALLBACK_LISTEN_MODE";
+const CODEX_OAUTH_CALLBACK_LISTEN_ENV: &str = "CODEX_OAUTH_CALLBACK_LISTEN";
+const DEFAULT_CODEX_OAUTH_CALLBACK_LISTEN_ADDR: &str = "127.0.0.1:1455";
 const UPSTREAM_ACCOUNT_BATCH_ACTION_MAX_ITEMS: usize = 20_000;
 const UPSTREAM_ACCOUNT_BATCH_ACTION_CONCURRENCY_ENV: &str =
     "CONTROL_PLANE_UPSTREAM_ACCOUNT_BATCH_ACTION_CONCURRENCY";
@@ -388,6 +392,140 @@ struct CodexOAuthLoginSessionRecord {
     expires_at: DateTime<Utc>,
 }
 
+struct CodexOAuthCallbackListenerRuntime {
+    shutdown_tx: tokio::sync::oneshot::Sender<()>,
+    join_handle: tokio::task::JoinHandle<()>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CodexOAuthCallbackListenMode {
+    Always,
+    OnDemand,
+    Off,
+}
+
+pub fn codex_oauth_callback_listen_mode_from_env() -> CodexOAuthCallbackListenMode {
+    std::env::var(CODEX_OAUTH_CALLBACK_LISTEN_MODE_ENV)
+        .ok()
+        .map(|raw| raw.trim().to_ascii_lowercase())
+        .and_then(|normalized| match normalized.as_str() {
+            "always" => Some(CodexOAuthCallbackListenMode::Always),
+            "on_demand" | "ondemand" | "lazy" => Some(CodexOAuthCallbackListenMode::OnDemand),
+            "off" | "none" | "disabled" => Some(CodexOAuthCallbackListenMode::Off),
+            _ => None,
+        })
+        .unwrap_or(CodexOAuthCallbackListenMode::Always)
+}
+
+fn codex_oauth_callback_listen_addr_from_env() -> Option<SocketAddr> {
+    let raw = std::env::var(CODEX_OAUTH_CALLBACK_LISTEN_ENV)
+        .unwrap_or_else(|_| DEFAULT_CODEX_OAUTH_CALLBACK_LISTEN_ADDR.to_string());
+    let normalized = raw.trim();
+    if normalized.is_empty() {
+        return None;
+    }
+    let lowered = normalized.to_ascii_lowercase();
+    if lowered == "off" || lowered == "none" || lowered == "disabled" {
+        return None;
+    }
+    match normalized.parse::<SocketAddr>() {
+        Ok(addr) => Some(addr),
+        Err(err) => {
+            tracing::warn!(
+                env = CODEX_OAUTH_CALLBACK_LISTEN_ENV,
+                value = normalized,
+                error = %err,
+                "invalid oauth callback listen address; on-demand callback listener is disabled"
+            );
+            None
+        }
+    }
+}
+
+async fn ensure_codex_oauth_callback_listener_started(state: &AppState) -> anyhow::Result<()> {
+    if state.codex_oauth_callback_listen_mode != CodexOAuthCallbackListenMode::OnDemand {
+        return Ok(());
+    }
+    let listen_addr = state
+        .codex_oauth_callback_listen_addr
+        .ok_or_else(|| anyhow!("oauth callback listen address is not configured"))?;
+    let mut guard = state.codex_oauth_callback_listener.lock().await;
+    if guard.is_some() {
+        return Ok(());
+    }
+
+    let listener = tokio::net::TcpListener::bind(listen_addr)
+        .await
+        .with_context(|| format!("failed to bind oauth callback listener at {listen_addr}"))?;
+    let callback_app = Router::new()
+        .route("/auth/callback", get(handle_codex_oauth_callback))
+        .route(
+            "/api/v1/upstream-accounts/oauth/codex/callback",
+            get(handle_codex_oauth_callback),
+        )
+        .with_state(state.clone());
+
+    let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
+    let join_handle = tokio::spawn(async move {
+        let shutdown = async move {
+            let _ = shutdown_rx.await;
+        };
+        if let Err(err) = axum::serve(listener, callback_app)
+            .with_graceful_shutdown(shutdown)
+            .await
+        {
+            tracing::warn!(
+                listen_addr = %listen_addr,
+                error = %err,
+                "codex oauth on-demand callback listener exited with error"
+            );
+        }
+    });
+    *guard = Some(CodexOAuthCallbackListenerRuntime {
+        shutdown_tx,
+        join_handle,
+    });
+    tracing::info!(
+        listen_addr = %listen_addr,
+        "codex oauth on-demand callback listener started"
+    );
+    Ok(())
+}
+
+async fn stop_codex_oauth_callback_listener_if_idle(state: &AppState) {
+    if state.codex_oauth_callback_listen_mode != CodexOAuthCallbackListenMode::OnDemand {
+        return;
+    }
+    let has_pending_sessions = {
+        let mut sessions = state
+            .oauth_login_sessions
+            .write()
+            .expect("oauth login session lock poisoned");
+        cleanup_codex_oauth_login_sessions(&mut sessions);
+        sessions.values().any(|session| {
+            matches!(
+                session.status,
+                CodexOAuthLoginSessionStatus::WaitingCallback
+                    | CodexOAuthLoginSessionStatus::Exchanging
+                    | CodexOAuthLoginSessionStatus::Importing
+            )
+        })
+    };
+    if has_pending_sessions {
+        return;
+    }
+
+    let runtime = {
+        let mut guard = state.codex_oauth_callback_listener.lock().await;
+        guard.take()
+    };
+    if let Some(runtime) = runtime {
+        let _ = runtime.shutdown_tx.send(());
+        let _ = runtime.join_handle.await;
+        tracing::info!("codex oauth on-demand callback listener stopped (idle)");
+    }
+}
+
 #[derive(Clone)]
 pub struct AppState {
     pub store: Arc<dyn ControlPlaneStore>,
@@ -411,6 +549,10 @@ pub struct AppState {
     model_probe_cache: Arc<std::sync::RwLock<ModelProbeCache>>,
     model_probe_extra_models: Arc<Vec<String>>,
     oauth_login_sessions: Arc<std::sync::RwLock<HashMap<String, CodexOAuthLoginSessionRecord>>>,
+    codex_oauth_callback_listen_mode: CodexOAuthCallbackListenMode,
+    codex_oauth_callback_listen_addr: Option<SocketAddr>,
+    codex_oauth_callback_listener:
+        Arc<tokio::sync::Mutex<Option<CodexOAuthCallbackListenerRuntime>>>,
     #[cfg_attr(test, allow(dead_code))]
     model_probe_interval_sec: u64,
 }
@@ -782,6 +924,8 @@ pub fn build_app_with_store_ttl_usage_repo_import_store_and_admin_auth(
     let model_catalog_request_timeout_sec = parse_model_catalog_request_timeout_sec();
     let model_probe_extra_models = parse_model_probe_extra_models();
     let oauth_import_max_body_bytes = oauth_import_multipart_max_bytes();
+    let codex_oauth_callback_listen_mode = codex_oauth_callback_listen_mode_from_env();
+    let codex_oauth_callback_listen_addr = codex_oauth_callback_listen_addr_from_env();
     let tenant_auth_service = store.postgres_pool().map(|pool| {
         Arc::new(
             TenantAuthService::from_pool(pool)
@@ -812,6 +956,9 @@ pub fn build_app_with_store_ttl_usage_repo_import_store_and_admin_auth(
         model_probe_cache: Arc::new(std::sync::RwLock::new(ModelProbeCache::default())),
         model_probe_extra_models: Arc::new(model_probe_extra_models),
         oauth_login_sessions: Arc::new(std::sync::RwLock::new(HashMap::new())),
+        codex_oauth_callback_listen_mode,
+        codex_oauth_callback_listen_addr,
+        codex_oauth_callback_listener: Arc::new(tokio::sync::Mutex::new(None)),
         model_probe_interval_sec,
     };
 

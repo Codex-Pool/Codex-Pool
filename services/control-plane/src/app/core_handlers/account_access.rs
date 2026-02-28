@@ -58,6 +58,16 @@ fn codex_oauth_provider_not_configured_error() -> (StatusCode, Json<ErrorEnvelop
     )
 }
 
+fn codex_oauth_callback_listener_unavailable_error() -> (StatusCode, Json<ErrorEnvelope>) {
+    (
+        StatusCode::SERVICE_UNAVAILABLE,
+        Json(ErrorEnvelope::new(
+            "oauth_callback_listener_unavailable",
+            "oauth callback listener is unavailable",
+        )),
+    )
+}
+
 fn codex_oauth_not_found_error() -> (StatusCode, Json<ErrorEnvelope>) {
     (
         StatusCode::NOT_FOUND,
@@ -331,7 +341,8 @@ async fn process_codex_oauth_callback_flow(
         .filter(|value| !value.is_empty())
         .map(ToString::to_string);
 
-    let (session_id, code, callback_url, code_verifier, base_url, label, enabled, priority) = {
+    let mut early_response = None;
+    let prepared_session = {
         let mut sessions = state
             .oauth_login_sessions
             .write()
@@ -385,31 +396,38 @@ async fn process_codex_oauth_callback_flow(
             });
             session.result = None;
             session.updated_at = now;
-            return Ok(codex_session_response(session));
+            early_response = Some(codex_session_response(session));
+            None
+        } else {
+            let code = callback
+                .code
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .ok_or_else(|| codex_oauth_invalid_request_error("missing oauth code"))?
+                .to_string();
+
+            session.status = CodexOAuthLoginSessionStatus::Exchanging;
+            session.error = None;
+            session.updated_at = now;
+            Some((
+                session_id,
+                code,
+                session.callback_url.clone(),
+                session.code_verifier.clone(),
+                session.base_url.clone(),
+                session.label.clone(),
+                session.enabled,
+                session.priority,
+            ))
         }
-
-        let code = callback
-            .code
-            .as_deref()
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .ok_or_else(|| codex_oauth_invalid_request_error("missing oauth code"))?
-            .to_string();
-
-        session.status = CodexOAuthLoginSessionStatus::Exchanging;
-        session.error = None;
-        session.updated_at = now;
-        (
-            session_id,
-            code,
-            session.callback_url.clone(),
-            session.code_verifier.clone(),
-            session.base_url.clone(),
-            session.label.clone(),
-            session.enabled,
-            session.priority,
-        )
     };
+    if let Some(response) = early_response {
+        stop_codex_oauth_callback_listener_if_idle(state).await;
+        return Ok(response);
+    }
+    let (session_id, code, callback_url, code_verifier, base_url, label, enabled, priority) =
+        prepared_session.ok_or_else(codex_oauth_not_found_error)?;
 
     let oauth_client = crate::oauth::OpenAiOAuthClient::from_env();
     let exchange = match oauth_client
@@ -419,19 +437,23 @@ async fn process_codex_oauth_callback_flow(
         Ok(exchange) => exchange,
         Err(err) => {
             tracing::warn!(error = %err, "codex oauth code exchange failed");
-            let mut sessions = state
-                .oauth_login_sessions
-                .write()
-                .expect("oauth login session lock poisoned");
-            cleanup_codex_oauth_login_sessions(&mut sessions);
-            let session = sessions
-                .get_mut(&session_id)
-                .ok_or_else(codex_oauth_not_found_error)?;
-            session.status = CodexOAuthLoginSessionStatus::Failed;
-            session.error = Some(codex_exchange_error_to_session_error(&err));
-            session.result = None;
-            session.updated_at = Utc::now();
-            return Ok(codex_session_response(session));
+            let response = {
+                let mut sessions = state
+                    .oauth_login_sessions
+                    .write()
+                    .expect("oauth login session lock poisoned");
+                cleanup_codex_oauth_login_sessions(&mut sessions);
+                let session = sessions
+                    .get_mut(&session_id)
+                    .ok_or_else(codex_oauth_not_found_error)?;
+                session.status = CodexOAuthLoginSessionStatus::Failed;
+                session.error = Some(codex_exchange_error_to_session_error(&err));
+                session.result = None;
+                session.updated_at = Utc::now();
+                codex_session_response(session)
+            };
+            stop_codex_oauth_callback_listener_if_idle(state).await;
+            return Ok(response);
         }
     };
 
@@ -493,41 +515,49 @@ async fn process_codex_oauth_callback_flow(
         Ok(result) => result,
         Err(err) => {
             tracing::warn!(error = %err, "codex oauth import failed");
-            let mut sessions = state
-                .oauth_login_sessions
-                .write()
-                .expect("oauth login session lock poisoned");
-            cleanup_codex_oauth_login_sessions(&mut sessions);
-            let session = sessions
-                .get_mut(&session_id)
-                .ok_or_else(codex_oauth_not_found_error)?;
-            session.status = CodexOAuthLoginSessionStatus::Failed;
-            session.error = Some(codex_import_error_to_session_error(&err));
-            session.result = None;
-            session.updated_at = Utc::now();
-            return Ok(codex_session_response(session));
+            let response = {
+                let mut sessions = state
+                    .oauth_login_sessions
+                    .write()
+                    .expect("oauth login session lock poisoned");
+                cleanup_codex_oauth_login_sessions(&mut sessions);
+                let session = sessions
+                    .get_mut(&session_id)
+                    .ok_or_else(codex_oauth_not_found_error)?;
+                session.status = CodexOAuthLoginSessionStatus::Failed;
+                session.error = Some(codex_import_error_to_session_error(&err));
+                session.result = None;
+                session.updated_at = Utc::now();
+                codex_session_response(session)
+            };
+            stop_codex_oauth_callback_listener_if_idle(state).await;
+            return Ok(response);
         }
     };
 
-    let mut sessions = state
-        .oauth_login_sessions
-        .write()
-        .expect("oauth login session lock poisoned");
-    cleanup_codex_oauth_login_sessions(&mut sessions);
-    let session = sessions
-        .get_mut(&session_id)
-        .ok_or_else(codex_oauth_not_found_error)?;
-    session.status = CodexOAuthLoginSessionStatus::Completed;
-    session.error = None;
-    session.updated_at = Utc::now();
-    session.result = Some(CodexOAuthLoginSessionResult {
-        created: upsert_result.created,
-        account: upsert_result.account,
-        email,
-        chatgpt_account_id,
-        chatgpt_plan_type: plan_type,
-    });
-    Ok(codex_session_response(session))
+    let response = {
+        let mut sessions = state
+            .oauth_login_sessions
+            .write()
+            .expect("oauth login session lock poisoned");
+        cleanup_codex_oauth_login_sessions(&mut sessions);
+        let session = sessions
+            .get_mut(&session_id)
+            .ok_or_else(codex_oauth_not_found_error)?;
+        session.status = CodexOAuthLoginSessionStatus::Completed;
+        session.error = None;
+        session.updated_at = Utc::now();
+        session.result = Some(CodexOAuthLoginSessionResult {
+            created: upsert_result.created,
+            account: upsert_result.account,
+            email,
+            chatgpt_account_id,
+            chatgpt_plan_type: plan_type,
+        });
+        codex_session_response(session)
+    };
+    stop_codex_oauth_callback_listener_if_idle(state).await;
+    Ok(response)
 }
 
 async fn create_tenant(
@@ -831,6 +861,13 @@ async fn create_codex_oauth_login_session(
             Some(DEFAULT_CODEX_OAUTH_SCOPE),
         )
         .map_err(|_| codex_oauth_provider_not_configured_error())?;
+    if let Err(err) = ensure_codex_oauth_callback_listener_started(&state).await {
+        tracing::warn!(
+            error = %err,
+            "failed to start codex oauth callback listener before creating login session"
+        );
+        return Err(codex_oauth_callback_listener_unavailable_error());
+    }
 
     let now = Utc::now();
     let record = CodexOAuthLoginSessionRecord {

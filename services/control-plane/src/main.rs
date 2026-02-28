@@ -1,10 +1,11 @@
+use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
-use std::net::SocketAddr;
 
 use control_plane::admin_auth::AdminAuthService;
 use control_plane::app::{
     build_app_with_store_ttl_usage_repo_import_store_and_admin_auth,
+    codex_oauth_callback_listen_mode_from_env, CodexOAuthCallbackListenMode,
     DEFAULT_AUTH_VALIDATE_CACHE_TTL_SEC,
 };
 use control_plane::config::ControlPlaneConfig;
@@ -640,6 +641,7 @@ async fn main() -> anyhow::Result<()> {
 
     let listener = tokio::net::TcpListener::bind(config.listen_addr).await?;
     let codex_callback_listen_addr = codex_oauth_callback_listen_addr_from_env()?;
+    let codex_callback_listen_mode = codex_oauth_callback_listen_mode_from_env();
 
     let usage_repo: Option<Arc<dyn UsageQueryRepository>> =
         config.clickhouse_url.clone().map(|clickhouse_url| {
@@ -660,33 +662,41 @@ async fn main() -> anyhow::Result<()> {
         import_job_store,
         admin_auth,
     );
-    if let Some(callback_addr) = codex_callback_listen_addr {
-        if callback_addr == config.listen_addr {
+    if codex_callback_listen_mode == CodexOAuthCallbackListenMode::Always {
+        if let Some(callback_addr) = codex_callback_listen_addr {
+            if callback_addr == config.listen_addr {
+                tracing::info!(
+                    listen_addr = %config.listen_addr,
+                    "codex oauth callback listener reuses primary control-plane listener"
+                );
+                axum::serve(listener, app).await?;
+                return Ok(());
+            }
+            let callback_listener = tokio::net::TcpListener::bind(callback_addr).await?;
             tracing::info!(
                 listen_addr = %config.listen_addr,
-                "codex oauth callback listener reuses primary control-plane listener"
+                codex_callback_listen_addr = %callback_addr,
+                "starting control-plane and codex oauth callback listeners"
             );
-            axum::serve(listener, app).await?;
+            let callback_app = app.clone();
+            tokio::try_join!(
+                axum::serve(listener, app),
+                axum::serve(callback_listener, callback_app),
+            )?;
             return Ok(());
         }
-        let callback_listener = tokio::net::TcpListener::bind(callback_addr).await?;
         tracing::info!(
             listen_addr = %config.listen_addr,
-            codex_callback_listen_addr = %callback_addr,
-            "starting control-plane and codex oauth callback listeners"
+            "{} disabled or empty",
+            CODEX_OAUTH_CALLBACK_LISTEN_ENV
         );
-        let callback_app = app.clone();
-        tokio::try_join!(
-            axum::serve(listener, app),
-            axum::serve(callback_listener, callback_app),
-        )?;
-        return Ok(());
+    } else {
+        tracing::info!(
+            listen_addr = %config.listen_addr,
+            mode = ?codex_callback_listen_mode,
+            "starting control-plane listener only; codex oauth callback listener is managed on-demand"
+        );
     }
-    tracing::info!(
-        listen_addr = %config.listen_addr,
-        "{} disabled or empty",
-        CODEX_OAUTH_CALLBACK_LISTEN_ENV
-    );
     axum::serve(listener, app).await?;
     Ok(())
 }
