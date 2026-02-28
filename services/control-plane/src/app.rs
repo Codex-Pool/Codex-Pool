@@ -40,7 +40,9 @@ use crate::import_jobs::{
     CreateOAuthImportJobOptions, ImportUploadFile, InMemoryOAuthImportJobStore,
     OAuthImportJobManager, OAuthImportJobStore,
 };
-use crate::store::{ControlPlaneStore, InMemoryStore};
+use crate::store::{
+    ControlPlaneStore, InMemoryStore, UpstreamProbeStatus, UpstreamProbeWrite,
+};
 use crate::tenant::TenantAuthService;
 use crate::usage::clickhouse_repo::UsageQueryRepository;
 
@@ -964,6 +966,8 @@ pub fn build_app_with_store_ttl_usage_repo_import_store_and_admin_auth(
 
     #[cfg(not(test))]
     spawn_model_probe_loop(state.clone());
+    #[cfg(not(test))]
+    spawn_upstream_probe_loop(state.clone());
 
     Router::new()
         .route("/health", get(health))
@@ -1207,6 +1211,14 @@ pub fn build_app_with_store_ttl_usage_repo_import_store_and_admin_auth(
             post(retry_failed_oauth_import_items),
         )
         .route(
+            "/api/v1/upstream-accounts/oauth/import-jobs/{job_id}/pause",
+            post(pause_oauth_import_job),
+        )
+        .route(
+            "/api/v1/upstream-accounts/oauth/import-jobs/{job_id}/resume",
+            post(resume_oauth_import_job),
+        )
+        .route(
             "/api/v1/upstream-accounts/oauth/import-jobs/{job_id}/cancel",
             post(cancel_oauth_import_job),
         )
@@ -1223,6 +1235,10 @@ pub fn build_app_with_store_ttl_usage_repo_import_store_and_admin_auth(
         .route(
             "/internal/v1/upstream-accounts/{account_id}/disable",
             post(internal_disable_upstream_account),
+        )
+        .route(
+            "/internal/v1/upstream-accounts/{account_id}/health/seen-ok",
+            post(internal_mark_upstream_account_seen_ok),
         )
         .route("/internal/v1/auth/validate", post(validate_api_key))
         .route(

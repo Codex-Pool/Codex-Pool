@@ -90,6 +90,28 @@ pub struct OAuthUpsertResult {
     pub created: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UpstreamProbeStatus {
+    Ok,
+    Fail,
+}
+
+#[derive(Debug, Clone)]
+pub struct ClaimedProbeAccount {
+    pub account_id: Uuid,
+    pub failure_count: u32,
+}
+
+#[derive(Debug, Clone)]
+pub struct UpstreamProbeWrite {
+    pub status: UpstreamProbeStatus,
+    pub observed_at: DateTime<Utc>,
+    pub next_probe_at: DateTime<Utc>,
+    pub http_status: Option<u16>,
+    pub error_code: Option<String>,
+    pub error_message: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UpsertOneTimeSessionAccountRequest {
     pub label: String,
@@ -251,6 +273,33 @@ pub trait ControlPlaneStore: Send + Sync {
             events: Vec::new(),
         })
     }
+    async fn claim_due_probe_accounts(
+        &self,
+        _limit: usize,
+        _seen_ok_suppress_sec: i64,
+        _lock_ttl_sec: i64,
+        _claimed_by: &str,
+    ) -> Result<Vec<ClaimedProbeAccount>> {
+        Ok(Vec::new())
+    }
+    async fn release_upstream_op_lock(&self, _account_id: Uuid, _op_type: &str) -> Result<()> {
+        Ok(())
+    }
+    async fn record_upstream_probe(
+        &self,
+        _account_id: Uuid,
+        _write: UpstreamProbeWrite,
+    ) -> Result<()> {
+        Ok(())
+    }
+    async fn mark_account_seen_ok(
+        &self,
+        _account_id: Uuid,
+        _seen_ok_at: DateTime<Utc>,
+        _min_write_interval_sec: i64,
+    ) -> Result<bool> {
+        Ok(false)
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -308,6 +357,23 @@ struct SessionProfileRecord {
     source_type: Option<String>,
 }
 
+#[derive(Debug, Clone, Default)]
+struct UpstreamAccountHealthStateRecord {
+    seen_ok_at: Option<DateTime<Utc>>,
+    last_probe_at: Option<DateTime<Utc>>,
+    last_probe_status: Option<UpstreamProbeStatus>,
+    last_probe_http_status: Option<i32>,
+    last_probe_error_code: Option<String>,
+    last_probe_error_message: Option<String>,
+    failure_count: u32,
+    next_probe_at: Option<DateTime<Utc>>,
+}
+
+#[derive(Debug, Clone)]
+struct UpstreamOpLockRecord {
+    inflight_until: DateTime<Utc>,
+}
+
 pub struct InMemoryStore {
     tenants: Arc<RwLock<HashMap<Uuid, Tenant>>>,
     api_keys: Arc<RwLock<HashMap<Uuid, ApiKey>>>,
@@ -316,6 +382,8 @@ pub struct InMemoryStore {
     account_auth_providers: Arc<RwLock<HashMap<Uuid, UpstreamAuthProvider>>>,
     oauth_credentials: Arc<RwLock<HashMap<Uuid, OAuthCredentialRecord>>>,
     session_profiles: Arc<RwLock<HashMap<Uuid, SessionProfileRecord>>>,
+    account_health_states: Arc<RwLock<HashMap<Uuid, UpstreamAccountHealthStateRecord>>>,
+    upstream_op_locks: Arc<RwLock<HashMap<(Uuid, String), UpstreamOpLockRecord>>>,
     policies: Arc<RwLock<HashMap<Uuid, RoutingPolicy>>>,
     revision: Arc<AtomicU64>,
     oauth_client: Arc<dyn OAuthTokenClient>,

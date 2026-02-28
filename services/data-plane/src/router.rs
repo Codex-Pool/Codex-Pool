@@ -146,6 +146,10 @@ impl RoundRobinRouter {
         Some(account)
     }
 
+    pub fn pick_account(&self, account_id: Uuid) -> Option<UpstreamAccount> {
+        self.pick_specific(account_id)
+    }
+
     pub fn sticky_stats(&self) -> StickyRoutingStats {
         StickyRoutingStats {
             sticky_session_total: self.sticky_session_total.load(Ordering::Relaxed),

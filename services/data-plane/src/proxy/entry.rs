@@ -16,7 +16,7 @@ use axum::http::{HeaderMap, HeaderName, HeaderValue, Request, StatusCode};
 use axum::response::Response;
 use codex_pool_core::api::ErrorEnvelope;
 use codex_pool_core::events::RequestLogEvent;
-use codex_pool_core::model::UpstreamMode;
+use codex_pool_core::model::{UpstreamAccount, UpstreamMode};
 use futures_util::{SinkExt, Stream, StreamExt};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -336,11 +336,18 @@ pub async fn proxy_handler(
     }
 
     loop {
-        let account = match state.router.pick_with_policy(
-            sticky_key.as_deref(),
-            &tried_account_ids,
-            state.sticky_prefer_non_conflicting,
-        ) {
+        let alive_ring_account = if sticky_key.is_none() {
+            pick_account_from_alive_ring(&state, &tried_account_ids).await
+        } else {
+            None
+        };
+        let account = match alive_ring_account.or_else(|| {
+            state.router.pick_with_policy(
+                sticky_key.as_deref(),
+                &tried_account_ids,
+                state.sticky_prefer_non_conflicting,
+            )
+        }) {
             Some(account) => account,
             None => {
                 if state.enable_request_failover
@@ -989,6 +996,12 @@ pub async fn proxy_handler(
                     reasoning_tokens,
                 )
                 .await;
+                if let Some(seen_ok_reporter) = state.seen_ok_reporter.clone() {
+                    let account_id = account.id;
+                    tokio::spawn(async move {
+                        seen_ok_reporter.report_seen_ok(account_id).await;
+                    });
+                }
                 record_failover_success_if_needed(&state, did_cross_account_failover);
                 return response;
             }
@@ -1184,11 +1197,18 @@ pub async fn proxy_websocket_handler(
     }
 
     loop {
-        let account = match state.router.pick_with_policy(
-            sticky_key.as_deref(),
-            &tried_account_ids,
-            state.sticky_prefer_non_conflicting,
-        ) {
+        let alive_ring_account = if sticky_key.is_none() {
+            pick_account_from_alive_ring(&state, &tried_account_ids).await
+        } else {
+            None
+        };
+        let account = match alive_ring_account.or_else(|| {
+            state.router.pick_with_policy(
+                sticky_key.as_deref(),
+                &tried_account_ids,
+                state.sticky_prefer_non_conflicting,
+            )
+        }) {
             Some(account) => account,
             None => {
                 if state.enable_request_failover
@@ -1498,6 +1518,12 @@ pub async fn proxy_websocket_handler(
             let state_for_upgrade = state.clone();
             let sticky_key_for_upgrade = sticky_key.clone();
             let account_id_for_upgrade = account.id;
+            if let Some(seen_ok_reporter) = state.seen_ok_reporter.clone() {
+                let account_id = account.id;
+                tokio::spawn(async move {
+                    seen_ok_reporter.report_seen_ok(account_id).await;
+                });
+            }
             record_failover_success_if_needed(&state, did_cross_account_failover);
             return ws_upgrade.on_upgrade(move |downstream_socket| async move {
                 if let Err(err) = proxy_websocket_streams(downstream_socket, upstream_socket).await
@@ -1534,6 +1560,29 @@ async fn wait_for_route_update_or_deadline(state: &AppState, deadline: Instant) 
         .min(deadline.saturating_duration_since(now))
         .max(Duration::from_millis(1));
     state.wait_for_route_update(timeout).await;
+}
+
+async fn pick_account_from_alive_ring(
+    state: &Arc<AppState>,
+    excluded_account_ids: &HashSet<Uuid>,
+) -> Option<UpstreamAccount> {
+    let alive_ring = state.alive_ring_router.as_ref()?;
+    let candidate_ids = match alive_ring.next_candidate_ids().await {
+        Ok(ids) => ids,
+        Err(err) => {
+            warn!(error = %err, "failed to fetch alive ring candidates");
+            return None;
+        }
+    };
+    for account_id in candidate_ids {
+        if excluded_account_ids.contains(&account_id) {
+            continue;
+        }
+        if let Some(account) = state.router.pick_account(account_id) {
+            return Some(account);
+        }
+    }
+    None
 }
 
 async fn mark_account_unhealthy_and_clear_sticky(

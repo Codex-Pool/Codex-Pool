@@ -30,6 +30,9 @@ use crate::router::RoundRobinRouter;
 use crate::routing_cache::{
     HybridRoutingCache, InMemoryRoutingCache, RedisRoutingCache, RoutingCache,
 };
+use crate::upstream_health::{
+    alive_ring_config_from_env, seen_ok_report_config_from_env, AliveRingRouter, SeenOkReporter,
+};
 
 #[path = "../snapshot.rs"]
 mod snapshot;
@@ -94,6 +97,8 @@ pub struct AppState {
     pub billing_capture_retry_backoff: Duration,
     pub billing_pricing_cache: RwLock<HashMap<String, CachedBillingPricing>>,
     pub routing_cache: Arc<dyn RoutingCache>,
+    pub alive_ring_router: Option<Arc<AliveRingRouter>>,
+    pub seen_ok_reporter: Option<Arc<SeenOkReporter>>,
     pub event_sink: Arc<dyn EventSink>,
     pub auth_validator: Option<AuthValidatorClient>,
     pub control_plane_internal_auth_token: Arc<str>,
@@ -209,6 +214,37 @@ pub async fn build_app_with_event_sink_and_allowed_keys(
     } else {
         local_routing_cache
     };
+    let alive_ring_config = alive_ring_config_from_env();
+    let alive_ring_router = if alive_ring_config.enabled {
+        config.redis_url.as_deref().and_then(|redis_url| {
+            AliveRingRouter::new(
+                redis_url,
+                &alive_ring_config.redis_prefix,
+                alive_ring_config.fetch_limit,
+                alive_ring_config.candidate_count,
+                alive_ring_config.cache_ttl,
+            )
+            .ok()
+            .map(Arc::new)
+        })
+    } else {
+        None
+    };
+    let seen_ok_config = seen_ok_report_config_from_env();
+    let seen_ok_reporter = if seen_ok_config.enabled {
+        control_plane_base_url.as_ref().and_then(|base_url| {
+            SeenOkReporter::new(
+                base_url.clone(),
+                control_plane_internal_auth_token.clone(),
+                seen_ok_config.timeout,
+                seen_ok_config.min_interval,
+            )
+            .ok()
+            .map(Arc::new)
+        })
+    } else {
+        None
+    };
     let invalid_request_guard_enabled = parse_bool_env_with_default(
         INVALID_REQUEST_GUARD_ENABLED_ENV,
         DEFAULT_INVALID_REQUEST_GUARD_ENABLED,
@@ -260,6 +296,8 @@ pub async fn build_app_with_event_sink_and_allowed_keys(
         ),
         billing_pricing_cache: RwLock::new(HashMap::new()),
         routing_cache,
+        alive_ring_router,
+        seen_ok_reporter,
         event_sink,
         auth_validator,
         control_plane_internal_auth_token,

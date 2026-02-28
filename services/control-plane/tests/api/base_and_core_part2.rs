@@ -466,6 +466,101 @@ async fn oauth_family_disable_and_enable_routes_work() {
 }
 
 #[tokio::test]
+async fn internal_seen_ok_route_requires_internal_token_and_is_idempotent() {
+    let store = InMemoryStore::default();
+    let app = build_app_with_store(Arc::new(store));
+    let admin_token = login_admin_token(&app).await;
+
+    let create_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/upstream-accounts")
+                .header("content-type", "application/json")
+                .header("authorization", format!("Bearer {admin_token}"))
+                .body(Body::from(
+                    json!({
+                        "label": "seen-ok-account",
+                        "mode": "chat_gpt_session",
+                        "base_url": "https://chatgpt.com/backend-api/codex",
+                        "bearer_token": "test-token",
+                        "enabled": true,
+                        "priority": 100
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(create_response.status(), StatusCode::OK);
+    let create_body = to_bytes(create_response.into_body(), usize::MAX).await.unwrap();
+    let create_json: Value = serde_json::from_slice(&create_body).unwrap();
+    let account_id = create_json["id"].as_str().unwrap().to_string();
+
+    let unauthorized = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!(
+                    "/internal/v1/upstream-accounts/{account_id}/health/seen-ok"
+                ))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(unauthorized.status(), StatusCode::UNAUTHORIZED);
+
+    let first = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!(
+                    "/internal/v1/upstream-accounts/{account_id}/health/seen-ok"
+                ))
+                .header(
+                    "authorization",
+                    format!("Bearer {}", internal_service_token()),
+                )
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(first.status(), StatusCode::OK);
+    let first_body = to_bytes(first.into_body(), usize::MAX).await.unwrap();
+    let first_json: Value = serde_json::from_slice(&first_body).unwrap();
+    assert_eq!(first_json["ok"], true);
+    assert_eq!(first_json["accepted"], true);
+
+    let second = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!(
+                    "/internal/v1/upstream-accounts/{account_id}/health/seen-ok"
+                ))
+                .header(
+                    "authorization",
+                    format!("Bearer {}", internal_service_token()),
+                )
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(second.status(), StatusCode::OK);
+    let second_body = to_bytes(second.into_body(), usize::MAX).await.unwrap();
+    let second_json: Value = serde_json::from_slice(&second_body).unwrap();
+    assert_eq!(second_json["ok"], true);
+    assert_eq!(second_json["accepted"], false);
+}
+
+#[tokio::test]
 async fn upstream_account_batch_actions_route_handles_partial_failures_and_refresh_jobs() {
     let app = build_app();
     let admin_token = login_admin_token(&app).await;

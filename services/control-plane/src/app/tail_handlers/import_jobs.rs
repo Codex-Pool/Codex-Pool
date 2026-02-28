@@ -1,116 +1,3 @@
-fn build_upstream_models_url(base_url: &str, mode: &UpstreamMode) -> anyhow::Result<String> {
-    let mut url = reqwest::Url::parse(base_url)?;
-    let base_path = url.path().trim_end_matches('/').to_string();
-
-    let target_path = match mode {
-        UpstreamMode::ChatGptSession | UpstreamMode::CodexOauth => {
-            if base_path.ends_with("/backend-api/codex") || base_path.ends_with("/v1") {
-                format!("{base_path}/models")
-            } else {
-                format!("{base_path}/backend-api/codex/models")
-            }
-        }
-        UpstreamMode::OpenAiApiKey => {
-            if base_path.ends_with("/v1") {
-                format!("{base_path}/models")
-            } else {
-                format!("{base_path}/v1/models")
-            }
-        }
-    };
-
-    url.set_path(&target_path);
-
-    // ChatGPT backend-api /codex/models requires a `client_version` query
-    // parameter, otherwise the server responds with 400. This mirrors the
-    // same logic in data-plane (proxy.rs `ensure_client_version_query`).
-    if matches!(mode, UpstreamMode::ChatGptSession | UpstreamMode::CodexOauth) {
-        url.query_pairs_mut()
-            .append_pair("client_version", env!("CARGO_PKG_VERSION"));
-    }
-
-    Ok(url.to_string())
-}
-
-fn build_upstream_responses_url(base_url: &str, mode: &UpstreamMode) -> anyhow::Result<String> {
-    let mut url = reqwest::Url::parse(base_url)?;
-    let base_path = url.path().trim_end_matches('/').to_string();
-
-    let target_path = match mode {
-        UpstreamMode::ChatGptSession | UpstreamMode::CodexOauth => {
-            if base_path.ends_with("/backend-api/codex") || base_path.ends_with("/v1") {
-                format!("{base_path}/responses")
-            } else {
-                format!("{base_path}/backend-api/codex/responses")
-            }
-        }
-        UpstreamMode::OpenAiApiKey => {
-            if base_path.ends_with("/v1") {
-                format!("{base_path}/responses")
-            } else {
-                format!("{base_path}/v1/responses")
-            }
-        }
-    };
-
-    url.set_path(&target_path);
-    Ok(url.to_string())
-}
-
-/// Normalise an upstream models response to the OpenAI `/v1/models` shape:
-/// `{ "object": "list", "data": [{ "id", "object", "created", "owned_by" }] }`.
-///
-/// For `ChatGptSession`/`CodexOauth` the upstream returns
-/// `{ "models": [{ "slug": "gpt-5.2-codex", ... }] }` — we map `slug` to `id`
-/// and fill in sensible defaults for the missing standard fields.
-///
-/// For `OpenAiApiKey` the upstream already returns the standard format, so we
-/// pass it through unchanged.
-fn normalise_models_payload(payload: serde_json::Value, mode: &UpstreamMode) -> serde_json::Value {
-    // Already in standard format — pass through.
-    if payload.get("data").is_some() {
-        return payload;
-    }
-
-    // ChatGPT backend-api format: { "models": [ { "slug": ..., ... } ] }
-    let models = match payload.get("models").and_then(|v| v.as_array()) {
-        Some(arr) => arr,
-        None => return payload,
-    };
-
-    let provider = match mode {
-        UpstreamMode::ChatGptSession => "chatgpt-session",
-        UpstreamMode::CodexOauth => "codex-oauth",
-        UpstreamMode::OpenAiApiKey => "openai",
-    };
-
-    let data: Vec<serde_json::Value> = models
-        .iter()
-        .map(|m| {
-            let id = m
-                .get("slug")
-                .and_then(|v| v.as_str())
-                .unwrap_or("unknown");
-            let visibility = m
-                .get("visibility")
-                .and_then(|value| value.as_str())
-                .map(ToString::to_string);
-            serde_json::json!({
-                "id": id,
-                "object": "model",
-                "created": 0,
-                "owned_by": provider,
-                "visibility": visibility,
-            })
-        })
-        .collect();
-
-    serde_json::json!({
-        "object": "list",
-        "data": data,
-    })
-}
-
 async fn fetch_data_plane_debug_state(
     data_plane_base_url: &str,
 ) -> (Option<serde_json::Value>, Option<String>) {
@@ -145,9 +32,7 @@ async fn fetch_data_plane_debug_state(
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        build_upstream_responses_url, fetch_data_plane_debug_state, normalise_models_payload,
-    };
+    use super::fetch_data_plane_debug_state;
     use axum::{routing::get, Router};
     use codex_pool_core::model::UpstreamMode;
     use serde_json::json;
@@ -228,7 +113,8 @@ mod tests {
             ]
         });
 
-        let normalized = normalise_models_payload(payload, &UpstreamMode::CodexOauth);
+        let normalized =
+            crate::upstream_api::normalise_models_payload(payload, &UpstreamMode::CodexOauth);
         let data = normalized
             .get("data")
             .and_then(|value| value.as_array())
@@ -247,7 +133,7 @@ mod tests {
 
     #[test]
     fn build_upstream_responses_url_for_codex_oauth_uses_responses_suffix() {
-        let built = build_upstream_responses_url(
+        let built = crate::upstream_api::build_upstream_responses_url(
             "https://chatgpt.com/backend-api/codex",
             &UpstreamMode::CodexOauth,
         )
@@ -387,6 +273,36 @@ async fn retry_failed_oauth_import_items(
     state
         .import_job_manager
         .retry_failed(job_id)
+        .await
+        .map(Json)
+        .map_err(|err| map_oauth_import_job_error(locale, err))
+}
+
+async fn pause_oauth_import_job(
+    Path(job_id): Path<Uuid>,
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<OAuthImportJobActionResponse>, (StatusCode, Json<ErrorEnvelope>)> {
+    let _principal = require_admin_principal(&state, &headers)?;
+    let locale = i18n::locale_from_headers(&headers);
+    state
+        .import_job_manager
+        .pause_job(job_id)
+        .await
+        .map(Json)
+        .map_err(|err| map_oauth_import_job_error(locale, err))
+}
+
+async fn resume_oauth_import_job(
+    Path(job_id): Path<Uuid>,
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<OAuthImportJobActionResponse>, (StatusCode, Json<ErrorEnvelope>)> {
+    let _principal = require_admin_principal(&state, &headers)?;
+    let locale = i18n::locale_from_headers(&headers);
+    state
+        .import_job_manager
+        .resume_job(job_id)
         .await
         .map(Json)
         .map_err(|err| map_oauth_import_job_error(locale, err))

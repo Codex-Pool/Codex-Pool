@@ -736,6 +736,73 @@ impl PostgresStore {
 
         sqlx::query(
             r#"
+            CREATE TABLE IF NOT EXISTS upstream_account_health_state (
+                account_id UUID PRIMARY KEY REFERENCES upstream_accounts(id) ON DELETE CASCADE,
+                seen_ok_at TIMESTAMPTZ NULL,
+                last_probe_at TIMESTAMPTZ NULL,
+                last_probe_status TEXT NULL,
+                last_probe_http_status INT NULL,
+                last_probe_error_code TEXT NULL,
+                last_probe_error_message TEXT NULL,
+                failure_count INT NOT NULL DEFAULT 0,
+                next_probe_at TIMESTAMPTZ NULL,
+                created_at TIMESTAMPTZ NOT NULL,
+                updated_at TIMESTAMPTZ NOT NULL
+            )
+            "#,
+        )
+        .execute(tx.as_mut())
+        .await
+        .context("failed to create upstream_account_health_state table")?;
+
+        sqlx::query(
+            r#"
+            CREATE INDEX IF NOT EXISTS idx_upstream_account_health_state_next_probe
+            ON upstream_account_health_state (next_probe_at)
+            "#,
+        )
+        .execute(tx.as_mut())
+        .await
+        .context("failed to create upstream health next_probe index")?;
+
+        sqlx::query(
+            r#"
+            CREATE INDEX IF NOT EXISTS idx_upstream_account_health_state_seen_ok
+            ON upstream_account_health_state (seen_ok_at)
+            "#,
+        )
+        .execute(tx.as_mut())
+        .await
+        .context("failed to create upstream health seen_ok index")?;
+
+        sqlx::query(
+            r#"
+            CREATE TABLE IF NOT EXISTS upstream_account_ops_locks (
+                account_id UUID NOT NULL REFERENCES upstream_accounts(id) ON DELETE CASCADE,
+                op_type TEXT NOT NULL,
+                inflight_until TIMESTAMPTZ NOT NULL,
+                claimed_at TIMESTAMPTZ NOT NULL,
+                claimed_by TEXT NOT NULL,
+                PRIMARY KEY (account_id, op_type)
+            )
+            "#,
+        )
+        .execute(tx.as_mut())
+        .await
+        .context("failed to create upstream_account_ops_locks table")?;
+
+        sqlx::query(
+            r#"
+            CREATE INDEX IF NOT EXISTS idx_upstream_account_ops_locks_inflight
+            ON upstream_account_ops_locks (op_type, inflight_until)
+            "#,
+        )
+        .execute(tx.as_mut())
+        .await
+        .context("failed to create upstream ops lock inflight index")?;
+
+        sqlx::query(
+            r#"
             CREATE TABLE IF NOT EXISTS oauth_rate_limit_refresh_jobs (
                 id UUID PRIMARY KEY,
                 status TEXT NOT NULL,

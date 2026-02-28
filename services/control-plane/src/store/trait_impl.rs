@@ -133,6 +133,43 @@ impl ControlPlaneStore for InMemoryStore {
             events: Vec::new(),
         })
     }
+
+    async fn claim_due_probe_accounts(
+        &self,
+        limit: usize,
+        seen_ok_suppress_sec: i64,
+        lock_ttl_sec: i64,
+        _claimed_by: &str,
+    ) -> Result<Vec<ClaimedProbeAccount>> {
+        Ok(self.claim_due_probe_accounts_inner(
+            limit,
+            seen_ok_suppress_sec,
+            lock_ttl_sec,
+        ))
+    }
+
+    async fn release_upstream_op_lock(&self, account_id: Uuid, op_type: &str) -> Result<()> {
+        self.release_upstream_op_lock_inner(account_id, op_type);
+        Ok(())
+    }
+
+    async fn record_upstream_probe(&self, account_id: Uuid, write: UpstreamProbeWrite) -> Result<()> {
+        self.record_upstream_probe_inner(account_id, write);
+        Ok(())
+    }
+
+    async fn mark_account_seen_ok(
+        &self,
+        account_id: Uuid,
+        seen_ok_at: DateTime<Utc>,
+        min_write_interval_sec: i64,
+    ) -> Result<bool> {
+        Ok(self.mark_account_seen_ok_inner(
+            account_id,
+            seen_ok_at,
+            min_write_interval_sec,
+        ))
+    }
 }
 
 fn truncate_error_message(raw: String) -> String {

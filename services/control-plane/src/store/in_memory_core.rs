@@ -11,6 +11,8 @@ impl InMemoryStore {
             account_auth_providers: Arc::new(RwLock::new(HashMap::new())),
             oauth_credentials: Arc::new(RwLock::new(HashMap::new())),
             session_profiles: Arc::new(RwLock::new(HashMap::new())),
+            account_health_states: Arc::new(RwLock::new(HashMap::new())),
+            upstream_op_locks: Arc::new(RwLock::new(HashMap::new())),
             policies: Arc::new(RwLock::new(HashMap::new())),
             revision: Arc::new(AtomicU64::new(1)),
             oauth_client,
@@ -176,6 +178,14 @@ impl InMemoryStore {
             .remove(&account_id);
         self.oauth_credentials.write().unwrap().remove(&account_id);
         self.session_profiles.write().unwrap().remove(&account_id);
+        self.account_health_states
+            .write()
+            .unwrap()
+            .remove(&account_id);
+        self.upstream_op_locks
+            .write()
+            .unwrap()
+            .retain(|(id, _), _| *id != account_id);
 
         self.revision.fetch_add(1, Ordering::Relaxed);
         Ok(())
@@ -244,6 +254,116 @@ impl InMemoryStore {
 
         self.revision.fetch_add(1, Ordering::Relaxed);
         policy
+    }
+
+    fn claim_due_probe_accounts_inner(
+        &self,
+        limit: usize,
+        seen_ok_suppress_sec: i64,
+        lock_ttl_sec: i64,
+    ) -> Vec<ClaimedProbeAccount> {
+        let now = Utc::now();
+        let suppress_before = now - Duration::seconds(seen_ok_suppress_sec.max(0));
+        let lock_ttl = Duration::seconds(lock_ttl_sec.max(1));
+
+        let accounts = self.accounts.read().unwrap().clone();
+        let health_states = self.account_health_states.read().unwrap().clone();
+        let mut locks = self.upstream_op_locks.write().unwrap();
+
+        let mut candidates = accounts
+            .values()
+            .filter(|account| account.enabled)
+            .filter_map(|account| {
+                let state = health_states.get(&account.id).cloned().unwrap_or_default();
+                if state.seen_ok_at.is_some_and(|seen_ok_at| seen_ok_at > suppress_before) {
+                    return None;
+                }
+                if state.next_probe_at.is_some_and(|next_probe_at| next_probe_at > now) {
+                    return None;
+                }
+                Some((
+                    account.id,
+                    state.failure_count,
+                    state.next_probe_at.unwrap_or(account.created_at),
+                ))
+            })
+            .collect::<Vec<_>>();
+
+        candidates.sort_by_key(|(_, _, next_probe_at)| *next_probe_at);
+
+        let mut claimed = Vec::new();
+        for (account_id, failure_count, _) in candidates {
+            if claimed.len() >= limit.max(1) {
+                break;
+            }
+            let lock_key = (account_id, "probe".to_string());
+            if locks
+                .get(&lock_key)
+                .is_some_and(|record| record.inflight_until > now)
+            {
+                continue;
+            }
+            locks.insert(
+                lock_key,
+                UpstreamOpLockRecord {
+                    inflight_until: now + lock_ttl,
+                },
+            );
+            claimed.push(ClaimedProbeAccount {
+                account_id,
+                failure_count,
+            });
+        }
+        claimed
+    }
+
+    fn release_upstream_op_lock_inner(&self, account_id: Uuid, op_type: &str) {
+        self.upstream_op_locks
+            .write()
+            .unwrap()
+            .remove(&(account_id, op_type.to_string()));
+    }
+
+    fn record_upstream_probe_inner(&self, account_id: Uuid, write: UpstreamProbeWrite) {
+        let mut states = self.account_health_states.write().unwrap();
+        let state = states.entry(account_id).or_default();
+        state.last_probe_at = Some(write.observed_at);
+        state.last_probe_status = Some(write.status);
+        state.last_probe_http_status = write.http_status.map(i32::from);
+        state.last_probe_error_code = write.error_code;
+        state.last_probe_error_message = write.error_message;
+        state.next_probe_at = Some(write.next_probe_at);
+        match write.status {
+            UpstreamProbeStatus::Ok => {
+                state.failure_count = 0;
+            }
+            UpstreamProbeStatus::Fail => {
+                state.failure_count = state.failure_count.saturating_add(1);
+            }
+        }
+    }
+
+    fn mark_account_seen_ok_inner(
+        &self,
+        account_id: Uuid,
+        seen_ok_at: DateTime<Utc>,
+        min_write_interval_sec: i64,
+    ) -> bool {
+        let mut states = self.account_health_states.write().unwrap();
+        let state = states.entry(account_id).or_default();
+        let min_interval = Duration::seconds(min_write_interval_sec.max(0));
+        if state
+            .seen_ok_at
+            .is_some_and(|previous| previous >= seen_ok_at - min_interval)
+        {
+            return false;
+        }
+        state.seen_ok_at = Some(
+            state
+                .seen_ok_at
+                .map_or(seen_ok_at, |previous| previous.max(seen_ok_at)),
+        );
+        true
     }
 
     fn require_credential_cipher(&self) -> Result<&CredentialCipher> {

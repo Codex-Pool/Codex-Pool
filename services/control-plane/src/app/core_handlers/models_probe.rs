@@ -128,7 +128,7 @@ async fn fetch_models_catalog_context_from_account(
     client: &reqwest::Client,
     account: UpstreamAccount,
 ) -> Result<ModelsCatalogContext, String> {
-    let models_url = build_upstream_models_url(&account.base_url, &account.mode)
+    let models_url = crate::upstream_api::build_upstream_models_url(&account.base_url, &account.mode)
         .map_err(|err| format!("{}: invalid base_url ({err})", account.label))?;
     let account_label = account.label.clone();
 
@@ -156,7 +156,7 @@ async fn fetch_models_catalog_context_from_account(
         .await
         .map_err(|err| format!("{account_label}: failed to parse upstream models response: {err}"))?;
     let provider = provider_label_for_mode(&account.mode);
-    let normalised = normalise_models_payload(payload, &account.mode);
+    let normalised = crate::upstream_api::normalise_models_payload(payload, &account.mode);
     let items = normalised
         .get("data")
         .and_then(|value| value.as_array())
@@ -611,7 +611,10 @@ async fn run_model_probe_cycle(
                 envelope.error.message
             )
         })?;
-    let responses_url = build_upstream_responses_url(&context.account.base_url, &context.account.mode)?;
+    let responses_url = crate::upstream_api::build_upstream_responses_url(
+        &context.account.base_url,
+        &context.account.mode,
+    )?;
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(MODEL_PROBE_REQUEST_TIMEOUT_SEC))
         .build()?;
