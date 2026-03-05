@@ -38,7 +38,7 @@ toml = "1"
 sha2 = "0.10"
 hex = "0.4"
 zstd = "0.13"
-jsonwebtoken = { version = "10", default-features = false, features = ["rust_crypto", "use_pem"] }
+jsonwebtoken = { version = "10", default-features = false, features = ["aws_lc_rs"] }
 bcrypt = "0.18"
 
 [workspace.dependencies.redis]
