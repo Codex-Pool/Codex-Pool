@@ -25,7 +25,7 @@ async fn build_app_with_event_sink(
     config: DataPlaneConfig,
     event_sink: Arc<NoopEventSink>,
 ) -> anyhow::Result<Router> {
-    support::ensure_test_security_env();
+    support::ensure_test_security_env().await;
     dp_build_app_with_event_sink(config, event_sink).await
 }
 

@@ -29,7 +29,7 @@ async fn build_app_with_event_sink(
     config: DataPlaneConfig,
     event_sink: Arc<dyn EventSink>,
 ) -> anyhow::Result<Router> {
-    support::ensure_test_security_env();
+    support::ensure_test_security_env().await;
     dp_build_app_with_event_sink(config, event_sink).await
 }
 
@@ -38,7 +38,7 @@ async fn build_app_with_event_sink_and_allowed_keys(
     event_sink: Arc<dyn EventSink>,
     allowed_keys: Vec<String>,
 ) -> anyhow::Result<Router> {
-    support::ensure_test_security_env();
+    support::ensure_test_security_env().await;
     dp_build_app_with_event_sink_and_allowed_keys(config, event_sink, allowed_keys).await
 }
 

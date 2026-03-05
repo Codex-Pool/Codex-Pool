@@ -20,8 +20,8 @@ fn ensure_test_security_env_locked() {
     });
 }
 
-pub fn ensure_test_security_env() {
-    let _guard = ENV_LOCK.blocking_lock();
+pub async fn ensure_test_security_env() {
+    let _guard = ENV_LOCK.lock().await;
     ensure_test_security_env_locked();
 }
 

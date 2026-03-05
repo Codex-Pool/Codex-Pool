@@ -31,7 +31,7 @@ fn test_account(base_url: String, token: &str) -> UpstreamAccount {
 }
 
 async fn build_test_app_with_allowed_keys(allowed_keys: Vec<String>) -> (Router, MockServer) {
-    support::ensure_test_security_env();
+    support::ensure_test_security_env().await;
     let upstream = MockServer::start().await;
     Mock::given(method("POST"))
         .and(path("/v1/responses"))
