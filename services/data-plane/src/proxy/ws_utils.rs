@@ -42,12 +42,25 @@ enum ProxyWebSocketStreamError {
 }
 
 const WS_RESPONSE_COMPLETED_BILLING_PHASE: &str = "ws_response_completed";
+const WS_LOGICAL_REQUEST_METHOD: &str = "POST";
+const WS_BILLING_RELEASED_PHASE: &str = "released";
+const WS_BILLING_RELEASED_FAILED_PHASE: &str = "released_failed";
+const WS_BILLING_RELEASED_MISSING_USAGE_PHASE: &str = "released_missing_usage";
+const WS_BILLING_RELEASED_INCOMPLETE_PHASE: &str = "released_incomplete";
+const WS_BILLING_RELEASED_INTERRUPTED_PHASE: &str = "released_interrupted";
+const WS_RELEASE_REASON_MISSING_USAGE: &str = "stream_usage_missing";
+const WS_RELEASE_REASON_RESPONSE_INCOMPLETE: &str = "ws_response_incomplete";
+const WS_RELEASE_REASON_UPSTREAM_ERROR: &str = "ws_upstream_error";
+const WS_RELEASE_REASON_CONNECTION_CLOSED: &str = "ws_connection_closed";
+const WS_RELEASE_REASON_UPSTREAM_CLOSED: &str = "ws_upstream_closed";
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 struct WsLogicalUsageConnectionContext {
     account_id: Uuid,
     tenant_id: Option<Uuid>,
     api_key_id: Option<Uuid>,
+    principal: Option<ApiPrincipal>,
+    request_headers: HeaderMap,
     request_path: String,
     request_method: String,
 }
@@ -60,20 +73,53 @@ struct WsLogicalResponseSeed {
     started_at: Instant,
 }
 
+#[derive(Debug, Clone)]
+struct WsTrackedResponse {
+    seed: WsLogicalResponseSeed,
+    billing_session: Option<BillingSession>,
+}
+
+#[derive(Debug, Clone)]
+enum WsPendingBillingAction {
+    Capture {
+        billing_session: BillingSession,
+        usage: Option<UsageTokens>,
+    },
+    Release {
+        billing_session: BillingSession,
+        release_reason: &'static str,
+    },
+}
+
 #[derive(Debug, Default)]
 struct WsLogicalResponseTracker {
-    pending_requests: VecDeque<WsLogicalResponseSeed>,
-    active_by_response_id: std::collections::HashMap<String, WsLogicalResponseSeed>,
+    pending_requests: VecDeque<WsTrackedResponse>,
+    active_by_response_id: std::collections::HashMap<String, WsTrackedResponse>,
     completed_response_ids: HashSet<String>,
+    pending_billing_actions: VecDeque<WsPendingBillingAction>,
 }
 
 impl WsLogicalResponseTracker {
-    fn observe_downstream_message(&mut self, message: &AxumWsMessage) {
-        if let AxumWsMessage::Text(text) = message {
-            self.observe_downstream_text(text.as_ref());
+    fn register_logical_request(
+        &mut self,
+        seed: WsLogicalResponseSeed,
+        billing_session: Option<BillingSession>,
+    ) {
+        let tracked = WsTrackedResponse {
+            seed,
+            billing_session,
+        };
+        if let Some(response_id) = tracked.seed.response_id.clone() {
+            if self.completed_response_ids.contains(&response_id) {
+                return;
+            }
+            self.active_by_response_id.insert(response_id, tracked);
+        } else {
+            self.pending_requests.push_back(tracked);
         }
     }
 
+    #[cfg(test)]
     fn observe_downstream_text(&mut self, text: &str) {
         let Some(value) = parse_ws_json_text(text) else {
             return;
@@ -81,15 +127,7 @@ impl WsLogicalResponseTracker {
         let Some(seed) = extract_ws_logical_request_seed(&value) else {
             return;
         };
-
-        if let Some(response_id) = seed.response_id.clone() {
-            if self.completed_response_ids.contains(&response_id) {
-                return;
-            }
-            self.active_by_response_id.insert(response_id, seed);
-        } else {
-            self.pending_requests.push_back(seed);
-        }
+        self.register_logical_request(seed, None);
     }
 
     fn observe_upstream_message(
@@ -116,6 +154,16 @@ impl WsLogicalResponseTracker {
             self.register_response_created(&value);
         }
 
+        if is_ws_response_incomplete_event(&value) {
+            self.release_response(&value, WS_RELEASE_REASON_RESPONSE_INCOMPLETE);
+            return Vec::new();
+        }
+
+        if is_ws_error_event(&value) {
+            self.release_response(&value, WS_RELEASE_REASON_UPSTREAM_ERROR);
+            return Vec::new();
+        }
+
         if is_ws_response_completed_event(&value) {
             if let Some(event) = self.complete_response(&value, context) {
                 return vec![event];
@@ -133,28 +181,32 @@ impl WsLogicalResponseTracker {
             return;
         }
 
-        let mut seed = self
+        let mut tracked = self
             .active_by_response_id
             .remove(&response_id)
             .or_else(|| self.pending_requests.pop_front())
-            .unwrap_or_else(|| WsLogicalResponseSeed {
-                request_id: None,
-                response_id: Some(response_id.clone()),
-                model: None,
-                started_at: Instant::now(),
+            .unwrap_or_else(|| WsTrackedResponse {
+                seed: WsLogicalResponseSeed {
+                    request_id: None,
+                    response_id: Some(response_id.clone()),
+                    model: None,
+                    started_at: Instant::now(),
+                },
+                billing_session: None,
             });
 
-        if seed.request_id.is_none() {
-            seed.request_id = extract_ws_request_id(value).or_else(|| Some(response_id.clone()));
+        if tracked.seed.request_id.is_none() {
+            tracked.seed.request_id =
+                extract_ws_request_id(value).or_else(|| Some(response_id.clone()));
         }
-        if seed.response_id.is_none() {
-            seed.response_id = Some(response_id.clone());
+        if tracked.seed.response_id.is_none() {
+            tracked.seed.response_id = Some(response_id.clone());
         }
-        if seed.model.is_none() {
-            seed.model = extract_ws_model(value);
+        if tracked.seed.model.is_none() {
+            tracked.seed.model = extract_ws_model(value);
         }
 
-        self.active_by_response_id.insert(response_id, seed);
+        self.active_by_response_id.insert(response_id, tracked);
     }
 
     fn complete_response(
@@ -169,38 +221,50 @@ impl WsLogicalResponseTracker {
             }
         }
 
-        let mut seed = response_id
+        let mut tracked = response_id
             .as_ref()
             .and_then(|item| self.active_by_response_id.remove(item))
             .or_else(|| self.pending_requests.pop_front())
-            .unwrap_or_else(|| WsLogicalResponseSeed {
-                request_id: None,
-                response_id: response_id.clone(),
-                model: None,
-                started_at: Instant::now(),
+            .unwrap_or_else(|| WsTrackedResponse {
+                seed: WsLogicalResponseSeed {
+                    request_id: None,
+                    response_id: response_id.clone(),
+                    model: None,
+                    started_at: Instant::now(),
+                },
+                billing_session: None,
             });
 
-        if seed.request_id.is_none() {
-            seed.request_id = extract_ws_request_id(value).or_else(|| response_id.clone());
+        if tracked.seed.request_id.is_none() {
+            tracked.seed.request_id = extract_ws_request_id(value).or_else(|| response_id.clone());
         }
-        if seed.response_id.is_none() {
-            seed.response_id = response_id.clone();
+        if tracked.seed.response_id.is_none() {
+            tracked.seed.response_id = response_id.clone();
         }
-        if seed.model.is_none() {
-            seed.model = extract_ws_model(value);
+        if tracked.seed.model.is_none() {
+            tracked.seed.model = extract_ws_model(value);
         }
 
         let usage = extract_usage_tokens_from_value(value);
-        if seed.request_id.is_none()
-            && seed.response_id.is_none()
-            && seed.model.is_none()
+        if tracked.seed.request_id.is_none()
+            && tracked.seed.response_id.is_none()
+            && tracked.seed.model.is_none()
             && usage.is_none()
         {
             return None;
         }
 
-        if let Some(response_id) = seed.response_id.as_ref() {
+        if let Some(response_id) = tracked.seed.response_id.as_ref() {
             self.completed_response_ids.insert(response_id.clone());
+        }
+
+        if let Some(billing_session) = tracked.billing_session {
+            self.pending_billing_actions
+                .push_back(WsPendingBillingAction::Capture {
+                    billing_session,
+                    usage,
+                });
+            return None;
         }
 
         Some(RequestLogEvent {
@@ -212,11 +276,11 @@ impl WsLogicalResponseTracker {
             path: context.request_path.clone(),
             method: context.request_method.clone(),
             status_code: StatusCode::OK.as_u16(),
-            latency_ms: seed.started_at.elapsed().as_millis() as u64,
+            latency_ms: tracked.seed.started_at.elapsed().as_millis() as u64,
             is_stream: true,
             error_code: None,
-            request_id: seed.request_id.or(seed.response_id.clone()),
-            model: seed.model,
+            request_id: tracked.seed.request_id.or(tracked.seed.response_id.clone()),
+            model: tracked.seed.model,
             input_tokens: usage.as_ref().map(|item| item.input_tokens),
             cached_input_tokens: usage.as_ref().map(|item| item.cached_input_tokens),
             output_tokens: usage.as_ref().map(|item| item.output_tokens),
@@ -227,6 +291,71 @@ impl WsLogicalResponseTracker {
             capture_status: None,
             created_at: chrono::Utc::now(),
         })
+    }
+
+    fn release_response(&mut self, value: &Value, release_reason: &'static str) {
+        let response_id = extract_ws_response_id(value);
+        if let Some(response_id) = response_id.as_ref() {
+            if self.completed_response_ids.contains(response_id) {
+                return;
+            }
+        }
+
+        let mut tracked = response_id
+            .as_ref()
+            .and_then(|item| self.active_by_response_id.remove(item))
+            .or_else(|| self.pending_requests.pop_front())
+            .unwrap_or_else(|| WsTrackedResponse {
+                seed: WsLogicalResponseSeed {
+                    request_id: None,
+                    response_id: response_id.clone(),
+                    model: None,
+                    started_at: Instant::now(),
+                },
+                billing_session: None,
+            });
+
+        if tracked.seed.request_id.is_none() {
+            tracked.seed.request_id = extract_ws_request_id(value).or_else(|| response_id.clone());
+        }
+        if tracked.seed.response_id.is_none() {
+            tracked.seed.response_id = response_id.clone();
+        }
+        if tracked.seed.model.is_none() {
+            tracked.seed.model = extract_ws_model(value);
+        }
+
+        if let Some(response_id) = tracked.seed.response_id.as_ref() {
+            self.completed_response_ids.insert(response_id.clone());
+        }
+
+        if let Some(billing_session) = tracked.billing_session {
+            self.pending_billing_actions
+                .push_back(WsPendingBillingAction::Release {
+                    billing_session,
+                    release_reason,
+                });
+        }
+    }
+
+    fn drain_pending_billing_actions(&mut self) -> Vec<WsPendingBillingAction> {
+        self.pending_billing_actions.drain(..).collect()
+    }
+
+    fn take_unfinished_billing_sessions(&mut self) -> Vec<BillingSession> {
+        let mut sessions = Vec::new();
+        for tracked in self.pending_requests.drain(..) {
+            if let Some(billing_session) = tracked.billing_session {
+                sessions.push(billing_session);
+            }
+        }
+        for (_, tracked) in self.active_by_response_id.drain() {
+            if let Some(billing_session) = tracked.billing_session {
+                sessions.push(billing_session);
+            }
+        }
+        self.pending_billing_actions.clear();
+        sessions
     }
 }
 
@@ -245,23 +374,110 @@ impl std::error::Error for ProxyWebSocketStreamError {}
 async fn proxy_websocket_streams(
     downstream_socket: WebSocket,
     upstream_socket: UpstreamWebSocket,
-    event_sink: std::sync::Arc<dyn crate::event::EventSink>,
+    state: Arc<AppState>,
     ws_usage_context: WsLogicalUsageConnectionContext,
 ) -> Result<(), ProxyWebSocketStreamError> {
-    let (mut downstream_sender, mut downstream_receiver) = downstream_socket.split();
+    let (downstream_sender, mut downstream_receiver) = downstream_socket.split();
     let (mut upstream_sender, mut upstream_receiver) = upstream_socket.split();
+    let downstream_sender = Arc::new(tokio::sync::Mutex::new(downstream_sender));
     let tracker = std::sync::Arc::new(std::sync::Mutex::new(WsLogicalResponseTracker::default()));
     let downstream_tracker = tracker.clone();
     let upstream_tracker = tracker.clone();
+    let downstream_state = state.clone();
+    let upstream_state = state.clone();
+    let downstream_sender_for_errors = downstream_sender.clone();
+    let downstream_sender_for_upstream = downstream_sender.clone();
 
     let downstream_to_upstream = async {
         while let Some(message) = downstream_receiver.next().await {
             let Ok(message) = message else {
                 break;
             };
-            if let Ok(mut tracker) = downstream_tracker.lock() {
-                tracker.observe_downstream_message(&message);
+
+            if let AxumWsMessage::Text(text) = &message {
+                if let Some(value) = parse_ws_json_text(text.as_ref()) {
+                    if let Some(seed) = extract_ws_logical_request_seed(&value) {
+                        let parsed_policy_context =
+                            parse_ws_request_policy_context(&ws_usage_context.request_headers, &value);
+                        if let Err(error_response) = enforce_principal_request_policy(
+                            ws_usage_context.principal.as_ref(),
+                            &ws_usage_context.request_headers,
+                            &parsed_policy_context,
+                        ) {
+                            let ws_error = ws_error_message_from_response(*error_response).await;
+                            let send_result = {
+                                let mut sender = downstream_sender_for_errors.lock().await;
+                                sender.send(ws_error).await
+                            };
+                            if send_result.is_err() {
+                                break;
+                            }
+                            continue;
+                        }
+
+                        let pending_billing_session = match build_pending_billing_session(
+                            downstream_state.as_ref(),
+                            ws_usage_context.principal.as_ref(),
+                            &ws_usage_context.request_headers,
+                            &parsed_policy_context,
+                            &ws_usage_context.request_path,
+                            WS_LOGICAL_REQUEST_METHOD,
+                        )
+                        .await
+                        {
+                            Ok(value) => value,
+                            Err(error_response) => {
+                                let ws_error = ws_error_message_from_response(*error_response).await;
+                                let send_result = {
+                                    let mut sender = downstream_sender_for_errors.lock().await;
+                                    sender.send(ws_error).await
+                                };
+                                if send_result.is_err() {
+                                    break;
+                                }
+                                continue;
+                            }
+                        };
+
+                        let billing_session = if let Some(pending_session) =
+                            pending_billing_session.as_ref()
+                        {
+                            match authorize_billing_session(
+                                downstream_state.as_ref(),
+                                pending_session,
+                                ws_usage_context.account_id,
+                                &ws_usage_context.request_path,
+                                WS_LOGICAL_REQUEST_METHOD,
+                                seed.started_at,
+                                true,
+                            )
+                            .await
+                            {
+                                Ok(session) => Some(session),
+                                Err(error_response) => {
+                                    let ws_error =
+                                        ws_error_message_from_response(*error_response).await;
+                                    let send_result = {
+                                        let mut sender = downstream_sender_for_errors.lock().await;
+                                        sender.send(ws_error).await
+                                    };
+                                    if send_result.is_err() {
+                                        break;
+                                    }
+                                    continue;
+                                }
+                            }
+                        } else {
+                            None
+                        };
+
+                        if let Ok(mut tracker) = downstream_tracker.lock() {
+                            tracker.register_logical_request(seed, billing_session);
+                        }
+                    }
+                }
             }
+
             let should_close = matches!(message, AxumWsMessage::Close(_));
             if upstream_sender
                 .send(axum_message_to_tungstenite(message))
@@ -284,14 +500,18 @@ async fn proxy_websocket_streams(
             let Ok(message) = message else {
                 break;
             };
-            let pending_events = if let Ok(mut tracker) = upstream_tracker.lock() {
-                tracker.observe_upstream_message(&message, &ws_usage_context)
-            } else {
-                Vec::new()
-            };
+            let (pending_events, pending_billing_actions) =
+                if let Ok(mut tracker) = upstream_tracker.lock() {
+                    let events = tracker.observe_upstream_message(&message, &ws_usage_context);
+                    let billing_actions = tracker.drain_pending_billing_actions();
+                    (events, billing_actions)
+                } else {
+                    (Vec::new(), Vec::new())
+                };
             for event in pending_events {
-                event_sink.emit_request_log(event).await;
+                upstream_state.event_sink.emit_request_log(event).await;
             }
+            process_ws_pending_billing_actions(upstream_state.clone(), pending_billing_actions).await;
             let should_close = matches!(message, TungsteniteMessage::Close(_));
             if let TungsteniteMessage::Close(frame) = &message {
                 let close = frame
@@ -307,7 +527,11 @@ async fn proxy_websocket_streams(
                 upstream_close = Some(close);
             }
             if let Some(mapped) = tungstenite_message_to_axum(message) {
-                if downstream_sender.send(mapped).await.is_err() {
+                let send_result = {
+                    let mut sender = downstream_sender.lock().await;
+                    sender.send(mapped).await
+                };
+                if send_result.is_err() {
                     break;
                 }
             }
@@ -315,7 +539,7 @@ async fn proxy_websocket_streams(
                 break;
             }
         }
-        let _ = downstream_sender.close().await;
+        let _ = downstream_sender_for_upstream.lock().await.close().await;
         if let Some(close) = upstream_close {
             return Err(ProxyWebSocketStreamError::UpstreamClosed(close));
         }
@@ -324,6 +548,26 @@ async fn proxy_websocket_streams(
 
     let (downstream_to_upstream_result, upstream_to_downstream_result) =
         tokio::join!(downstream_to_upstream, upstream_to_downstream);
+
+    let release_reason = match &upstream_to_downstream_result {
+        Err(ProxyWebSocketStreamError::UpstreamClosed(_)) => WS_RELEASE_REASON_UPSTREAM_CLOSED,
+        _ => WS_RELEASE_REASON_CONNECTION_CLOSED,
+    };
+    let lingering_billing_sessions = if let Ok(mut tracker) = tracker.lock() {
+        tracker.take_unfinished_billing_sessions()
+    } else {
+        Vec::new()
+    };
+    for billing_session in lingering_billing_sessions {
+        release_ws_billing_session(
+            state.clone(),
+            billing_session,
+            release_reason,
+            ws_billing_phase_for_release_reason(release_reason),
+        )
+        .await;
+    }
+
     downstream_to_upstream_result?;
     upstream_to_downstream_result?;
 
@@ -332,6 +576,181 @@ async fn proxy_websocket_streams(
 
 fn parse_ws_json_text(text: &str) -> Option<Value> {
     serde_json::from_str::<Value>(text).ok()
+}
+
+fn parse_ws_request_policy_context(
+    headers: &HeaderMap,
+    value: &Value,
+) -> ParsedRequestPolicyContext {
+    let request_id = extract_ws_request_id(value).or_else(|| {
+        headers
+            .get("x-request-id")
+            .and_then(|item| item.to_str().ok())
+            .map(str::trim)
+            .filter(|item| !item.is_empty())
+            .map(ToString::to_string)
+    });
+    let request_value = value.get("response").unwrap_or(value);
+    let model = request_value
+        .get("model")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|item| !item.is_empty())
+        .map(ToString::to_string);
+    let estimated_input_tokens = estimate_request_input_tokens(request_value);
+    ParsedRequestPolicyContext {
+        model,
+        stream: true,
+        request_id,
+        estimated_input_tokens,
+        sticky_key_hint: None,
+        session_key_hint: sticky_session_key_from_headers(headers).or_else(|| {
+            request_value
+                .get("metadata")
+                .and_then(|meta| meta.get("session_id"))
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(ToString::to_string)
+        }),
+    }
+}
+
+fn ws_billing_phase_for_release_reason(release_reason: &str) -> &'static str {
+    match release_reason {
+        WS_RELEASE_REASON_MISSING_USAGE => WS_BILLING_RELEASED_MISSING_USAGE_PHASE,
+        WS_RELEASE_REASON_RESPONSE_INCOMPLETE | WS_RELEASE_REASON_UPSTREAM_ERROR => {
+            WS_BILLING_RELEASED_INCOMPLETE_PHASE
+        }
+        _ => WS_BILLING_RELEASED_INTERRUPTED_PHASE,
+    }
+}
+
+async fn ws_error_message_from_response(error_response: Response) -> AxumWsMessage {
+    let (parts, body) = error_response.into_parts();
+    let body_bytes = axum::body::to_bytes(body, 64 * 1024)
+        .await
+        .unwrap_or_default();
+    let error = serde_json::from_slice::<Value>(&body_bytes)
+        .ok()
+        .and_then(|value| value.get("error").cloned())
+        .unwrap_or_else(|| serde_json::json!(ErrorEnvelope::new(
+            "internal_error",
+            "request failed",
+        )));
+    AxumWsMessage::Text(
+        serde_json::json!({
+            "type": "error",
+            "status": parts.status.as_u16(),
+            "error": error,
+        })
+        .to_string()
+        .into(),
+    )
+}
+
+async fn process_ws_pending_billing_actions(
+    state: Arc<AppState>,
+    actions: Vec<WsPendingBillingAction>,
+) {
+    for action in actions {
+        match action {
+            WsPendingBillingAction::Capture {
+                billing_session,
+                usage,
+            } => match usage {
+                Some(usage_tokens) => {
+                    match settle_authorized_billing(state.as_ref(), &billing_session, usage_tokens).await
+                    {
+                        Ok(settle_result) => {
+                            emit_stream_request_log_event(
+                                state.as_ref(),
+                                &billing_session,
+                                WS_BILLING_RELEASED_PHASE,
+                                Some(settle_result.capture_status.as_str()),
+                                Some(settle_result.input_tokens),
+                                Some(settle_result.cached_input_tokens),
+                                Some(settle_result.output_tokens),
+                                Some(settle_result.reasoning_tokens),
+                            )
+                            .await;
+                        }
+                        Err(err) => {
+                            warn!(
+                                status = ?err.status(),
+                                request_id = %billing_session.request_id,
+                                authorization_id = %billing_session.authorization_id,
+                                reserved_microcredits = billing_session.reserved_microcredits,
+                                "websocket billing finalize failed"
+                            );
+                            emit_stream_request_log_event(
+                                state.as_ref(),
+                                &billing_session,
+                                WS_BILLING_RELEASED_FAILED_PHASE,
+                                None,
+                                Some(usage_tokens.input_tokens),
+                                Some(usage_tokens.cached_input_tokens),
+                                Some(usage_tokens.output_tokens),
+                                Some(usage_tokens.reasoning_tokens),
+                            )
+                            .await;
+                        }
+                    }
+                }
+                None => {
+                    release_ws_billing_session(
+                        state.clone(),
+                        billing_session,
+                        WS_RELEASE_REASON_MISSING_USAGE,
+                        WS_BILLING_RELEASED_MISSING_USAGE_PHASE,
+                    )
+                    .await;
+                }
+            },
+            WsPendingBillingAction::Release {
+                billing_session,
+                release_reason,
+            } => {
+                release_ws_billing_session(
+                    state.clone(),
+                    billing_session,
+                    release_reason,
+                    ws_billing_phase_for_release_reason(release_reason),
+                )
+                .await;
+            }
+        }
+    }
+}
+
+async fn release_ws_billing_session(
+    state: Arc<AppState>,
+    billing_session: BillingSession,
+    release_reason: &str,
+    billing_phase: &str,
+) {
+    emit_stream_request_log_event(
+        state.as_ref(),
+        &billing_session,
+        billing_phase,
+        None,
+        None,
+        None,
+        None,
+        None,
+    )
+    .await;
+    release_billing_hold_best_effort(
+        state,
+        Some(billing_session),
+        Some(BillingReleaseFailureContext {
+            release_reason: Some(release_reason.to_string()),
+            failover_action: Some("return_failure".to_string()),
+            failover_reason_class: Some(release_reason.to_string()),
+            ..Default::default()
+        }),
+    )
+    .await;
 }
 
 fn ws_string_at_path<'a>(value: &'a Value, path: &[&str]) -> Option<&'a str> {
@@ -385,6 +804,14 @@ fn is_ws_response_created_event(value: &Value) -> bool {
 
 fn is_ws_response_completed_event(value: &Value) -> bool {
     matches!(extract_ws_event_type(value), Some("response.completed" | "response.done"))
+}
+
+fn is_ws_response_incomplete_event(value: &Value) -> bool {
+    matches!(extract_ws_event_type(value), Some("response.incomplete"))
+}
+
+fn is_ws_error_event(value: &Value) -> bool {
+    matches!(extract_ws_event_type(value), Some("error"))
 }
 
 fn axum_message_to_tungstenite(message: AxumWsMessage) -> TungsteniteMessage {
@@ -717,6 +1144,8 @@ mod tests {
             account_id: Uuid::nil(),
             tenant_id: None,
             api_key_id: None,
+            principal: None,
+            request_headers: HeaderMap::new(),
             request_path: "/v1/responses".to_string(),
             request_method: "GET".to_string(),
         }

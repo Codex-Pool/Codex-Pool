@@ -1774,10 +1774,11 @@ pub async fn proxy_websocket_handler(
                 account_id: account.id,
                 tenant_id: principal.as_ref().and_then(|item| item.tenant_id),
                 api_key_id: principal.as_ref().and_then(|item| item.api_key_id),
+                principal: principal.clone(),
+                request_headers: parts.headers.clone(),
                 request_path: path.clone(),
                 request_method: request_method.clone(),
             };
-            let event_sink_for_upgrade = state.event_sink.clone();
             if let Some(seen_ok_reporter) = state.seen_ok_reporter.clone() {
                 let account_id = account.id;
                 tokio::spawn(async move {
@@ -1789,7 +1790,7 @@ pub async fn proxy_websocket_handler(
                 if let Err(err) = proxy_websocket_streams(
                     downstream_socket,
                     upstream_socket,
-                    event_sink_for_upgrade,
+                    state_for_upgrade.clone(),
                     ws_usage_context,
                 )
                 .await

@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -142,6 +142,50 @@ async fn spawn_data_plane_server_with_event_sink(
     event_sink: Arc<dyn EventSink>,
 ) -> String {
     let auth_validate_url = None;
+    let cfg = DataPlaneConfig {
+        listen_addr: "127.0.0.1:0".parse().unwrap(),
+        routing_strategy: RoutingStrategy::RoundRobin,
+        upstream_accounts: accounts,
+        account_ejection_ttl_sec: 30,
+        enable_request_failover: true,
+        same_account_quick_retry_max: 1,
+        request_failover_wait_ms: 2_000,
+        retry_poll_interval_ms: 100,
+        sticky_prefer_non_conflicting: true,
+        shared_routing_cache_enabled: true,
+        enable_metered_stream_billing: true,
+        billing_authorize_required_for_stream: true,
+        stream_billing_reserve_microcredits: 2_000_000,
+        billing_dynamic_preauth_enabled: true,
+        billing_preauth_expected_output_tokens: 256,
+        billing_preauth_safety_factor: 1.3,
+        billing_preauth_min_microcredits: 1_000,
+        billing_preauth_max_microcredits: 1_000_000_000_000,
+        billing_preauth_unit_price_microcredits: 10_000,
+        stream_billing_drain_timeout_ms: 5_000,
+        billing_capture_retry_max: 3,
+        billing_capture_retry_backoff_ms: 200,
+        redis_url: None,
+        auth_validate_url,
+        auth_validate_cache_ttl_sec: 30,
+        auth_validate_negative_cache_ttl_sec: 5,
+        auth_fail_open: false,
+        enable_internal_debug_routes: false,
+    };
+    let app = build_app_with_event_sink(cfg, event_sink)
+        .await
+        .expect("app should build");
+    spawn_data_plane_server_with_app(app).await
+}
+
+async fn spawn_data_plane_server_with_control_plane_and_event_sink(
+    accounts: Vec<UpstreamAccount>,
+    control_plane_base_url: Option<String>,
+    event_sink: Arc<dyn EventSink>,
+) -> String {
+    let auth_validate_url = control_plane_base_url
+        .as_deref()
+        .map(|base| format!("{}/internal/v1/auth/validate", base.trim_end_matches('/')));
     let cfg = DataPlaneConfig {
         listen_addr: "127.0.0.1:0".parse().unwrap(),
         routing_strategy: RoutingStrategy::RoundRobin,
@@ -478,6 +522,86 @@ async fn spawn_ws_logical_usage_upstream() -> String {
     format!("http://{}", addr)
 }
 
+async fn spawn_ws_scripted_upstream(turns: Vec<Vec<Value>>) -> String {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let turn_scripts = Arc::new(Mutex::new(VecDeque::from(turns)));
+
+    tokio::spawn({
+        let turn_scripts = turn_scripts.clone();
+        async move {
+            loop {
+                let (stream, _) = match listener.accept().await {
+                    Ok(value) => value,
+                    Err(_) => break,
+                };
+                let turn_scripts = turn_scripts.clone();
+                tokio::spawn(async move {
+                    let ws_stream = accept_hdr_async(
+                        stream,
+                        |_request: &tokio_tungstenite::tungstenite::handshake::server::Request,
+                         response: tokio_tungstenite::tungstenite::handshake::server::Response|
+                         -> Result<
+                            tokio_tungstenite::tungstenite::handshake::server::Response,
+                            ErrorResponse,
+                        > { Ok(response) },
+                    )
+                    .await;
+                    let Ok(ws_stream) = ws_stream else {
+                        return;
+                    };
+
+                    let (mut writer, mut reader) = ws_stream.split();
+                    while let Some(message) = reader.next().await {
+                        let Ok(message) = message else {
+                            break;
+                        };
+                        match message {
+                            Message::Text(text) => {
+                                let Ok(value) = serde_json::from_str::<Value>(&text) else {
+                                    continue;
+                                };
+                                let is_create = value
+                                    .get("type")
+                                    .and_then(Value::as_str)
+                                    .map(|item| item == "response.create")
+                                    .unwrap_or(false);
+                                if !is_create {
+                                    continue;
+                                }
+
+                                let scripted_events =
+                                    turn_scripts.lock().unwrap().pop_front().unwrap_or_default();
+                                for event in scripted_events {
+                                    if writer
+                                        .send(Message::Text(event.to_string().into()))
+                                        .await
+                                        .is_err()
+                                    {
+                                        return;
+                                    }
+                                }
+                            }
+                            Message::Close(frame) => {
+                                let _ = writer.send(Message::Close(frame)).await;
+                                break;
+                            }
+                            Message::Ping(payload) => {
+                                if writer.send(Message::Pong(payload)).await.is_err() {
+                                    break;
+                                }
+                            }
+                            Message::Binary(_) | Message::Pong(_) | Message::Frame(_) => {}
+                        }
+                    }
+                });
+            }
+        }
+    });
+
+    format!("http://{}", addr)
+}
+
 fn ws_url(http_base: &str, path_and_query: &str) -> String {
     format!(
         "{}{}",
@@ -581,6 +705,460 @@ async fn ws_logical_usage_emits_one_event_per_completed_response() {
     );
     assert_eq!(events[1].request_id.as_deref(), Some("req-2"));
     assert_eq!(events[1].model.as_deref(), Some("gpt-5.4-mini"));
+
+    ws_client.close(None).await.unwrap();
+}
+
+#[tokio::test]
+async fn ws_billing_completed_response_authorizes_and_captures() {
+    let authorization_id = Uuid::new_v4();
+    let tenant_id = Uuid::new_v4();
+    let api_key_id = Uuid::new_v4();
+    let upstream_base = spawn_ws_scripted_upstream(vec![vec![
+        json!({
+            "type": "response.created",
+            "response": { "id": "resp-1", "model": "gpt-5.4" }
+        }),
+        json!({
+            "type": "response.completed",
+            "response": {
+                "id": "resp-1",
+                "model": "gpt-5.4",
+                "usage": { "input_tokens": 17, "output_tokens": 9 }
+            }
+        }),
+    ]])
+    .await;
+
+    let control_plane = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/internal/v1/auth/validate"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "tenant_id": tenant_id,
+            "api_key_id": api_key_id,
+            "enabled": true,
+            "tenant_status": "active",
+            "balance_microcredits": 1_000_000,
+            "cache_ttl_sec": 30,
+        })))
+        .mount(&control_plane)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/internal/v1/billing/authorize"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "authorization_id": authorization_id,
+            "status": "authorized",
+            "reserved_microcredits": 2_000_000,
+        })))
+        .mount(&control_plane)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/internal/v1/billing/capture"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "status": "captured"
+        })))
+        .mount(&control_plane)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/internal/v1/billing/release"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "status": "released"
+        })))
+        .mount(&control_plane)
+        .await;
+
+    let sink = Arc::new(RecordingSink::default());
+    let data_plane_base = spawn_data_plane_server_with_control_plane_and_event_sink(
+        vec![test_account(upstream_base, "upstream-token")],
+        Some(control_plane.uri()),
+        sink.clone(),
+    )
+    .await;
+
+    let mut request = ws_url(&data_plane_base, "/v1/responses")
+        .into_client_request()
+        .unwrap();
+    request
+        .headers_mut()
+        .insert("authorization", "Bearer cp_identity".parse().unwrap());
+    let (mut ws_client, response) = connect_async(request).await.unwrap();
+    assert_eq!(response.status(), StatusCode::SWITCHING_PROTOCOLS);
+
+    ws_client
+        .send(Message::Text(
+            json!({
+                "type": "response.create",
+                "request_id": "req-1",
+                "response": { "model": "gpt-5.4" }
+            })
+            .to_string()
+            .into(),
+        ))
+        .await
+        .unwrap();
+
+    for _ in 0..2 {
+        let message = ws_client.next().await.unwrap().unwrap();
+        assert!(matches!(message, Message::Text(_)));
+    }
+
+    let (authorize_count, capture_count, release_count, capture_payload) =
+        tokio::time::timeout(Duration::from_secs(2), async {
+            loop {
+                let requests = control_plane.received_requests().await.unwrap();
+                let authorize_count = requests
+                    .iter()
+                    .filter(|request| request.url.path() == "/internal/v1/billing/authorize")
+                    .count();
+                let capture_count = requests
+                    .iter()
+                    .filter(|request| request.url.path() == "/internal/v1/billing/capture")
+                    .count();
+                let release_count = requests
+                    .iter()
+                    .filter(|request| request.url.path() == "/internal/v1/billing/release")
+                    .count();
+                let capture_payload = requests
+                    .iter()
+                    .find(|request| request.url.path() == "/internal/v1/billing/capture")
+                    .map(|request| serde_json::from_slice::<Value>(&request.body).unwrap());
+                if authorize_count == 1 && capture_count == 1 {
+                    return (authorize_count, capture_count, release_count, capture_payload);
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("billing requests should arrive");
+
+    assert_eq!(authorize_count, 1);
+    assert_eq!(capture_count, 1);
+    assert_eq!(release_count, 1);
+    let capture_payload = capture_payload.expect("capture payload should exist");
+    assert_eq!(capture_payload["request_id"], "req-1");
+    assert_eq!(capture_payload["model"], "gpt-5.4");
+    assert_eq!(capture_payload["input_tokens"], 17);
+    assert_eq!(capture_payload["output_tokens"], 9);
+    assert_eq!(capture_payload["is_stream"], true);
+
+    let events = tokio::time::timeout(Duration::from_secs(2), async {
+        loop {
+            let events = sink.events();
+            if events.len() == 1 {
+                return events;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("billing event should arrive");
+
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0].request_id.as_deref(), Some("req-1"));
+    assert_eq!(events[0].authorization_id, Some(authorization_id));
+    assert_eq!(events[0].capture_status.as_deref(), Some("captured"));
+    assert_eq!(events[0].billing_phase.as_deref(), Some("released"));
+    assert_eq!(events[0].input_tokens, Some(17));
+    assert_eq!(events[0].output_tokens, Some(9));
+
+    ws_client.close(None).await.unwrap();
+}
+
+#[tokio::test]
+async fn ws_billing_incomplete_response_releases_without_capture() {
+    let tenant_id = Uuid::new_v4();
+    let api_key_id = Uuid::new_v4();
+    let upstream_base = spawn_ws_scripted_upstream(vec![vec![
+        json!({
+            "type": "response.created",
+            "response": { "id": "resp-1", "model": "gpt-5.4" }
+        }),
+        json!({
+            "type": "response.incomplete",
+            "response": { "id": "resp-1", "model": "gpt-5.4" }
+        }),
+    ]])
+    .await;
+
+    let control_plane = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/internal/v1/auth/validate"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "tenant_id": tenant_id,
+            "api_key_id": api_key_id,
+            "enabled": true,
+            "tenant_status": "active",
+            "balance_microcredits": 1_000_000,
+            "cache_ttl_sec": 30,
+        })))
+        .mount(&control_plane)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/internal/v1/billing/authorize"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "authorization_id": Uuid::new_v4(),
+            "status": "authorized",
+            "reserved_microcredits": 2_000_000,
+        })))
+        .mount(&control_plane)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/internal/v1/billing/capture"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "status": "captured"
+        })))
+        .mount(&control_plane)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/internal/v1/billing/release"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "status": "released"
+        })))
+        .mount(&control_plane)
+        .await;
+
+    let sink = Arc::new(RecordingSink::default());
+    let data_plane_base = spawn_data_plane_server_with_control_plane_and_event_sink(
+        vec![test_account(upstream_base, "upstream-token")],
+        Some(control_plane.uri()),
+        sink,
+    )
+    .await;
+
+    let mut request = ws_url(&data_plane_base, "/v1/responses")
+        .into_client_request()
+        .unwrap();
+    request
+        .headers_mut()
+        .insert("authorization", "Bearer cp_identity".parse().unwrap());
+    let (mut ws_client, response) = connect_async(request).await.unwrap();
+    assert_eq!(response.status(), StatusCode::SWITCHING_PROTOCOLS);
+
+    ws_client
+        .send(Message::Text(
+            json!({
+                "type": "response.create",
+                "request_id": "req-incomplete",
+                "response": { "model": "gpt-5.4" }
+            })
+            .to_string()
+            .into(),
+        ))
+        .await
+        .unwrap();
+
+    for _ in 0..2 {
+        let message = ws_client.next().await.unwrap().unwrap();
+        assert!(matches!(message, Message::Text(_)));
+    }
+
+    let (authorize_count, capture_count, release_count, release_payload) =
+        tokio::time::timeout(Duration::from_secs(2), async {
+            loop {
+                let requests = control_plane.received_requests().await.unwrap();
+                let authorize_count = requests
+                    .iter()
+                    .filter(|request| request.url.path() == "/internal/v1/billing/authorize")
+                    .count();
+                let capture_count = requests
+                    .iter()
+                    .filter(|request| request.url.path() == "/internal/v1/billing/capture")
+                    .count();
+                let release_count = requests
+                    .iter()
+                    .filter(|request| request.url.path() == "/internal/v1/billing/release")
+                    .count();
+                let release_payload = requests
+                    .iter()
+                    .find(|request| request.url.path() == "/internal/v1/billing/release")
+                    .map(|request| serde_json::from_slice::<Value>(&request.body).unwrap());
+                if authorize_count == 1 && release_count == 1 {
+                    return (authorize_count, capture_count, release_count, release_payload);
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("release request should arrive");
+
+    assert_eq!(authorize_count, 1);
+    assert_eq!(capture_count, 0);
+    assert_eq!(release_count, 1);
+    let release_payload = release_payload.expect("release payload should exist");
+    assert_eq!(release_payload["request_id"], "req-incomplete");
+    assert_eq!(release_payload["is_stream"], true);
+
+    ws_client.close(None).await.unwrap();
+}
+
+#[tokio::test]
+async fn ws_billing_multiple_completed_responses_capture_twice() {
+    let tenant_id = Uuid::new_v4();
+    let api_key_id = Uuid::new_v4();
+    let upstream_base = spawn_ws_scripted_upstream(vec![
+        vec![
+            json!({
+                "type": "response.created",
+                "response": { "id": "resp-1", "model": "gpt-5.4" }
+            }),
+            json!({
+                "type": "response.completed",
+                "response": {
+                    "id": "resp-1",
+                    "model": "gpt-5.4",
+                    "usage": { "input_tokens": 11, "output_tokens": 7 }
+                }
+            }),
+        ],
+        vec![
+            json!({
+                "type": "response.created",
+                "response": { "id": "resp-2", "model": "gpt-5.4-mini" }
+            }),
+            json!({
+                "type": "response.completed",
+                "response": {
+                    "id": "resp-2",
+                    "model": "gpt-5.4-mini",
+                    "usage": { "input_tokens": 5, "output_tokens": 3 }
+                }
+            }),
+        ],
+    ])
+    .await;
+
+    let control_plane = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/internal/v1/auth/validate"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "tenant_id": tenant_id,
+            "api_key_id": api_key_id,
+            "enabled": true,
+            "tenant_status": "active",
+            "balance_microcredits": 1_000_000,
+            "cache_ttl_sec": 30,
+        })))
+        .mount(&control_plane)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/internal/v1/billing/authorize"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "authorization_id": Uuid::new_v4(),
+            "status": "authorized",
+            "reserved_microcredits": 2_000_000,
+        })))
+        .mount(&control_plane)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/internal/v1/billing/capture"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "status": "captured"
+        })))
+        .mount(&control_plane)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/internal/v1/billing/release"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "status": "released"
+        })))
+        .mount(&control_plane)
+        .await;
+
+    let sink = Arc::new(RecordingSink::default());
+    let data_plane_base = spawn_data_plane_server_with_control_plane_and_event_sink(
+        vec![test_account(upstream_base, "upstream-token")],
+        Some(control_plane.uri()),
+        sink.clone(),
+    )
+    .await;
+
+    let mut request = ws_url(&data_plane_base, "/v1/responses")
+        .into_client_request()
+        .unwrap();
+    request
+        .headers_mut()
+        .insert("authorization", "Bearer cp_identity".parse().unwrap());
+    let (mut ws_client, response) = connect_async(request).await.unwrap();
+    assert_eq!(response.status(), StatusCode::SWITCHING_PROTOCOLS);
+
+    ws_client
+        .send(Message::Text(
+            json!({
+                "type": "response.create",
+                "request_id": "req-1",
+                "response": { "model": "gpt-5.4" }
+            })
+            .to_string()
+            .into(),
+        ))
+        .await
+        .unwrap();
+    ws_client
+        .send(Message::Text(
+            json!({
+                "type": "response.create",
+                "request_id": "req-2",
+                "response": { "model": "gpt-5.4-mini" }
+            })
+            .to_string()
+            .into(),
+        ))
+        .await
+        .unwrap();
+
+    for _ in 0..4 {
+        let message = ws_client.next().await.unwrap().unwrap();
+        assert!(matches!(message, Message::Text(_)));
+    }
+
+    let (authorize_count, capture_count, release_count) = tokio::time::timeout(
+        Duration::from_secs(2),
+        async {
+            loop {
+                let requests = control_plane.received_requests().await.unwrap();
+                let authorize_count = requests
+                    .iter()
+                    .filter(|request| request.url.path() == "/internal/v1/billing/authorize")
+                    .count();
+                let capture_count = requests
+                    .iter()
+                    .filter(|request| request.url.path() == "/internal/v1/billing/capture")
+                    .count();
+                let release_count = requests
+                    .iter()
+                    .filter(|request| request.url.path() == "/internal/v1/billing/release")
+                    .count();
+                if authorize_count == 2 && capture_count == 2 {
+                    return (authorize_count, capture_count, release_count);
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        },
+    )
+    .await
+    .expect("two captures should arrive");
+
+    assert_eq!(authorize_count, 2);
+    assert_eq!(capture_count, 2);
+    assert_eq!(release_count, 2);
+
+    let events = tokio::time::timeout(Duration::from_secs(2), async {
+        loop {
+            let events = sink.events();
+            if events.len() == 2 {
+                return events;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("billing events should arrive");
+
+    assert_eq!(events.len(), 2);
+    assert!(events.iter().all(|event| event.authorization_id.is_some()));
+    assert!(events
+        .iter()
+        .all(|event| event.capture_status.as_deref() == Some("captured")));
 
     ws_client.close(None).await.unwrap();
 }
