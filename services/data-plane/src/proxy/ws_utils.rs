@@ -80,7 +80,7 @@ struct WsLogicalResponseSeed {
 struct WsTrackedResponse {
     seed: WsLogicalResponseSeed,
     billing_session: Option<BillingSession>,
-    original_request_text: Option<String>,
+    replay_request_texts: Vec<String>,
     response_started: bool,
 }
 
@@ -120,12 +120,12 @@ impl WsLogicalResponseTracker {
         &mut self,
         seed: WsLogicalResponseSeed,
         billing_session: Option<BillingSession>,
-        original_request_text: Option<String>,
+        replay_request_texts: Vec<String>,
     ) {
         let tracked = WsTrackedResponse {
             seed,
             billing_session,
-            original_request_text,
+            replay_request_texts,
             response_started: false,
         };
         self.register_tracked_request(tracked);
@@ -139,7 +139,7 @@ impl WsLogicalResponseTracker {
         let Some(seed) = extract_ws_logical_request_seed(&value) else {
             return;
         };
-        self.register_logical_request(seed, None, Some(text.to_string()));
+        self.register_logical_request(seed, None, vec![text.to_string()]);
     }
 
     fn observe_upstream_message(
@@ -205,7 +205,7 @@ impl WsLogicalResponseTracker {
                     started_at: Instant::now(),
                 },
                 billing_session: None,
-                original_request_text: None,
+                replay_request_texts: Vec::new(),
                 response_started: false,
             });
 
@@ -248,7 +248,7 @@ impl WsLogicalResponseTracker {
                     started_at: Instant::now(),
                 },
                 billing_session: None,
-                original_request_text: None,
+                replay_request_texts: Vec::new(),
                 response_started: false,
             });
 
@@ -330,7 +330,7 @@ impl WsLogicalResponseTracker {
                     started_at: Instant::now(),
                 },
                 billing_session: None,
-                original_request_text: None,
+                replay_request_texts: Vec::new(),
                 response_started: false,
             });
 
@@ -385,7 +385,7 @@ impl WsLogicalResponseTracker {
             }
         }
 
-        None
+        self.latest_unstarted_request()
     }
 
     fn take_retryable_request(&mut self, value: &Value) -> Option<WsTrackedResponse> {
@@ -421,7 +421,66 @@ impl WsLogicalResponseTracker {
             }
         }
 
-        None
+        self.take_latest_unstarted_request()
+    }
+
+    fn latest_unstarted_request(&self) -> Option<WsTrackedResponse> {
+        let latest_pending = self
+            .pending_requests
+            .iter()
+            .rev()
+            .find(|tracked| !tracked.response_started)
+            .cloned();
+        let latest_active = self
+            .active_by_response_id
+            .values()
+            .filter(|tracked| !tracked.response_started)
+            .cloned()
+            .max_by_key(|tracked| tracked.seed.started_at);
+
+        match (latest_pending, latest_active) {
+            (Some(pending), Some(active)) => {
+                if pending.seed.started_at >= active.seed.started_at {
+                    Some(pending)
+                } else {
+                    Some(active)
+                }
+            }
+            (Some(pending), None) => Some(pending),
+            (None, Some(active)) => Some(active),
+            (None, None) => None,
+        }
+    }
+
+    fn take_latest_unstarted_request(&mut self) -> Option<WsTrackedResponse> {
+        let latest_pending = self
+            .pending_requests
+            .iter()
+            .enumerate()
+            .rev()
+            .find(|(_, tracked)| !tracked.response_started)
+            .map(|(index, tracked)| (index, tracked.seed.started_at));
+        let latest_active = self
+            .active_by_response_id
+            .iter()
+            .filter(|(_, tracked)| !tracked.response_started)
+            .max_by_key(|(_, tracked)| tracked.seed.started_at)
+            .map(|(response_id, tracked)| (response_id.clone(), tracked.seed.started_at));
+
+        match (latest_pending, latest_active) {
+            (Some((pending_index, pending_started_at)), Some((active_response_id, active_started_at))) => {
+                if pending_started_at >= active_started_at {
+                    self.pending_requests.remove(pending_index)
+                } else {
+                    self.active_by_response_id.remove(&active_response_id)
+                }
+            }
+            (Some((pending_index, _)), None) => self.pending_requests.remove(pending_index),
+            (None, Some((active_response_id, _))) => {
+                self.active_by_response_id.remove(&active_response_id)
+            }
+            (None, None) => None,
+        }
     }
 
     fn requeue_tracked_request(&mut self, tracked: WsTrackedResponse) {
@@ -474,6 +533,7 @@ async fn proxy_websocket_streams(
     let (mut downstream_sender, mut downstream_receiver) = downstream_socket.split();
     let (mut upstream_sender, mut upstream_receiver) = upstream_socket.split();
     let mut tracker = WsLogicalResponseTracker::default();
+    let mut pending_replay_request_texts = Vec::new();
 
     let release_reason = loop {
         tokio::select! {
@@ -551,11 +611,16 @@ async fn proxy_websocket_streams(
                                 None
                             };
 
+                            let mut replay_request_texts = pending_replay_request_texts.clone();
+                            replay_request_texts.push(text.to_string());
                             tracker.register_logical_request(
                                 seed,
                                 billing_session,
-                                Some(text.to_string()),
+                                replay_request_texts,
                             );
+                            pending_replay_request_texts.clear();
+                        } else {
+                            pending_replay_request_texts.push(text.to_string());
                         }
                     }
                 }
@@ -636,18 +701,21 @@ async fn proxy_websocket_streams(
                                     )
                                     .await
                                 {
-                                    if let Some(original_request_text) =
-                                        retried_tracked.original_request_text.clone()
-                                    {
+                                    if !retried_tracked.replay_request_texts.is_empty() {
                                         let (mut new_upstream_sender, new_upstream_receiver) =
                                             next_socket.split();
-                                        if new_upstream_sender
-                                            .send(TungsteniteMessage::Text(
-                                                original_request_text.into(),
-                                            ))
-                                            .await
-                                            .is_ok()
-                                        {
+                                        let mut replay_succeeded = true;
+                                        for request_text in retried_tracked.replay_request_texts.clone() {
+                                            if new_upstream_sender
+                                                .send(TungsteniteMessage::Text(request_text.into()))
+                                                .await
+                                                .is_err()
+                                            {
+                                                replay_succeeded = false;
+                                                break;
+                                            }
+                                        }
+                                        if replay_succeeded {
                                             let _ = tracker.take_retryable_request(value);
                                             if original_tracked.billing_session.is_some() {
                                                 release_billing_hold_best_effort(
@@ -801,7 +869,7 @@ async fn build_retried_ws_tracked_request(
     next_account_id: Uuid,
     tracked: &WsTrackedResponse,
 ) -> Option<WsTrackedResponse> {
-    let original_request_text = tracked.original_request_text.clone()?;
+    let original_request_text = tracked.replay_request_texts.last()?.clone();
     let value = parse_ws_json_text(&original_request_text)?;
     let parsed_policy_context =
         parse_ws_request_policy_context(&ws_usage_context.request_headers, &value);
@@ -1186,7 +1254,7 @@ fn extract_ws_model(value: &Value) -> Option<String> {
 
 fn extract_ws_logical_request_seed(value: &Value) -> Option<WsLogicalResponseSeed> {
     let event_type = extract_ws_event_type(value)?;
-    if event_type != "response.create" && !event_type.ends_with(".create") {
+    if event_type != "response.create" {
         return None;
     }
 
@@ -1283,6 +1351,7 @@ mod tests {
     use axum::http::StatusCode;
     use bytes::Bytes;
     use codex_pool_core::model::UpstreamMode;
+    use serde_json::Value;
     use std::time::Duration;
 
     use super::{
@@ -1655,5 +1724,38 @@ mod tests {
         assert_eq!(events[0].model.as_deref(), Some("gpt-5.4"));
         assert_eq!(events[0].input_tokens, None);
         assert_eq!(events[0].output_tokens, None);
+    }
+
+    #[test]
+    fn ws_logical_usage_ignores_non_response_create_events() {
+        let mut tracker = WsLogicalResponseTracker::default();
+        tracker.observe_downstream_text(
+            r#"{"type":"conversation.item.create","event_id":"evt-1","item":{"type":"message"}}"#,
+        );
+
+        assert!(!tracker.has_unfinished_requests());
+    }
+
+    #[test]
+    fn ws_retryable_request_falls_back_to_latest_unstarted_request_without_ids() {
+        let mut tracker = WsLogicalResponseTracker::default();
+        tracker.observe_downstream_text(
+            r#"{"type":"response.create","request_id":"req-1","response":{"model":"gpt-5.4"}}"#,
+        );
+        tracker.observe_downstream_text(
+            r#"{"type":"response.create","request_id":"req-2","response":{"model":"gpt-5.4-mini"}}"#,
+        );
+
+        let value = serde_json::from_str::<Value>(
+            r#"{"type":"error","error":{"code":"usage_limit","message":"quota exhausted"}}"#,
+        )
+        .unwrap();
+
+        let tracked = tracker
+            .find_retryable_request(&value)
+            .expect("latest pending request should be retryable");
+
+        assert_eq!(tracked.seed.request_id.as_deref(), Some("req-2"));
+        assert_eq!(tracked.seed.model.as_deref(), Some("gpt-5.4-mini"));
     }
 }

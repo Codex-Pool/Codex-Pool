@@ -602,6 +602,120 @@ async fn spawn_ws_scripted_upstream(turns: Vec<Vec<Value>>) -> String {
     format!("http://{}", addr)
 }
 
+async fn spawn_ws_turn_state_required_upstream(expected_turn_text: &'static str) -> String {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+
+    tokio::spawn(async move {
+        loop {
+            let (stream, _) = match listener.accept().await {
+                Ok(value) => value,
+                Err(_) => break,
+            };
+            tokio::spawn(async move {
+                let ws_stream = accept_hdr_async(
+                    stream,
+                    |_request: &tokio_tungstenite::tungstenite::handshake::server::Request,
+                     response: tokio_tungstenite::tungstenite::handshake::server::Response|
+                     -> Result<
+                        tokio_tungstenite::tungstenite::handshake::server::Response,
+                        ErrorResponse,
+                    > { Ok(response) },
+                )
+                .await;
+                let Ok(ws_stream) = ws_stream else {
+                    return;
+                };
+
+                let (mut writer, mut reader) = ws_stream.split();
+                let mut saw_expected_turn = false;
+
+                while let Some(message) = reader.next().await {
+                    let Ok(message) = message else {
+                        break;
+                    };
+                    match message {
+                        Message::Text(text) => {
+                            let Ok(value) = serde_json::from_str::<Value>(&text) else {
+                                continue;
+                            };
+                            let Some(event_type) = value.get("type").and_then(Value::as_str) else {
+                                continue;
+                            };
+
+                            match event_type {
+                                "conversation.item.create" => {
+                                    saw_expected_turn = value
+                                        .get("item")
+                                        .and_then(|item| item.get("content"))
+                                        .and_then(Value::as_array)
+                                        .and_then(|items| items.first())
+                                        .and_then(|item| item.get("text"))
+                                        .and_then(Value::as_str)
+                                        == Some(expected_turn_text);
+                                }
+                                "response.create" => {
+                                    if !saw_expected_turn {
+                                        let error = json!({
+                                            "type": "error",
+                                            "error": {
+                                                "code": "missing_turn_state",
+                                                "message": "missing latest turn state before response.create"
+                                            }
+                                        });
+                                        let _ = writer.send(Message::Text(error.to_string().into())).await;
+                                        continue;
+                                    }
+
+                                    let created = json!({
+                                        "type": "response.created",
+                                        "response": { "id": "resp-turn-2", "model": "gpt-5.4" }
+                                    });
+                                    let completed = json!({
+                                        "type": "response.completed",
+                                        "response": {
+                                            "id": "resp-turn-2",
+                                            "model": "gpt-5.4",
+                                            "usage": { "input_tokens": 8, "output_tokens": 4 }
+                                        }
+                                    });
+                                    if writer
+                                        .send(Message::Text(created.to_string().into()))
+                                        .await
+                                        .is_err()
+                                    {
+                                        return;
+                                    }
+                                    if writer
+                                        .send(Message::Text(completed.to_string().into()))
+                                        .await
+                                        .is_err()
+                                    {
+                                        return;
+                                    }
+                                }
+                                _ => {}
+                            }
+                        }
+                        Message::Close(frame) => {
+                            let _ = writer.send(Message::Close(frame)).await;
+                            break;
+                        }
+                        Message::Ping(payload) => {
+                            if writer.send(Message::Pong(payload)).await.is_err() {
+                                break;
+                            }
+                        }
+                        Message::Binary(_) | Message::Pong(_) | Message::Frame(_) => {}
+                    }
+                }
+            });
+        }
+    });
+
+    format!("http://{}", addr)
+}
+
 fn ws_url(http_base: &str, path_and_query: &str) -> String {
     format!(
         "{}{}",
@@ -1596,6 +1710,162 @@ async fn ws_session_retries_same_request_on_new_account_before_any_output() {
     assert_eq!(first_payload["type"], "response.created");
     assert_eq!(second_payload["type"], "response.completed");
     assert_eq!(second_payload["response"]["id"], "resp-retry");
+
+    ws_client.close(None).await.unwrap();
+}
+
+#[tokio::test]
+async fn ws_session_retries_same_request_without_request_id_on_new_account_before_any_output() {
+    let quota_upstream_base = spawn_ws_scripted_upstream(vec![vec![json!({
+        "type": "error",
+        "error": {
+            "code": "usage_limit",
+            "message": "You've hit your usage limit. Upgrade to Plus to continue using Codex"
+        }
+    })]])
+    .await;
+    let healthy_upstream_base = spawn_ws_scripted_upstream(vec![vec![
+        json!({
+            "type": "response.created",
+            "response": { "id": "resp-retry-no-id", "model": "gpt-5.4" }
+        }),
+        json!({
+            "type": "response.completed",
+            "response": {
+                "id": "resp-retry-no-id",
+                "model": "gpt-5.4",
+                "usage": { "input_tokens": 8, "output_tokens": 4 }
+            }
+        }),
+    ]])
+    .await;
+
+    let data_plane_base = spawn_data_plane_server(vec![
+        test_account(quota_upstream_base, "upstream-token-a"),
+        test_account(healthy_upstream_base, "upstream-token-b"),
+    ])
+    .await;
+
+    let request = ws_url(&data_plane_base, "/v1/responses")
+        .into_client_request()
+        .unwrap();
+    let (mut ws_client, response) = connect_async(request).await.unwrap();
+    assert_eq!(response.status(), StatusCode::SWITCHING_PROTOCOLS);
+
+    ws_client
+        .send(Message::Text(
+            json!({
+                "type": "response.create",
+                "request_id": "req-retry-no-id",
+                "response": { "model": "gpt-5.4" }
+            })
+            .to_string()
+            .into(),
+        ))
+        .await
+        .unwrap();
+
+    let (first, second) = tokio::time::timeout(Duration::from_secs(2), async {
+        let first = ws_client.next().await.unwrap().unwrap();
+        let second = ws_client.next().await.unwrap().unwrap();
+        (first, second)
+    })
+    .await
+    .expect("same request should retry on a new account even without request_id in error");
+
+    let first_text = match first {
+        Message::Text(text) => text.to_string(),
+        other => panic!("expected first text message, got {other:?}"),
+    };
+    let second_text = match second {
+        Message::Text(text) => text.to_string(),
+        other => panic!("expected second text message, got {other:?}"),
+    };
+    let first_payload: Value = serde_json::from_str(&first_text).unwrap();
+    let second_payload: Value = serde_json::from_str(&second_text).unwrap();
+
+    assert_eq!(first_payload["type"], "response.created");
+    assert_eq!(second_payload["type"], "response.completed");
+    assert_eq!(second_payload["response"]["id"], "resp-retry-no-id");
+
+    ws_client.close(None).await.unwrap();
+}
+
+#[tokio::test]
+async fn ws_session_replays_required_turn_frames_before_retrying_response_create() {
+    let quota_upstream_base = spawn_ws_scripted_upstream(vec![vec![json!({
+        "type": "error",
+        "request_id": "req-turn-2",
+        "error": {
+            "code": "usage_limit",
+            "message": "You've hit your usage limit. Upgrade to Plus to continue using Codex"
+        }
+    })]])
+    .await;
+    let healthy_upstream_base = spawn_ws_turn_state_required_upstream("turn-2").await;
+
+    let data_plane_base = spawn_data_plane_server(vec![
+        test_account(quota_upstream_base, "upstream-token-a"),
+        test_account(healthy_upstream_base, "upstream-token-b"),
+    ])
+    .await;
+
+    let request = ws_url(&data_plane_base, "/v1/responses")
+        .into_client_request()
+        .unwrap();
+    let (mut ws_client, response) = connect_async(request).await.unwrap();
+    assert_eq!(response.status(), StatusCode::SWITCHING_PROTOCOLS);
+
+    ws_client
+        .send(Message::Text(
+            json!({
+                "type": "conversation.item.create",
+                "item": {
+                    "type": "message",
+                    "role": "user",
+                    "content": [{ "type": "input_text", "text": "turn-2" }]
+                }
+            })
+            .to_string()
+            .into(),
+        ))
+        .await
+        .unwrap();
+    ws_client
+        .send(Message::Text(
+            json!({
+                "type": "response.create",
+                "request_id": "req-turn-2",
+                "response": { "model": "gpt-5.4" }
+            })
+            .to_string()
+            .into(),
+        ))
+        .await
+        .unwrap();
+
+    let (first, second) = tokio::time::timeout(Duration::from_secs(2), async {
+        let first = ws_client.next().await.unwrap().unwrap();
+        let second = ws_client.next().await.unwrap().unwrap();
+        (first, second)
+    })
+    .await
+    .expect("retry should replay required turn frames before response.create");
+
+    let first_text = match first {
+        Message::Text(text) => text.to_string(),
+        other => panic!("expected first text message, got {other:?}"),
+    };
+    let second_text = match second {
+        Message::Text(text) => text.to_string(),
+        other => panic!("expected second text message, got {other:?}"),
+    };
+    let first_payload: Value = serde_json::from_str(&first_text).unwrap();
+    let second_payload: Value = serde_json::from_str(&second_text).unwrap();
+
+    assert_eq!(first_payload["type"], "response.created");
+    assert_eq!(second_payload["type"], "response.completed");
+    assert_eq!(second_payload["response"]["id"], "resp-turn-2");
 
     ws_client.close(None).await.unwrap();
 }
