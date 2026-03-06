@@ -50,6 +50,7 @@ const WS_BILLING_RELEASED_INCOMPLETE_PHASE: &str = "released_incomplete";
 const WS_BILLING_RELEASED_INTERRUPTED_PHASE: &str = "released_interrupted";
 const WS_RELEASE_REASON_MISSING_USAGE: &str = "stream_usage_missing";
 const WS_RELEASE_REASON_RESPONSE_INCOMPLETE: &str = "ws_response_incomplete";
+const WS_RELEASE_REASON_RESPONSE_FAILED: &str = "ws_response_failed";
 const WS_RELEASE_REASON_UPSTREAM_ERROR: &str = "ws_upstream_error";
 const WS_RELEASE_REASON_CONNECTION_CLOSED: &str = "ws_connection_closed";
 const WS_RELEASE_REASON_UPSTREAM_CLOSED: &str = "ws_upstream_closed";
@@ -168,6 +169,11 @@ impl WsLogicalResponseTracker {
 
         if is_ws_response_incomplete_event(&value) {
             self.release_response(&value, WS_RELEASE_REASON_RESPONSE_INCOMPLETE);
+            return Vec::new();
+        }
+
+        if is_ws_response_failed_event(&value) {
+            self.release_response(&value, WS_RELEASE_REASON_RESPONSE_FAILED);
             return Vec::new();
         }
 
@@ -425,62 +431,50 @@ impl WsLogicalResponseTracker {
     }
 
     fn latest_unstarted_request(&self) -> Option<WsTrackedResponse> {
-        let latest_pending = self
+        let mut candidates = self
             .pending_requests
             .iter()
-            .rev()
-            .find(|tracked| !tracked.response_started)
-            .cloned();
-        let latest_active = self
-            .active_by_response_id
-            .values()
             .filter(|tracked| !tracked.response_started)
             .cloned()
-            .max_by_key(|tracked| tracked.seed.started_at);
-
-        match (latest_pending, latest_active) {
-            (Some(pending), Some(active)) => {
-                if pending.seed.started_at >= active.seed.started_at {
-                    Some(pending)
-                } else {
-                    Some(active)
-                }
-            }
-            (Some(pending), None) => Some(pending),
-            (None, Some(active)) => Some(active),
-            (None, None) => None,
+            .collect::<Vec<_>>();
+        candidates.extend(
+            self.active_by_response_id
+                .values()
+                .filter(|tracked| !tracked.response_started)
+                .cloned(),
+        );
+        if candidates.len() != 1 {
+            return None;
         }
+        candidates.pop()
     }
 
     fn take_latest_unstarted_request(&mut self) -> Option<WsTrackedResponse> {
-        let latest_pending = self
+        let pending_candidates = self
             .pending_requests
             .iter()
             .enumerate()
-            .rev()
-            .find(|(_, tracked)| !tracked.response_started)
-            .map(|(index, tracked)| (index, tracked.seed.started_at));
-        let latest_active = self
+            .filter(|(_, tracked)| !tracked.response_started)
+            .map(|(index, tracked)| (index, tracked.seed.started_at))
+            .collect::<Vec<_>>();
+        let active_candidates = self
             .active_by_response_id
             .iter()
             .filter(|(_, tracked)| !tracked.response_started)
-            .max_by_key(|(_, tracked)| tracked.seed.started_at)
-            .map(|(response_id, tracked)| (response_id.clone(), tracked.seed.started_at));
+            .map(|(response_id, tracked)| (response_id.clone(), tracked.seed.started_at))
+            .collect::<Vec<_>>();
 
-        match (latest_pending, latest_active) {
-            (Some((pending_index, pending_started_at)), Some((active_response_id, active_started_at))) => {
-                if pending_started_at >= active_started_at {
-                    self.pending_requests.remove(pending_index)
-                } else {
-                    self.active_by_response_id.remove(&active_response_id)
-                }
-            }
-            (Some((pending_index, _)), None) => self.pending_requests.remove(pending_index),
-            (None, Some((active_response_id, _))) => {
-                self.active_by_response_id.remove(&active_response_id)
-            }
-            (None, None) => None,
+        if pending_candidates.len() + active_candidates.len() != 1 {
+            return None;
         }
+
+        if let Some((pending_index, _)) = pending_candidates.into_iter().next() {
+            return self.pending_requests.remove(pending_index);
+        }
+        if let Some((active_response_id, _)) = active_candidates.into_iter().next() {
+            return self.active_by_response_id.remove(&active_response_id);
+        }
+        None
     }
 
     fn requeue_tracked_request(&mut self, tracked: WsTrackedResponse) {
@@ -534,6 +528,7 @@ async fn proxy_websocket_streams(
     let (mut upstream_sender, mut upstream_receiver) = upstream_socket.split();
     let mut tracker = WsLogicalResponseTracker::default();
     let mut pending_replay_request_texts = Vec::new();
+    let mut upstream_closed_error: Option<UpstreamWebSocketClose> = None;
 
     let release_reason = loop {
         tokio::select! {
@@ -552,6 +547,22 @@ async fn proxy_websocket_streams(
                         if let Some(seed) = extract_ws_logical_request_seed(&value) {
                             let parsed_policy_context =
                                 parse_ws_request_policy_context(&ws_usage_context.request_headers, &value);
+                            if let Some(sticky_key) = parsed_policy_context
+                                .sticky_key_hint
+                                .clone()
+                                .or(parsed_policy_context.session_key_hint.clone())
+                            {
+                                ws_usage_context.sticky_key = Some(sticky_key.clone());
+                                let _ = state.router.bind_sticky(&sticky_key, ws_usage_context.account_id);
+                                let _ = state
+                                    .routing_cache
+                                    .set_sticky_account_id(
+                                        &sticky_key,
+                                        ws_usage_context.account_id,
+                                        Duration::from_secs(ROUTING_CACHE_STICKY_TTL_SEC),
+                                    )
+                                    .await;
+                            }
                             if let Err(error_response) = enforce_principal_request_policy(
                                 ws_usage_context.principal.as_ref(),
                                 &ws_usage_context.request_headers,
@@ -843,7 +854,8 @@ async fn proxy_websocket_streams(
 
                 if let Some(close) = upstream_close {
                     let _ = downstream_sender.close().await;
-                    return Err(ProxyWebSocketStreamError::UpstreamClosed(close));
+                    upstream_closed_error = Some(close);
+                    break WS_RELEASE_REASON_UPSTREAM_CLOSED;
                 }
             }
         }
@@ -858,6 +870,10 @@ async fn proxy_websocket_streams(
             ws_billing_phase_for_release_reason(release_reason),
         )
         .await;
+    }
+
+    if let Some(close) = upstream_closed_error {
+        return Err(ProxyWebSocketStreamError::UpstreamClosed(close));
     }
 
     Ok(())
@@ -1059,6 +1075,21 @@ fn parse_ws_request_policy_context(
             .map(ToString::to_string)
     });
     let request_value = value.get("response").unwrap_or(value);
+    let previous_response_id = value
+        .get("previous_response_id")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|item| !item.is_empty())
+        .map(ToString::to_string);
+    let header_or_metadata_session_key = sticky_session_key_from_headers(headers).or_else(|| {
+        request_value
+            .get("metadata")
+            .and_then(|meta| meta.get("session_id"))
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(ToString::to_string)
+    });
     let model = request_value
         .get("model")
         .and_then(Value::as_str)
@@ -1071,23 +1102,19 @@ fn parse_ws_request_policy_context(
         stream: true,
         request_id,
         estimated_input_tokens,
-        sticky_key_hint: None,
-        session_key_hint: sticky_session_key_from_headers(headers).or_else(|| {
-            request_value
-                .get("metadata")
-                .and_then(|meta| meta.get("session_id"))
-                .and_then(Value::as_str)
-                .map(str::trim)
-                .filter(|value| !value.is_empty())
-                .map(ToString::to_string)
-        }),
+        sticky_key_hint: previous_response_id
+            .clone()
+            .or_else(|| header_or_metadata_session_key.clone()),
+        session_key_hint: previous_response_id.or(header_or_metadata_session_key),
     }
 }
 
 fn ws_billing_phase_for_release_reason(release_reason: &str) -> &'static str {
     match release_reason {
         WS_RELEASE_REASON_MISSING_USAGE => WS_BILLING_RELEASED_MISSING_USAGE_PHASE,
-        WS_RELEASE_REASON_RESPONSE_INCOMPLETE | WS_RELEASE_REASON_UPSTREAM_ERROR => {
+        WS_RELEASE_REASON_RESPONSE_INCOMPLETE
+        | WS_RELEASE_REASON_RESPONSE_FAILED
+        | WS_RELEASE_REASON_UPSTREAM_ERROR => {
             WS_BILLING_RELEASED_INCOMPLETE_PHASE
         }
         _ => WS_BILLING_RELEASED_INTERRUPTED_PHASE,
@@ -1276,6 +1303,10 @@ fn is_ws_response_completed_event(value: &Value) -> bool {
 
 fn is_ws_response_incomplete_event(value: &Value) -> bool {
     matches!(extract_ws_event_type(value), Some("response.incomplete"))
+}
+
+fn is_ws_response_failed_event(value: &Value) -> bool {
+    matches!(extract_ws_event_type(value), Some("response.failed"))
 }
 
 fn is_ws_error_event(value: &Value) -> bool {
@@ -1737,7 +1768,7 @@ mod tests {
     }
 
     #[test]
-    fn ws_retryable_request_falls_back_to_latest_unstarted_request_without_ids() {
+    fn ws_retryable_request_returns_none_when_multiple_unstarted_requests_have_no_ids() {
         let mut tracker = WsLogicalResponseTracker::default();
         tracker.observe_downstream_text(
             r#"{"type":"response.create","request_id":"req-1","response":{"model":"gpt-5.4"}}"#,
@@ -1751,11 +1782,41 @@ mod tests {
         )
         .unwrap();
 
+        assert!(tracker.find_retryable_request(&value).is_none());
+        assert!(tracker.take_retryable_request(&value).is_none());
+    }
+
+    #[test]
+    fn ws_retryable_request_falls_back_when_only_one_unstarted_request_exists_without_ids() {
+        let mut tracker = WsLogicalResponseTracker::default();
+        tracker.observe_downstream_text(
+            r#"{"type":"response.create","request_id":"req-1","response":{"model":"gpt-5.4"}}"#,
+        );
+
+        let value = serde_json::from_str::<Value>(
+            r#"{"type":"error","error":{"code":"usage_limit","message":"quota exhausted"}}"#,
+        )
+        .unwrap();
+
         let tracked = tracker
             .find_retryable_request(&value)
-            .expect("latest pending request should be retryable");
+            .expect("single pending request should be retryable");
 
-        assert_eq!(tracked.seed.request_id.as_deref(), Some("req-2"));
-        assert_eq!(tracked.seed.model.as_deref(), Some("gpt-5.4-mini"));
+        assert_eq!(tracked.seed.request_id.as_deref(), Some("req-1"));
+        assert_eq!(tracked.seed.model.as_deref(), Some("gpt-5.4"));
+    }
+
+    #[test]
+    fn ws_request_policy_context_uses_previous_response_id_for_continuation_hints() {
+        let headers = HeaderMap::new();
+        let value = serde_json::from_str::<Value>(
+            r#"{"type":"response.create","response":{"model":"gpt-5.4"},"previous_response_id":"resp-prev-1"}"#,
+        )
+        .unwrap();
+
+        let context = super::parse_ws_request_policy_context(&headers, &value);
+
+        assert_eq!(context.sticky_key_hint.as_deref(), Some("resp-prev-1"));
+        assert_eq!(context.session_key_hint.as_deref(), Some("resp-prev-1"));
     }
 }

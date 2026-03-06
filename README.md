@@ -69,6 +69,12 @@ flowchart LR
 | `usage-worker` | 消费 Redis Stream 请求日志，按小时聚合写入 ClickHouse |
 | `frontend` | Admin + Tenant 双门户，统一通过 `/api/v1` 访问 control-plane |
 
+补充约定：
+
+- `x-request-id` 用于请求链路追踪与日志关联，不作为计费幂等键。
+- data-plane 会为每个可计费 logical request 生成内部 billing key；control-plane 只对该内部键做授权/捕获/释放幂等。
+- `previous_response_id`、`session_id`、`x-codex-turn-state` 只参与 continuation / sticky routing，不直接承担账务幂等语义。
+
 ---
 
 ## 5 分钟快速开始

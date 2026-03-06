@@ -66,6 +66,12 @@ impl TenantAuthService {
             .fetch_authorization_for_update(&mut tx, req.tenant_id, request_id)
             .await?
         {
+            if !authorization_reusable_for_authorize(&existing.status) {
+                return Err(anyhow!(
+                    "billing authorization is in invalid status for authorize reuse: {}",
+                    existing.status
+                ));
+            }
             let balance_microcredits = self
                 .current_credit_balance_for_update(&mut tx, req.tenant_id)
                 .await?;
@@ -121,6 +127,7 @@ impl TenantAuthService {
                         "phase": "authorize",
                         "authorization_id": authorization_id,
                         "request_id": request_id,
+                        "trace_request_id": req.trace_request_id,
                         "session_key": session_key,
                         "request_kind": request_kind.as_str(),
                         "pricing_band": pricing_decision.band.as_str(),
@@ -220,7 +227,7 @@ impl TenantAuthService {
             .await?
             .ok_or_else(|| anyhow!("authorization not found"))?;
 
-        if authorization.status == "captured" || authorization.status == "released" {
+        if authorization_capture_is_idempotent(&authorization.status) {
             let balance_microcredits = self
                 .current_credit_balance_for_update(&mut tx, req.tenant_id)
                 .await?;
@@ -883,6 +890,14 @@ impl TenantAuthService {
     }
 }
 
+fn authorization_reusable_for_authorize(status: &str) -> bool {
+    status == "authorized"
+}
+
+fn authorization_capture_is_idempotent(status: &str) -> bool {
+    status == "captured"
+}
+
 const PRICING_PER_MILLION_TOKENS_SCALE: i128 = 1_000_000;
 
 fn charge_tokens_by_per_million_price(tokens: i64, price_per_million_microcredits: i64) -> i64 {
@@ -921,4 +936,23 @@ fn calculate_charged_microcredits(
     input_charge
         .saturating_add(cached_input_charge)
         .saturating_add(output_charge)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn billing_authorize_reuses_only_authorized_status() {
+        assert!(authorization_reusable_for_authorize("authorized"));
+        assert!(!authorization_reusable_for_authorize("captured"));
+        assert!(!authorization_reusable_for_authorize("released"));
+    }
+
+    #[test]
+    fn billing_capture_is_idempotent_only_for_captured_status() {
+        assert!(authorization_capture_is_idempotent("captured"));
+        assert!(!authorization_capture_is_idempotent("authorized"));
+        assert!(!authorization_capture_is_idempotent("released"));
+    }
 }

@@ -719,6 +719,8 @@ pub struct BillingAuthorizeRequest {
     #[serde(default)]
     pub api_key_id: Option<Uuid>,
     pub request_id: String,
+    #[serde(default)]
+    pub trace_request_id: Option<String>,
     pub model: String,
     #[serde(default)]
     pub session_key: Option<String>,

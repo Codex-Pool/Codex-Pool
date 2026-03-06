@@ -46,10 +46,12 @@ async fn build_pending_billing_session(
         )));
     };
     let estimated_input_tokens = context.estimated_input_tokens.unwrap_or(0);
-    let request_id = resolve_request_id(headers, context);
+    let trace_request_id = resolve_trace_request_id(headers, context);
+    let request_id = generate_billing_request_id();
     let session_key = context
         .session_key_hint
         .clone()
+        .or(trace_request_id.clone())
         .unwrap_or_else(|| request_id.clone());
     let reserved_microcredits =
         estimate_authorize_reserve_microcredits(state, api_key_id, model, estimated_input_tokens)
@@ -59,6 +61,7 @@ async fn build_pending_billing_session(
         tenant_id,
         api_key_id,
         request_id,
+        trace_request_id,
         model: model.to_string(),
         session_key,
         request_kind: billing_request_kind(path).to_string(),
@@ -287,19 +290,19 @@ fn record_preauth_error_ratio_sample(
     }
 }
 
-fn resolve_request_id(headers: &HeaderMap, context: &ParsedRequestPolicyContext) -> String {
-    context
-        .request_id
-        .clone()
-        .or_else(|| {
-            headers
-                .get("x-request-id")
-                .and_then(|value| value.to_str().ok())
-                .map(str::trim)
-                .filter(|value| !value.is_empty())
-                .map(ToString::to_string)
-        })
-        .unwrap_or_else(|| Uuid::new_v4().to_string())
+fn resolve_trace_request_id(headers: &HeaderMap, context: &ParsedRequestPolicyContext) -> Option<String> {
+    context.request_id.clone().or_else(|| {
+        headers
+            .get("x-request-id")
+            .and_then(|value| value.to_str().ok())
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(ToString::to_string)
+    })
+}
+
+fn generate_billing_request_id() -> String {
+    Uuid::new_v4().to_string()
 }
 
 async fn authorize_billing_session(
@@ -320,6 +323,7 @@ async fn authorize_billing_session(
             tenant_id: pending.tenant_id,
             api_key_id: Some(pending.api_key_id),
             request_id: pending.request_id.clone(),
+            trace_request_id: pending.trace_request_id.clone(),
             model: pending.model.clone(),
             session_key: Some(pending.session_key.clone()),
             request_kind: Some(pending.request_kind.clone()),
@@ -344,6 +348,7 @@ async fn authorize_billing_session(
                 request_method: method.to_string(),
                 request_started: started,
                 request_id: pending.request_id.clone(),
+                trace_request_id: pending.trace_request_id.clone(),
                 model: pending.model.clone(),
                 session_key: pending.session_key.clone(),
                 request_kind: pending.request_kind.clone(),
@@ -1113,7 +1118,10 @@ async fn emit_stream_request_log_event(
             latency_ms: billing_session.request_started.elapsed().as_millis() as u64,
             is_stream: true,
             error_code: None,
-            request_id: Some(billing_session.request_id.clone()),
+            request_id: billing_session
+                .trace_request_id
+                .clone()
+                .or_else(|| Some(billing_session.request_id.clone())),
             model: Some(billing_session.model.clone()),
             input_tokens,
             cached_input_tokens,

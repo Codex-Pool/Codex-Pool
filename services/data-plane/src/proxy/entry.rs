@@ -116,6 +116,7 @@ struct PendingBillingSession {
     tenant_id: Uuid,
     api_key_id: Uuid,
     request_id: String,
+    trace_request_id: Option<String>,
     model: String,
     session_key: String,
     request_kind: String,
@@ -133,6 +134,7 @@ struct BillingSession {
     request_method: String,
     request_started: Instant,
     request_id: String,
+    trace_request_id: Option<String>,
     model: String,
     session_key: String,
     request_kind: String,
@@ -194,6 +196,7 @@ struct InternalBillingAuthorizePayload {
     tenant_id: Uuid,
     api_key_id: Option<Uuid>,
     request_id: String,
+    trace_request_id: Option<String>,
     model: String,
     session_key: Option<String>,
     request_kind: Option<String>,
@@ -670,6 +673,14 @@ pub async fn proxy_handler(
                             "none",
                             "cross_account_failover",
                         );
+                        release_billing_hold_for_cross_account_failover(
+                            state.clone(),
+                            &mut billing_session,
+                            StatusCode::BAD_GATEWAY,
+                            None,
+                            "transport_error",
+                        )
+                        .await;
                         record_cross_account_failover_attempt(
                             &state,
                             &mut tried_account_ids,
@@ -883,14 +894,14 @@ pub async fn proxy_handler(
                                 recovery_outcome_label(recovery_outcome),
                                 "cross_account_failover",
                             );
-                            record_cross_account_failover_attempt(
-                                &state,
-                                &mut tried_account_ids,
-                                account.id,
-                                &mut did_cross_account_failover,
-                            );
-                            last_failure = Some((response, status, account.id));
-                            break;
+                            release_billing_hold_for_cross_account_failover(
+                                state.clone(),
+                                &mut billing_session,
+                                status,
+                                error_context.as_ref(),
+                                reason_class,
+                            )
+                            .await;
                         }
 
                         log_failover_decision(
@@ -949,6 +960,7 @@ pub async fn proxy_handler(
 
             let mut non_stream_billing_settle: Option<BillingSettleResult> = None;
             let mut non_stream_billing_deferred: Option<(Uuid, UsageTokens)> = None;
+            let mut non_stream_billing_failed: Option<(Uuid, UsageTokens)> = None;
             let mut non_stream_observed_usage: Option<UsageTokens> = None;
             let mut non_stream_estimated_usage: Option<UsageTokens> = None;
 
@@ -1004,25 +1016,16 @@ pub async fn proxy_handler(
                             }
                             response
                         }
-                        Err(error_response) => {
-                            release_billing_hold_best_effort(
-                                state.clone(),
-                                billing_session.take(),
-                                Some(BillingReleaseFailureContext {
-                                    release_reason: Some("billing_settle_failed".to_string()),
-                                    upstream_status_code: Some(error_response.status().as_u16()),
-                                    failover_action: Some("return_failure".to_string()),
-                                    failover_reason_class: Some(
-                                        "billing_settle_failed".to_string(),
-                                    ),
-                                    cross_account_failover_attempted: Some(
-                                        did_cross_account_failover,
-                                    ),
-                                    ..Default::default()
-                                }),
-                            )
-                            .await;
-                            *error_response
+                        Err(_error_response) => {
+                            let failed_authorization_id =
+                                billing_session.take().map(|session| session.authorization_id);
+                            let failed_usage = non_stream_observed_usage.or(non_stream_estimated_usage);
+                            if let (Some(authorization_id), Some(usage)) =
+                                (failed_authorization_id, failed_usage)
+                            {
+                                non_stream_billing_failed = Some((authorization_id, usage));
+                            }
+                            response
                         }
                     };
                 let response = if let Some(cached) = models_cached.as_ref() {
@@ -1072,6 +1075,16 @@ pub async fn proxy_handler(
                     } else if let Some((authorization_id, usage)) = non_stream_billing_deferred {
                         (
                             Some("deferred_estimated"),
+                            Some(authorization_id),
+                            None,
+                            Some(usage.input_tokens),
+                            Some(usage.cached_input_tokens),
+                            Some(usage.output_tokens),
+                            Some(usage.reasoning_tokens),
+                        )
+                    } else if let Some((authorization_id, usage)) = non_stream_billing_failed {
+                        (
+                            Some("released_failed"),
                             Some(authorization_id),
                             None,
                             Some(usage.input_tokens),
@@ -1229,6 +1242,14 @@ pub async fn proxy_handler(
                     recovery_outcome_label(recovery_outcome),
                     "cross_account_failover",
                 );
+                release_billing_hold_for_cross_account_failover(
+                    state.clone(),
+                    &mut billing_session,
+                    status,
+                    upstream_error_context.as_ref(),
+                    "retryable_status",
+                )
+                .await;
                 record_cross_account_failover_attempt(
                     &state,
                     &mut tried_account_ids,
@@ -1820,6 +1841,30 @@ pub async fn proxy_websocket_handler(
             });
         }
     }
+}
+
+async fn release_billing_hold_for_cross_account_failover(
+    state: Arc<AppState>,
+    billing_session: &mut Option<BillingSession>,
+    status: StatusCode,
+    error_context: Option<&UpstreamErrorContext>,
+    reason_class: &str,
+) {
+    release_billing_hold_best_effort(
+        state,
+        billing_session.take(),
+        Some(BillingReleaseFailureContext {
+            release_reason: Some("cross_account_failover".to_string()),
+            upstream_status_code: Some(status.as_u16()),
+            upstream_error_code: error_context
+                .and_then(|context| context.error_code.clone()),
+            failover_action: Some("cross_account_failover".to_string()),
+            failover_reason_class: Some(reason_class.to_string()),
+            cross_account_failover_attempted: Some(true),
+            ..Default::default()
+        }),
+    )
+    .await;
 }
 
 async fn wait_for_route_update_or_deadline(state: &AppState, deadline: Instant) {
