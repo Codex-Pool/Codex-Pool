@@ -488,8 +488,7 @@ impl TenantAuthService {
                 threshold_input_tokens,
                 input_multiplier_ppm,
                 cached_input_multiplier_ppm,
-                output_multiplier_ppm,
-                priority
+                output_multiplier_ppm
             FROM billing_pricing_rules
             WHERE enabled = true
             ORDER BY priority DESC, threshold_input_tokens DESC NULLS LAST, created_at ASC
@@ -511,7 +510,6 @@ impl TenantAuthService {
                     input_multiplier_ppm: row.try_get("input_multiplier_ppm")?,
                     cached_input_multiplier_ppm: row.try_get("cached_input_multiplier_ppm")?,
                     output_multiplier_ppm: row.try_get("output_multiplier_ppm")?,
-                    priority: row.try_get("priority")?,
                 })
             })
             .collect::<Result<Vec<_>>>()?;
@@ -535,14 +533,7 @@ impl TenantAuthService {
 
         let row = sqlx::query(
             r#"
-            SELECT
-                tenant_id,
-                session_key,
-                model,
-                pricing_band,
-                entered_band_at,
-                last_seen_at,
-                expires_at
+            SELECT pricing_band
             FROM billing_sessions
             WHERE tenant_id = $1 AND session_key = $2 AND expires_at > $3
             FOR UPDATE
@@ -560,13 +551,7 @@ impl TenantAuthService {
         };
 
         Ok(Some(BillingSessionRecord {
-            tenant_id: row.try_get("tenant_id")?,
-            session_key: row.try_get("session_key")?,
-            model: row.try_get("model")?,
             pricing_band: row.try_get("pricing_band")?,
-            entered_band_at: row.try_get("entered_band_at")?,
-            last_seen_at: row.try_get("last_seen_at")?,
-            expires_at: row.try_get("expires_at")?,
         }))
     }
 
@@ -1186,82 +1171,6 @@ fn current_ts_sec() -> Result<u64> {
         .as_secs())
 }
 
-#[cfg(test)]
-mod billing_pricing_rule_tests {
-    use super::*;
-
-    #[test]
-    fn stays_on_base_band_below_long_context_threshold() {
-        let base = BillingPricingResolved {
-            input_price_microcredits: 2_500_000,
-            cached_input_price_microcredits: 250_000,
-            output_price_microcredits: 15_000_000,
-            source: "exact".to_string(),
-        };
-        let rules = vec![BillingPricingRuleRecord {
-            id: Uuid::new_v4(),
-            model_pattern: "gpt-5.4".to_string(),
-            request_kind: BillingRequestKind::Any.as_str().to_string(),
-            scope: BillingPricingRuleScope::Session.as_str().to_string(),
-            threshold_input_tokens: Some(272_000),
-            input_multiplier_ppm: 2_000_000,
-            cached_input_multiplier_ppm: 1_000_000,
-            output_multiplier_ppm: 1_500_000,
-            priority: 100,
-        }];
-
-        let resolved = resolve_effective_pricing_for_band(
-            &base,
-            &rules,
-            "gpt-5.4",
-            BillingRequestKind::Response,
-            None,
-            Some(100_000),
-            BillingResolutionPhase::Capture,
-        );
-
-        assert_eq!(resolved.band, BillingPricingBand::Base);
-        assert_eq!(resolved.pricing.input_price_microcredits, 2_500_000);
-        assert_eq!(resolved.pricing.output_price_microcredits, 15_000_000);
-    }
-
-    #[test]
-    fn locked_long_context_band_keeps_multipliers_for_later_requests() {
-        let base = BillingPricingResolved {
-            input_price_microcredits: 2_500_000,
-            cached_input_price_microcredits: 250_000,
-            output_price_microcredits: 15_000_000,
-            source: "exact".to_string(),
-        };
-        let rules = vec![BillingPricingRuleRecord {
-            id: Uuid::new_v4(),
-            model_pattern: "gpt-5.4".to_string(),
-            request_kind: BillingRequestKind::Any.as_str().to_string(),
-            scope: BillingPricingRuleScope::Session.as_str().to_string(),
-            threshold_input_tokens: Some(272_000),
-            input_multiplier_ppm: 2_000_000,
-            cached_input_multiplier_ppm: 1_000_000,
-            output_multiplier_ppm: 1_500_000,
-            priority: 100,
-        }];
-
-        let resolved = resolve_effective_pricing_for_band(
-            &base,
-            &rules,
-            "gpt-5.4",
-            BillingRequestKind::Compact,
-            Some(BillingPricingBand::LongContext),
-            Some(32_000),
-            BillingResolutionPhase::Capture,
-        );
-
-        assert_eq!(resolved.band, BillingPricingBand::LongContext);
-        assert_eq!(resolved.pricing.input_price_microcredits, 5_000_000);
-        assert_eq!(resolved.pricing.cached_input_price_microcredits, 250_000);
-        assert_eq!(resolved.pricing.output_price_microcredits, 22_500_000);
-    }
-}
-
 pub fn map_api_key_response_to_tenant_record(
     response: CreateApiKeyResponse,
     ip_allowlist: Vec<String>,
@@ -1297,5 +1206,80 @@ pub fn map_api_key_to_tenant_record(
         created_at: api_key.created_at,
         ip_allowlist,
         model_allowlist,
+    }
+}
+
+
+#[cfg(test)]
+mod billing_pricing_rule_tests {
+    use super::*;
+
+    #[test]
+    fn stays_on_base_band_below_long_context_threshold() {
+        let base = BillingPricingResolved {
+            input_price_microcredits: 2_500_000,
+            cached_input_price_microcredits: 250_000,
+            output_price_microcredits: 15_000_000,
+            source: "exact".to_string(),
+        };
+        let rules = vec![BillingPricingRuleRecord {
+            id: Uuid::new_v4(),
+            model_pattern: "gpt-5.4".to_string(),
+            request_kind: BillingRequestKind::Any.as_str().to_string(),
+            scope: BillingPricingRuleScope::Session.as_str().to_string(),
+            threshold_input_tokens: Some(272_000),
+            input_multiplier_ppm: 2_000_000,
+            cached_input_multiplier_ppm: 1_000_000,
+            output_multiplier_ppm: 1_500_000,
+        }];
+
+        let resolved = resolve_effective_pricing_for_band(
+            &base,
+            &rules,
+            "gpt-5.4",
+            BillingRequestKind::Response,
+            None,
+            Some(100_000),
+            BillingResolutionPhase::Capture,
+        );
+
+        assert_eq!(resolved.band, BillingPricingBand::Base);
+        assert_eq!(resolved.pricing.input_price_microcredits, 2_500_000);
+        assert_eq!(resolved.pricing.output_price_microcredits, 15_000_000);
+    }
+
+    #[test]
+    fn locked_long_context_band_keeps_multipliers_for_later_requests() {
+        let base = BillingPricingResolved {
+            input_price_microcredits: 2_500_000,
+            cached_input_price_microcredits: 250_000,
+            output_price_microcredits: 15_000_000,
+            source: "exact".to_string(),
+        };
+        let rules = vec![BillingPricingRuleRecord {
+            id: Uuid::new_v4(),
+            model_pattern: "gpt-5.4".to_string(),
+            request_kind: BillingRequestKind::Any.as_str().to_string(),
+            scope: BillingPricingRuleScope::Session.as_str().to_string(),
+            threshold_input_tokens: Some(272_000),
+            input_multiplier_ppm: 2_000_000,
+            cached_input_multiplier_ppm: 1_000_000,
+            output_multiplier_ppm: 1_500_000,
+        }];
+
+        let resolved = resolve_effective_pricing_for_band(
+            &base,
+            &rules,
+            "gpt-5.4",
+            BillingRequestKind::Compact,
+            Some(BillingPricingBand::LongContext),
+            Some(32_000),
+            BillingResolutionPhase::Capture,
+        );
+
+        assert_eq!(resolved.band, BillingPricingBand::LongContext);
+        assert_eq!(resolved.pricing.input_price_microcredits, 5_000_000);
+        assert_eq!(resolved.pricing.cached_input_price_microcredits, 250_000);
+        assert_eq!(resolved.pricing.output_price_microcredits, 22_500_000);
     }
 }

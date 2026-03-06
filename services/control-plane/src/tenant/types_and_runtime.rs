@@ -119,6 +119,7 @@ enum BillingPricingRuleScope {
 }
 
 impl BillingPricingRuleScope {
+    #[cfg(test)]
     fn as_str(self) -> &'static str {
         match self {
             Self::Request => "request",
@@ -172,18 +173,11 @@ struct BillingPricingRuleRecord {
     input_multiplier_ppm: i64,
     cached_input_multiplier_ppm: i64,
     output_multiplier_ppm: i64,
-    priority: i32,
 }
 
 #[derive(Debug, Clone)]
 struct BillingSessionRecord {
-    tenant_id: Uuid,
-    session_key: String,
-    model: String,
     pricing_band: String,
-    entered_band_at: DateTime<Utc>,
-    last_seen_at: DateTime<Utc>,
-    expires_at: DateTime<Utc>,
 }
 
 #[derive(Debug, Clone)]
