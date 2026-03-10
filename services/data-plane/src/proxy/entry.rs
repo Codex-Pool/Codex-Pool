@@ -100,6 +100,7 @@ struct ParsedRequestPolicyContext {
     stream: bool,
     request_id: Option<String>,
     estimated_input_tokens: Option<i64>,
+    continuation_key_hint: Option<String>,
     sticky_key_hint: Option<String>,
     session_key_hint: Option<String>,
 }
@@ -123,6 +124,16 @@ struct PendingBillingSession {
     is_stream: bool,
     estimated_input_tokens: i64,
     reserved_microcredits: i64,
+}
+
+impl PendingBillingSession {
+    fn rotate_request_id_for_cross_account_failover(&mut self) {
+        let previous_request_id = self.request_id.clone();
+        self.request_id = generate_billing_request_id();
+        if self.trace_request_id.is_none() && self.session_key == previous_request_id {
+            self.session_key = self.request_id.clone();
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -172,7 +183,10 @@ struct StreamRequestLogContext {
 enum BillingSettleOutcome {
     NotNeeded,
     Settled(BillingSettleResult),
-    DeferredEstimated { authorization_id: Uuid, usage: UsageTokens },
+    DeferredEstimated {
+        authorization_id: Uuid,
+        usage: UsageTokens,
+    },
 }
 
 #[derive(Debug, Default)]
@@ -323,7 +337,8 @@ pub async fn proxy_handler(
         }
     }
 
-    let max_request_body_bytes = max_request_body_bytes_for_path(state.max_request_body_bytes, &path);
+    let max_request_body_bytes =
+        max_request_body_bytes_for_path(state.max_request_body_bytes, &path);
     let body_bytes = match axum::body::to_bytes(body, max_request_body_bytes).await {
         Ok(bytes) => bytes,
         Err(err) => {
@@ -348,7 +363,10 @@ pub async fn proxy_handler(
         }
     };
     let parsed_policy_context = parse_request_policy_context(&parts.headers, &body_bytes);
-    let sticky_key = sticky_session_key_from_headers(&parts.headers)
+    let sticky_key = parsed_policy_context
+        .continuation_key_hint
+        .clone()
+        .or_else(|| sticky_session_key_from_headers(&parts.headers))
         .or_else(|| parsed_policy_context.sticky_key_hint.clone());
     if let Err(response) =
         enforce_principal_request_policy(principal.as_ref(), &parts.headers, &parsed_policy_context)
@@ -358,7 +376,7 @@ pub async fn proxy_handler(
     if let Some(response) = enforce_invalid_request_guard(&state, principal.as_ref()) {
         return response;
     }
-    let pending_billing_session = match build_pending_billing_session(
+    let mut pending_billing_session = match build_pending_billing_session(
         &state,
         principal.as_ref(),
         &parts.headers,
@@ -450,9 +468,7 @@ pub async fn proxy_handler(
                             upstream_status_code: Some(status.as_u16()),
                             failover_action: Some("return_failure".to_string()),
                             failover_reason_class: Some("failover_exhausted".to_string()),
-                            cross_account_failover_attempted: Some(
-                                did_cross_account_failover,
-                            ),
+                            cross_account_failover_attempted: Some(did_cross_account_failover),
                             ..Default::default()
                         }),
                     )
@@ -546,9 +562,7 @@ pub async fn proxy_handler(
                             upstream_status_code: Some(StatusCode::BAD_GATEWAY.as_u16()),
                             failover_action: Some("return_failure".to_string()),
                             failover_reason_class: Some("invalid_upstream_url".to_string()),
-                            cross_account_failover_attempted: Some(
-                                did_cross_account_failover,
-                            ),
+                            cross_account_failover_attempted: Some(did_cross_account_failover),
                             ..Default::default()
                         }),
                     )
@@ -556,6 +570,20 @@ pub async fn proxy_handler(
                     return response;
                 }
             };
+        let upstream_request_adaptation = maybe_adapt_openai_responses_request_for_codex_profile(
+            &account.mode,
+            &account.base_url,
+            &path,
+            &parts.headers,
+            &body_bytes,
+        );
+        let upstream_request_body = upstream_request_adaptation
+            .as_ref()
+            .map(|item| item.body.clone())
+            .unwrap_or_else(|| body_bytes.clone());
+        let bridge_stream_response = upstream_request_adaptation
+            .as_ref()
+            .is_some_and(|item| item.bridge_stream_response);
 
         let mut same_account_retry_attempt: u32 = 0;
         loop {
@@ -583,7 +611,13 @@ pub async fn proxy_handler(
             let mut upstream_request = state
                 .http_client
                 .request(method.clone(), upstream_url.clone());
-            upstream_request = apply_passthrough_headers(upstream_request, &parts.headers);
+            upstream_request = apply_passthrough_headers(
+                upstream_request,
+                &parts.headers,
+                upstream_request_adaptation
+                    .as_ref()
+                    .is_some_and(|item| item.strip_content_encoding),
+            );
             if parts.headers.get(SESSION_ID_HEADER).is_none() {
                 if let Some(raw_value) = parts.headers.get(X_SESSION_ID_HEADER) {
                     if let Ok(value) = raw_value.to_str() {
@@ -606,7 +640,7 @@ pub async fn proxy_handler(
             if let Some(account_id) = account.chatgpt_account_id.as_deref() {
                 upstream_request = upstream_request.header(CHATGPT_ACCOUNT_ID, account_id);
             }
-            upstream_request = upstream_request.body(body_bytes.clone());
+            upstream_request = upstream_request.body(upstream_request_body.clone());
 
             let upstream_response = match upstream_request.send().await {
                 Ok(resp) => resp,
@@ -675,6 +709,7 @@ pub async fn proxy_handler(
                         );
                         release_billing_hold_for_cross_account_failover(
                             state.clone(),
+                            &mut pending_billing_session,
                             &mut billing_session,
                             StatusCode::BAD_GATEWAY,
                             None,
@@ -723,9 +758,7 @@ pub async fn proxy_handler(
                             upstream_status_code: Some(StatusCode::BAD_GATEWAY.as_u16()),
                             failover_action: Some("return_failure".to_string()),
                             failover_reason_class: Some("transport_error".to_string()),
-                            cross_account_failover_attempted: Some(
-                                did_cross_account_failover,
-                            ),
+                            cross_account_failover_attempted: Some(did_cross_account_failover),
                             ..Default::default()
                         }),
                     )
@@ -746,7 +779,355 @@ pub async fn proxy_handler(
             let is_stream = content_type_indicates_stream
                 || (parsed_policy_context.stream && status.is_success());
             if let Some(session) = billing_session.as_mut() {
-                session.is_stream = is_stream;
+                session.is_stream = if bridge_stream_response { false } else { is_stream };
+            }
+
+            if bridge_stream_response && status.is_success() {
+                let (response, upstream_error_context, body) =
+                    buffered_codex_compat_response(status, &response_headers, upstream_response)
+                        .await;
+                let is_503_overloaded = status == StatusCode::SERVICE_UNAVAILABLE
+                    && upstream_error_context
+                        .as_ref()
+                        .is_some_and(|context| context.class == UpstreamErrorClass::Overloaded);
+                let (
+                    response,
+                    upstream_error_context,
+                    non_stream_observed_usage,
+                    non_stream_billing_settle,
+                    non_stream_billing_deferred,
+                    non_stream_billing_failed,
+                ) = (
+                    response,
+                    upstream_error_context,
+                    extract_usage_tokens(&body),
+                    None,
+                    None,
+                    None,
+                );
+                let mut non_stream_billing_settle = non_stream_billing_settle;
+                let mut non_stream_billing_deferred = non_stream_billing_deferred;
+                let mut non_stream_billing_failed = non_stream_billing_failed;
+                let non_stream_estimated_usage = if non_stream_observed_usage.is_none() {
+                    let estimated_input_tokens =
+                        parsed_policy_context.estimated_input_tokens.unwrap_or(0).max(0);
+                    let estimated_output_tokens =
+                        estimate_response_output_tokens(&body).unwrap_or(0).max(0);
+                    if estimated_input_tokens > 0 || estimated_output_tokens > 0 {
+                        Some(UsageTokens {
+                            input_tokens: estimated_input_tokens,
+                            cached_input_tokens: 0,
+                            output_tokens: estimated_output_tokens,
+                            reasoning_tokens: 0,
+                        })
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
+                let response = match settle_billing_if_needed(
+                    state.clone(),
+                    billing_session.as_ref(),
+                    status,
+                    &body,
+                )
+                .await
+                {
+                    Ok(outcome) => {
+                        match outcome {
+                            BillingSettleOutcome::NotNeeded => {}
+                            BillingSettleOutcome::Settled(settle_result) => {
+                                non_stream_billing_settle = Some(settle_result);
+                                billing_session = None;
+                            }
+                            BillingSettleOutcome::DeferredEstimated {
+                                authorization_id,
+                                usage,
+                            } => {
+                                non_stream_billing_deferred = Some((authorization_id, usage));
+                                billing_session = None;
+                            }
+                        }
+                        response
+                    }
+                    Err(_error_response) => {
+                        let failed_authorization_id = billing_session
+                            .take()
+                            .map(|session| session.authorization_id);
+                        let failed_usage = non_stream_observed_usage.or(non_stream_estimated_usage);
+                        if let (Some(authorization_id), Some(usage)) =
+                            (failed_authorization_id, failed_usage)
+                        {
+                            non_stream_billing_failed = Some((authorization_id, usage));
+                        }
+                        response
+                    }
+                };
+
+                if status.is_success() {
+                    let (
+                        billing_phase,
+                        authorization_id,
+                        capture_status,
+                        input_tokens,
+                        cached_input_tokens,
+                        output_tokens,
+                        reasoning_tokens,
+                    ) = if let Some(settle_result) = non_stream_billing_settle.as_ref() {
+                        (
+                            Some("released"),
+                            Some(settle_result.authorization_id),
+                            Some(settle_result.capture_status.as_str()),
+                            Some(settle_result.input_tokens),
+                            Some(settle_result.cached_input_tokens),
+                            Some(settle_result.output_tokens),
+                            Some(settle_result.reasoning_tokens),
+                        )
+                    } else if let Some((authorization_id, usage)) = non_stream_billing_deferred {
+                        (
+                            Some("deferred_estimated"),
+                            Some(authorization_id),
+                            None,
+                            Some(usage.input_tokens),
+                            Some(usage.cached_input_tokens),
+                            Some(usage.output_tokens),
+                            Some(usage.reasoning_tokens),
+                        )
+                    } else if let Some((authorization_id, usage)) = non_stream_billing_failed {
+                        (
+                            Some("released_failed"),
+                            Some(authorization_id),
+                            None,
+                            Some(usage.input_tokens),
+                            Some(usage.cached_input_tokens),
+                            Some(usage.output_tokens),
+                            Some(usage.reasoning_tokens),
+                        )
+                    } else if let Some(usage) = non_stream_observed_usage {
+                        (
+                            None,
+                            None,
+                            None,
+                            Some(usage.input_tokens),
+                            Some(usage.cached_input_tokens),
+                            Some(usage.output_tokens),
+                            Some(usage.reasoning_tokens),
+                        )
+                    } else if let Some(usage) = non_stream_estimated_usage {
+                        (
+                            None,
+                            None,
+                            None,
+                            Some(usage.input_tokens),
+                            Some(usage.cached_input_tokens),
+                            Some(usage.output_tokens),
+                            Some(usage.reasoning_tokens),
+                        )
+                    } else {
+                        (None, None, None, None, None, None, None)
+                    };
+                    emit_request_log_event_with_billing(
+                        &state,
+                        account.id,
+                        principal.as_ref(),
+                        &path,
+                        method.as_str(),
+                        status,
+                        started,
+                        false,
+                        parsed_policy_context.request_id.as_deref(),
+                        parsed_policy_context.model.as_deref(),
+                        billing_phase,
+                        authorization_id,
+                        capture_status,
+                        input_tokens,
+                        cached_input_tokens,
+                        output_tokens,
+                        reasoning_tokens,
+                        Some(started.elapsed().as_millis() as u64),
+                    )
+                    .await;
+                    if let Some(seen_ok_reporter) = state.seen_ok_reporter.clone() {
+                        let account_id = account.id;
+                        let model_id = parsed_policy_context.model.clone();
+                        tokio::spawn(async move {
+                            seen_ok_reporter.report_seen_ok(account_id).await;
+                            if let Some(model_id) = model_id.as_deref() {
+                                seen_ok_reporter
+                                    .report_model_seen_ok(account_id, model_id)
+                                    .await;
+                            }
+                        });
+                    }
+                    record_failover_success_if_needed(&state, did_cross_account_failover);
+                    return response;
+                }
+
+                let retryable =
+                    is_failover_retryable_error(status, upstream_error_context.as_ref());
+                let same_account_retryable = should_retry_same_account_on_status(
+                    status,
+                    is_503_overloaded,
+                    same_account_retry_attempt,
+                    &state,
+                    upstream_error_context.as_ref(),
+                );
+                if state.enable_request_failover
+                    && retryable
+                    && same_account_retryable
+                    && Instant::now() < failover_deadline
+                {
+                    log_failover_decision(
+                        Some(account.id),
+                        Some(status),
+                        upstream_error_context
+                            .as_ref()
+                            .and_then(|context| context.error_code.as_deref()),
+                        upstream_error_class_label(upstream_error_context.as_ref()),
+                        "retryable_status",
+                        recovery_action_label(upstream_error_context.as_ref()),
+                        "not_applied",
+                        "retry_same_account",
+                    );
+                    same_account_retry_attempt += 1;
+                    record_same_account_retry(&state);
+                    tokio::time::sleep(state.retry_poll_interval).await;
+                    continue;
+                }
+
+                let should_failover_across_accounts = should_cross_account_failover(
+                    &state,
+                    sticky_key.as_deref(),
+                    failover_deadline,
+                    &tried_account_ids,
+                    account.id,
+                    retryable,
+                );
+                let recovery_outcome = if should_failover_across_accounts {
+                    if upstream_error_context.is_some() {
+                        let state_for_recovery = state.clone();
+                        let recovery_context = upstream_error_context.clone();
+                        tokio::spawn(async move {
+                            let _ = apply_recovery_action(
+                                state_for_recovery.as_ref(),
+                                account.id,
+                                recovery_context.as_ref(),
+                            )
+                            .await;
+                        });
+                    }
+                    ProxyRecoveryOutcome::NotApplied
+                } else {
+                    apply_recovery_action(&state, account.id, upstream_error_context.as_ref()).await
+                };
+                if let Some(ejection_ttl) = ejection_ttl_for_response(
+                    status,
+                    state.account_ejection_ttl,
+                    is_503_overloaded,
+                    upstream_error_context.as_ref(),
+                    recovery_outcome,
+                ) {
+                    state.router.mark_unhealthy(account.id, ejection_ttl);
+                    let _ = state
+                        .routing_cache
+                        .set_unhealthy(account.id, ejection_ttl)
+                        .await;
+                    if let Some(sticky_key) = sticky_key.as_deref() {
+                        let _ = state.router.unbind_sticky(sticky_key);
+                        let _ = state
+                            .routing_cache
+                            .delete_sticky_account_id(sticky_key)
+                            .await;
+                    }
+                }
+                record_invalid_request_guard_failure(
+                    &state,
+                    principal.as_ref(),
+                    status,
+                    upstream_error_context.as_ref(),
+                );
+
+                if should_failover_across_accounts {
+                    log_failover_decision(
+                        Some(account.id),
+                        Some(status),
+                        upstream_error_context
+                            .as_ref()
+                            .and_then(|context| context.error_code.as_deref()),
+                        upstream_error_class_label(upstream_error_context.as_ref()),
+                        "retryable_status",
+                        recovery_action_label(upstream_error_context.as_ref()),
+                        recovery_outcome_label(recovery_outcome),
+                        "cross_account_failover",
+                    );
+                    release_billing_hold_for_cross_account_failover(
+                        state.clone(),
+                        &mut pending_billing_session,
+                        &mut billing_session,
+                        status,
+                        upstream_error_context.as_ref(),
+                        "retryable_status",
+                    )
+                    .await;
+                    record_cross_account_failover_attempt(
+                        &state,
+                        &mut tried_account_ids,
+                        account.id,
+                        &mut did_cross_account_failover,
+                    );
+                    last_failure = Some((response, status, account.id));
+                    break;
+                }
+
+                log_failover_decision(
+                    Some(account.id),
+                    Some(status),
+                    upstream_error_context
+                        .as_ref()
+                        .and_then(|context| context.error_code.as_deref()),
+                    upstream_error_class_label(upstream_error_context.as_ref()),
+                    "non_retryable_or_budget_exhausted",
+                    recovery_action_label(upstream_error_context.as_ref()),
+                    recovery_outcome_label(recovery_outcome),
+                    "return_failure",
+                );
+                emit_request_log_event(
+                    &state,
+                    account.id,
+                    principal.as_ref(),
+                    &path,
+                    method.as_str(),
+                    status,
+                    started,
+                    false,
+                    parsed_policy_context.request_id.as_deref(),
+                    parsed_policy_context.model.as_deref(),
+                )
+                .await;
+                record_failover_exhausted_if_needed(&state, did_cross_account_failover);
+                release_billing_hold_best_effort(
+                    state.clone(),
+                    billing_session.take(),
+                    Some(BillingReleaseFailureContext {
+                        release_reason: Some("upstream_request_failed".to_string()),
+                        upstream_status_code: Some(status.as_u16()),
+                        upstream_error_code: upstream_error_context
+                            .as_ref()
+                            .and_then(|context| context.error_code.clone()),
+                        failover_action: Some("return_failure".to_string()),
+                        failover_reason_class: Some(
+                            "non_retryable_or_budget_exhausted".to_string(),
+                        ),
+                        recovery_action: Some(
+                            recovery_action_label(upstream_error_context.as_ref()).to_string(),
+                        ),
+                        recovery_outcome: Some(recovery_outcome_label(recovery_outcome).to_string()),
+                        cross_account_failover_attempted: Some(did_cross_account_failover),
+                    }),
+                )
+                .await;
+                return response;
             }
 
             if is_stream && status.is_success() {
@@ -846,12 +1227,8 @@ pub async fn proxy_handler(
                             continue;
                         }
 
-                        let recovery_outcome = apply_recovery_action(
-                            &state,
-                            account.id,
-                            error_context.as_ref(),
-                        )
-                        .await;
+                        let recovery_outcome =
+                            apply_recovery_action(&state, account.id, error_context.as_ref()).await;
                         let ejection_ttl = ejection_ttl_for_response(
                             status,
                             state.account_ejection_ttl,
@@ -896,12 +1273,21 @@ pub async fn proxy_handler(
                             );
                             release_billing_hold_for_cross_account_failover(
                                 state.clone(),
+                                &mut pending_billing_session,
                                 &mut billing_session,
                                 status,
                                 error_context.as_ref(),
                                 reason_class,
                             )
                             .await;
+                            record_cross_account_failover_attempt(
+                                &state,
+                                &mut tried_account_ids,
+                                account.id,
+                                &mut did_cross_account_failover,
+                            );
+                            last_failure = Some((response, status, account.id));
+                            break;
                         }
 
                         log_failover_decision(
@@ -947,9 +1333,7 @@ pub async fn proxy_handler(
                                 recovery_outcome: Some(
                                     recovery_outcome_label(recovery_outcome).to_string(),
                                 ),
-                                cross_account_failover_attempted: Some(
-                                    did_cross_account_failover,
-                                ),
+                                cross_account_failover_attempted: Some(did_cross_account_failover),
                             }),
                         )
                         .await;
@@ -964,21 +1348,24 @@ pub async fn proxy_handler(
             let mut non_stream_observed_usage: Option<UsageTokens> = None;
             let mut non_stream_estimated_usage: Option<UsageTokens> = None;
 
-            let (response, upstream_error_context, is_503_overloaded) =
-                if status == StatusCode::SERVICE_UNAVAILABLE {
+            let (response, upstream_error_context, is_503_overloaded) = if status
+                == StatusCode::SERVICE_UNAVAILABLE
+            {
                 let (response, error_context) =
                     map_service_unavailable(&response_headers, upstream_response).await;
-                let is_overloaded =
-                    matches!(error_context.class, UpstreamErrorClass::Overloaded);
+                let is_overloaded = matches!(error_context.class, UpstreamErrorClass::Overloaded);
                 (response, Some(error_context), is_overloaded)
             } else {
                 let (mut response, error_context, body) =
                     buffered_response(status, &response_headers, upstream_response).await;
                 non_stream_observed_usage = extract_usage_tokens(&body);
                 if non_stream_observed_usage.is_none() {
-                    let estimated_input_tokens =
-                        parsed_policy_context.estimated_input_tokens.unwrap_or(0).max(0);
-                    let estimated_output_tokens = estimate_response_output_tokens(&body).unwrap_or(0).max(0);
+                    let estimated_input_tokens = parsed_policy_context
+                        .estimated_input_tokens
+                        .unwrap_or(0)
+                        .max(0);
+                    let estimated_output_tokens =
+                        estimate_response_output_tokens(&body).unwrap_or(0).max(0);
                     if estimated_input_tokens > 0 || estimated_output_tokens > 0 {
                         non_stream_estimated_usage = Some(UsageTokens {
                             input_tokens: estimated_input_tokens,
@@ -994,40 +1381,44 @@ pub async fn proxy_handler(
                     apply_models_cache_headers(&mut response, &cached, Instant::now());
                     models_cached = Some(cached);
                 }
-                let response =
-                    match settle_billing_if_needed(state.clone(), billing_session.as_ref(), status, &body)
-                        .await
-                    {
-                        Ok(outcome) => {
-                            match outcome {
-                                BillingSettleOutcome::NotNeeded => {}
-                                BillingSettleOutcome::Settled(settle_result) => {
-                                    non_stream_billing_settle = Some(settle_result);
-                                    billing_session = None;
-                                }
-                                BillingSettleOutcome::DeferredEstimated {
-                                    authorization_id,
-                                    usage,
-                                } => {
-                                    non_stream_billing_deferred =
-                                        Some((authorization_id, usage));
-                                    billing_session = None;
-                                }
+                let response = match settle_billing_if_needed(
+                    state.clone(),
+                    billing_session.as_ref(),
+                    status,
+                    &body,
+                )
+                .await
+                {
+                    Ok(outcome) => {
+                        match outcome {
+                            BillingSettleOutcome::NotNeeded => {}
+                            BillingSettleOutcome::Settled(settle_result) => {
+                                non_stream_billing_settle = Some(settle_result);
+                                billing_session = None;
                             }
-                            response
-                        }
-                        Err(_error_response) => {
-                            let failed_authorization_id =
-                                billing_session.take().map(|session| session.authorization_id);
-                            let failed_usage = non_stream_observed_usage.or(non_stream_estimated_usage);
-                            if let (Some(authorization_id), Some(usage)) =
-                                (failed_authorization_id, failed_usage)
-                            {
-                                non_stream_billing_failed = Some((authorization_id, usage));
+                            BillingSettleOutcome::DeferredEstimated {
+                                authorization_id,
+                                usage,
+                            } => {
+                                non_stream_billing_deferred = Some((authorization_id, usage));
+                                billing_session = None;
                             }
-                            response
                         }
-                    };
+                        response
+                    }
+                    Err(_error_response) => {
+                        let failed_authorization_id = billing_session
+                            .take()
+                            .map(|session| session.authorization_id);
+                        let failed_usage = non_stream_observed_usage.or(non_stream_estimated_usage);
+                        if let (Some(authorization_id), Some(usage)) =
+                            (failed_authorization_id, failed_usage)
+                        {
+                            non_stream_billing_failed = Some((authorization_id, usage));
+                        }
+                        response
+                    }
+                };
                 let response = if let Some(cached) = models_cached.as_ref() {
                     if request_if_none_match_matches(&parts.headers, cached.etag.as_ref()) {
                         build_models_not_modified_response(cached, Instant::now())
@@ -1049,72 +1440,71 @@ pub async fn proxy_handler(
                     cached_input_tokens,
                     output_tokens,
                     reasoning_tokens,
-                ) =
-                    if is_stream {
-                        (
-                            billing_session.as_ref().map(|_| "streaming_open"),
-                            billing_session
-                                .as_ref()
-                                .map(|session| session.authorization_id),
-                            None,
-                            None,
-                            None,
-                            None,
-                            None,
-                        )
-                    } else if let Some(settle_result) = non_stream_billing_settle.as_ref() {
-                        (
-                            Some("released"),
-                            Some(settle_result.authorization_id),
-                            Some(settle_result.capture_status.as_str()),
-                            Some(settle_result.input_tokens),
-                            Some(settle_result.cached_input_tokens),
-                            Some(settle_result.output_tokens),
-                            Some(settle_result.reasoning_tokens),
-                        )
-                    } else if let Some((authorization_id, usage)) = non_stream_billing_deferred {
-                        (
-                            Some("deferred_estimated"),
-                            Some(authorization_id),
-                            None,
-                            Some(usage.input_tokens),
-                            Some(usage.cached_input_tokens),
-                            Some(usage.output_tokens),
-                            Some(usage.reasoning_tokens),
-                        )
-                    } else if let Some((authorization_id, usage)) = non_stream_billing_failed {
-                        (
-                            Some("released_failed"),
-                            Some(authorization_id),
-                            None,
-                            Some(usage.input_tokens),
-                            Some(usage.cached_input_tokens),
-                            Some(usage.output_tokens),
-                            Some(usage.reasoning_tokens),
-                        )
-                    } else if let Some(usage) = non_stream_observed_usage {
-                        (
-                            None,
-                            None,
-                            None,
-                            Some(usage.input_tokens),
-                            Some(usage.cached_input_tokens),
-                            Some(usage.output_tokens),
-                            Some(usage.reasoning_tokens),
-                        )
-                    } else if let Some(usage) = non_stream_estimated_usage {
-                        (
-                            None,
-                            None,
-                            None,
-                            Some(usage.input_tokens),
-                            Some(usage.cached_input_tokens),
-                            Some(usage.output_tokens),
-                            Some(usage.reasoning_tokens),
-                        )
-                    } else {
-                        (None, None, None, None, None, None, None)
-                    };
+                ) = if is_stream {
+                    (
+                        billing_session.as_ref().map(|_| "streaming_open"),
+                        billing_session
+                            .as_ref()
+                            .map(|session| session.authorization_id),
+                        None,
+                        None,
+                        None,
+                        None,
+                        None,
+                    )
+                } else if let Some(settle_result) = non_stream_billing_settle.as_ref() {
+                    (
+                        Some("released"),
+                        Some(settle_result.authorization_id),
+                        Some(settle_result.capture_status.as_str()),
+                        Some(settle_result.input_tokens),
+                        Some(settle_result.cached_input_tokens),
+                        Some(settle_result.output_tokens),
+                        Some(settle_result.reasoning_tokens),
+                    )
+                } else if let Some((authorization_id, usage)) = non_stream_billing_deferred {
+                    (
+                        Some("deferred_estimated"),
+                        Some(authorization_id),
+                        None,
+                        Some(usage.input_tokens),
+                        Some(usage.cached_input_tokens),
+                        Some(usage.output_tokens),
+                        Some(usage.reasoning_tokens),
+                    )
+                } else if let Some((authorization_id, usage)) = non_stream_billing_failed {
+                    (
+                        Some("released_failed"),
+                        Some(authorization_id),
+                        None,
+                        Some(usage.input_tokens),
+                        Some(usage.cached_input_tokens),
+                        Some(usage.output_tokens),
+                        Some(usage.reasoning_tokens),
+                    )
+                } else if let Some(usage) = non_stream_observed_usage {
+                    (
+                        None,
+                        None,
+                        None,
+                        Some(usage.input_tokens),
+                        Some(usage.cached_input_tokens),
+                        Some(usage.output_tokens),
+                        Some(usage.reasoning_tokens),
+                    )
+                } else if let Some(usage) = non_stream_estimated_usage {
+                    (
+                        None,
+                        None,
+                        None,
+                        Some(usage.input_tokens),
+                        Some(usage.cached_input_tokens),
+                        Some(usage.output_tokens),
+                        Some(usage.reasoning_tokens),
+                    )
+                } else {
+                    (None, None, None, None, None, None, None)
+                };
                 emit_request_log_event_with_billing(
                     &state,
                     account.id,
@@ -1138,8 +1528,14 @@ pub async fn proxy_handler(
                 .await;
                 if let Some(seen_ok_reporter) = state.seen_ok_reporter.clone() {
                     let account_id = account.id;
+                    let model_id = parsed_policy_context.model.clone();
                     tokio::spawn(async move {
                         seen_ok_reporter.report_seen_ok(account_id).await;
+                        if let Some(model_id) = model_id.as_deref() {
+                            seen_ok_reporter
+                                .report_model_seen_ok(account_id, model_id)
+                                .await;
+                        }
                     });
                 }
                 record_failover_success_if_needed(&state, did_cross_account_failover);
@@ -1244,6 +1640,7 @@ pub async fn proxy_handler(
                 );
                 release_billing_hold_for_cross_account_failover(
                     state.clone(),
+                    &mut pending_billing_session,
                     &mut billing_session,
                     status,
                     upstream_error_context.as_ref(),
@@ -1408,7 +1805,11 @@ fn build_models_not_modified_response(cached: &CachedModelsResponse, now: Instan
         .unwrap_or_else(|_| Response::new(Body::from("internal response error")))
 }
 
-fn apply_models_cache_headers(response: &mut Response, cached: &CachedModelsResponse, now: Instant) {
+fn apply_models_cache_headers(
+    response: &mut Response,
+    cached: &CachedModelsResponse,
+    now: Instant,
+) {
     let headers = response.headers_mut();
     apply_models_cache_headers_to_map(headers, cached, now);
 }
@@ -1418,10 +1819,7 @@ fn apply_models_cache_headers_to_map(
     cached: &CachedModelsResponse,
     now: Instant,
 ) {
-    let max_age = cached
-        .expires_at
-        .saturating_duration_since(now)
-        .as_secs();
+    let max_age = cached.expires_at.saturating_duration_since(now).as_secs();
     if let Ok(value) = HeaderValue::from_str(cached.etag.as_ref()) {
         headers.insert(ETAG, value);
     }
@@ -1615,7 +2013,8 @@ pub async fn proxy_websocket_handler(
                         tokio_tungstenite::tungstenite::Error::Http(upstream_response) => {
                             is_http_handshake_error = true;
                             status = upstream_response.status();
-                            let upstream_body = upstream_response.body().clone().unwrap_or_default();
+                            let upstream_body =
+                                upstream_response.body().clone().unwrap_or_default();
                             if status == StatusCode::UPGRADE_REQUIRED {
                                 response = json_error(
                                     StatusCode::UPGRADE_REQUIRED,
@@ -1648,7 +2047,10 @@ pub async fn proxy_websocket_handler(
                                 )
                             }
                         }
-                        _ => should_retry_same_account_on_transport(same_account_retry_attempt, &state),
+                        _ => should_retry_same_account_on_transport(
+                            same_account_retry_attempt,
+                            &state,
+                        ),
                     };
 
                     warn!(
@@ -1845,19 +2247,26 @@ pub async fn proxy_websocket_handler(
 
 async fn release_billing_hold_for_cross_account_failover(
     state: Arc<AppState>,
+    pending_billing_session: &mut Option<PendingBillingSession>,
     billing_session: &mut Option<BillingSession>,
     status: StatusCode,
     error_context: Option<&UpstreamErrorContext>,
     reason_class: &str,
 ) {
+    let released_session = billing_session.take();
+    if released_session.is_some() {
+        if let Some(pending_billing_session) = pending_billing_session.as_mut() {
+            pending_billing_session.rotate_request_id_for_cross_account_failover();
+        }
+    }
+
     release_billing_hold_best_effort(
         state,
-        billing_session.take(),
+        released_session,
         Some(BillingReleaseFailureContext {
             release_reason: Some("cross_account_failover".to_string()),
             upstream_status_code: Some(status.as_u16()),
-            upstream_error_code: error_context
-                .and_then(|context| context.error_code.clone()),
+            upstream_error_code: error_context.and_then(|context| context.error_code.clone()),
             failover_action: Some("cross_account_failover".to_string()),
             failover_reason_class: Some(reason_class.to_string()),
             cross_account_failover_attempted: Some(true),
@@ -1909,7 +2318,10 @@ async fn mark_account_unhealthy_and_clear_sticky(
     ejection_ttl: Duration,
 ) {
     state.router.mark_unhealthy(account_id, ejection_ttl);
-    let _ = state.routing_cache.set_unhealthy(account_id, ejection_ttl).await;
+    let _ = state
+        .routing_cache
+        .set_unhealthy(account_id, ejection_ttl)
+        .await;
     if let Some(sticky_key) = sticky_key {
         let _ = state.router.unbind_sticky(sticky_key);
         let _ = state

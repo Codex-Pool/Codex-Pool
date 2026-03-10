@@ -98,7 +98,9 @@ export const modelsApi = {
   syncOpenAiCatalog: () =>
     apiClient.post<OpenAiModelsSyncResponse>('/admin/models/sync-openai', {}),
   probeModels: (payload: ProbeModelsRequest = {}) =>
-    apiClient.post<ListModelsResponse>('/admin/models/probe', payload),
+    apiClient.post<ListModelsResponse>('/admin/models/probe', payload, {
+      timeout: 120000,
+    }),
   listModelPricing: () => apiClient.get<ModelPricingItem[]>('/admin/model-pricing'),
   upsertModelPricing: (payload: ModelPricingUpsertRequest) =>
     apiClient.post<ModelPricingItem>('/admin/model-pricing', payload),

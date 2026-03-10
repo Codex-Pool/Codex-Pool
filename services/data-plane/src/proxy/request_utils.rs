@@ -123,6 +123,96 @@ fn normalize_input_path(path: &str) -> String {
     }
 }
 
+#[derive(Debug, Clone)]
+struct UpstreamRequestCompatibilityAdaptation {
+    body: bytes::Bytes,
+    strip_content_encoding: bool,
+    bridge_stream_response: bool,
+}
+
+fn maybe_adapt_openai_responses_request_for_codex_profile(
+    mode: &UpstreamMode,
+    base_path: &str,
+    path: &str,
+    headers: &HeaderMap,
+    body: &bytes::Bytes,
+) -> Option<UpstreamRequestCompatibilityAdaptation> {
+    if !is_chatgpt_codex_profile(mode, base_path) {
+        return None;
+    }
+    let normalized_path = normalize_input_path(path);
+    if !matches!(normalized_path.as_str(), "/v1/responses" | "/v1/responses/compact") {
+        return None;
+    }
+    let is_compact = normalized_path == "/v1/responses/compact";
+
+    let mut value = parse_request_json_body(headers, body)?;
+    let object = value.as_object_mut()?;
+    let original_stream = object.get("stream").and_then(Value::as_bool).unwrap_or(false);
+    let mut changed = false;
+
+    if !matches!(object.get("instructions"), Some(Value::String(_))) {
+        object.insert("instructions".to_string(), Value::String(String::new()));
+        changed = true;
+    }
+
+    if let Some(adapted_input) = object.get("input").cloned().map(adapt_codex_input_value) {
+        if object.get("input") != Some(&adapted_input) {
+            object.insert("input".to_string(), adapted_input);
+            changed = true;
+        }
+    }
+
+    if is_compact {
+        if object.remove("store").is_some() {
+            changed = true;
+        }
+        if object.remove("stream").is_some() {
+            changed = true;
+        }
+    } else {
+        if object.get("store").and_then(Value::as_bool) != Some(false) {
+            object.insert("store".to_string(), Value::Bool(false));
+            changed = true;
+        }
+
+        if !original_stream {
+            object.insert("stream".to_string(), Value::Bool(true));
+            changed = true;
+        }
+    }
+
+    if object.remove("max_output_tokens").is_some() {
+        changed = true;
+    }
+
+    if !changed {
+        return None;
+    }
+
+    let body = bytes::Bytes::from(serde_json::to_vec(&value).ok()?);
+    Some(UpstreamRequestCompatibilityAdaptation {
+        body,
+        strip_content_encoding: headers.contains_key(axum::http::header::CONTENT_ENCODING),
+        bridge_stream_response: !is_compact && !original_stream,
+    })
+}
+
+fn adapt_codex_input_value(input: Value) -> Value {
+    match input {
+        Value::String(text) => serde_json::json!([{
+            "role": "user",
+            "content": [{
+                "type": "input_text",
+                "text": text
+            }]
+        }]),
+        Value::Array(items) => Value::Array(items),
+        Value::Null => Value::Array(Vec::new()),
+        other => Value::Array(vec![other]),
+    }
+}
+
 fn sticky_session_key_from_headers(headers: &HeaderMap) -> Option<String> {
     for header_name in [
         SESSION_ID_HEADER,
@@ -636,23 +726,28 @@ fn extract_upstream_error_code(body: &[u8]) -> Option<String> {
 }
 
 fn extract_upstream_error_details(body: &[u8]) -> (Option<String>, Option<String>) {
-    let value = match serde_json::from_slice::<Value>(body) {
-        Ok(item) => item,
-        Err(_) => return (None, None),
-    };
-    let code = value
-        .get("error")
-        .and_then(|error| error.get("code"))
-        .and_then(Value::as_str)
-        .or_else(|| value.get("code").and_then(Value::as_str))
+    if let Ok(value) = serde_json::from_slice::<Value>(body) {
+        let code = value
+            .get("error")
+            .and_then(|error| error.get("code"))
+            .and_then(Value::as_str)
+            .or_else(|| value.get("code").and_then(Value::as_str))
+            .map(ToString::to_string);
+        let message = value
+            .get("error")
+            .and_then(|error| error.get("message"))
+            .and_then(Value::as_str)
+            .or_else(|| value.get("message").and_then(Value::as_str))
+            .map(ToString::to_string);
+        return (code, message);
+    }
+
+    let message = std::str::from_utf8(body)
+        .ok()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
         .map(ToString::to_string);
-    let message = value
-        .get("error")
-        .and_then(|error| error.get("message"))
-        .and_then(Value::as_str)
-        .or_else(|| value.get("message").and_then(Value::as_str))
-        .map(ToString::to_string);
-    (code, message)
+    (None, message)
 }
 
 fn build_upstream_error_context(
@@ -727,6 +822,7 @@ fn classify_upstream_error(
     if message.contains("access token could not be refreshed")
         || message.contains("logged out")
         || message.contains("signed in to another account")
+        || message.contains("failed to extract accountid from token")
     {
         return UpstreamErrorClass::AuthExpired;
     }
@@ -1024,12 +1120,14 @@ fn build_upstream_websocket_request(
 fn apply_passthrough_headers(
     mut request_builder: reqwest::RequestBuilder,
     headers: &HeaderMap,
+    strip_content_encoding: bool,
 ) -> reqwest::RequestBuilder {
     for (name, value) in headers {
         if !is_compatibility_passthrough_header(name)
             && (is_hop_by_hop_header(name)
                 || *name == HOST
                 || *name == CONTENT_LENGTH
+                || (strip_content_encoding && *name == axum::http::header::CONTENT_ENCODING)
                 || *name == AUTHORIZATION
                 || *name == HeaderName::from_static(CHATGPT_ACCOUNT_ID))
         {
@@ -1126,6 +1224,87 @@ async fn buffered_response(
     )
 }
 
+async fn buffered_codex_compat_response(
+    status: StatusCode,
+    headers: &HeaderMap,
+    upstream_response: reqwest::Response,
+) -> (Response, Option<UpstreamErrorContext>, bytes::Bytes) {
+    let body = upstream_response.bytes().await.unwrap_or_default();
+    if status.as_u16() >= 400 {
+        let error_context = build_upstream_error_context(status, headers, &body);
+        let response = match error_context.as_ref() {
+            Some(context) => normalize_upstream_error_response(context),
+            None => response_with_bytes(status, headers, body.clone()),
+        };
+        return (response, error_context, body);
+    }
+
+    if let Some(completed_response) = extract_codex_completed_response(&body) {
+        if let Ok(response_body) = serde_json::to_vec(&completed_response) {
+            let response_body = bytes::Bytes::from(response_body);
+            let mut response_headers = headers.clone();
+            response_headers.remove(CONTENT_LENGTH);
+            response_headers.remove(axum::http::header::CONTENT_ENCODING);
+            response_headers.insert(
+                axum::http::header::CONTENT_TYPE,
+                HeaderValue::from_static("application/json"),
+            );
+            return (
+                response_with_bytes(status, &response_headers, response_body.clone()),
+                None,
+                response_body,
+            );
+        }
+    }
+
+    let error_context = UpstreamErrorContext {
+        status: StatusCode::BAD_GATEWAY,
+        error_code: None,
+        error_message: Some("codex upstream stream missing completion event".to_string()),
+        retry_after: None,
+        class: UpstreamErrorClass::TransientServer,
+    };
+    (
+        normalize_upstream_error_response(&error_context),
+        Some(error_context),
+        body,
+    )
+}
+
+fn extract_codex_completed_response(body: &[u8]) -> Option<Value> {
+    if let Ok(value) = serde_json::from_slice::<Value>(body) {
+        return Some(value);
+    }
+
+    let mut completed: Option<Value> = None;
+    for raw_line in body.split(|byte| *byte == b'\n') {
+        let line = trim_ascii(raw_line);
+        if line.is_empty() {
+            continue;
+        }
+        let payload = if let Some(raw_payload) = line.strip_prefix(b"data:") {
+            trim_ascii(raw_payload)
+        } else {
+            line
+        };
+        if payload.is_empty() || payload == b"[DONE]" {
+            continue;
+        }
+        let Ok(value) = serde_json::from_slice::<Value>(payload) else {
+            continue;
+        };
+        if matches!(
+            value.get("type").and_then(Value::as_str),
+            Some("response.completed" | "response.done")
+        ) {
+            if let Some(response) = value.get("response") {
+                completed = Some(response.clone());
+            }
+        }
+    }
+    completed
+}
+
 fn parse_request_policy_context(
     headers: &HeaderMap,
     body: &bytes::Bytes,
@@ -1166,11 +1345,18 @@ fn parse_request_policy_context(
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(ToString::to_string);
+    let previous_response_id = value
+        .get("previous_response_id")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToString::to_string);
     ParsedRequestPolicyContext {
         model,
         stream,
         request_id,
         estimated_input_tokens,
+        continuation_key_hint: previous_response_id.clone(),
         sticky_key_hint,
         session_key_hint: sticky_session_key_from_headers(headers)
             .or_else(|| {
@@ -1182,14 +1368,7 @@ fn parse_request_policy_context(
                     .filter(|value| !value.is_empty())
                     .map(ToString::to_string)
             })
-            .or_else(|| {
-                value
-                    .get("previous_response_id")
-                    .and_then(Value::as_str)
-                    .map(str::trim)
-                    .filter(|value| !value.is_empty())
-                    .map(ToString::to_string)
-            }),
+            .or(previous_response_id),
     }
 }
 
@@ -1504,8 +1683,8 @@ struct UsageTokens {
 
 #[cfg(test)]
 mod request_utils_tests {
-    use super::{classify_upstream_error, UpstreamErrorClass};
-    use http::StatusCode;
+    use super::{build_upstream_error_context, classify_upstream_error, UpstreamErrorClass};
+    use http::{HeaderMap, StatusCode};
 
     #[test]
     fn classifies_unknown_403_as_non_retryable_client() {
@@ -1525,5 +1704,32 @@ mod request_utils_tests {
             Some("Your access token could not be refreshed because you have since logged out."),
         );
         assert_eq!(class, UpstreamErrorClass::AuthExpired);
+    }
+
+    #[test]
+    fn classifies_accountid_extraction_failure_as_auth_expired() {
+        let class = classify_upstream_error(
+            StatusCode::BAD_REQUEST,
+            None,
+            Some("Failed to extract accountId from token"),
+        );
+        assert_eq!(class, UpstreamErrorClass::AuthExpired);
+    }
+
+    #[test]
+    fn builds_error_context_from_plain_text_accountid_failure() {
+        let headers = HeaderMap::new();
+        let context = build_upstream_error_context(
+            StatusCode::BAD_REQUEST,
+            &headers,
+            b"Failed to extract accountId from token",
+        )
+        .expect("plain text error body should build context");
+        assert_eq!(context.class, UpstreamErrorClass::AuthExpired);
+        assert_eq!(context.status, StatusCode::BAD_REQUEST);
+        assert_eq!(
+            context.error_message.as_deref(),
+            Some("Failed to extract accountId from token")
+        );
     }
 }

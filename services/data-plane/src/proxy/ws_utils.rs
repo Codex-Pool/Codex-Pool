@@ -646,6 +646,7 @@ async fn proxy_websocket_streams(
                 }
                 if should_close {
                     let _ = upstream_sender.close().await;
+                    let _ = downstream_sender.close().await;
                     break WS_RELEASE_REASON_CONNECTION_CLOSED;
                 }
             }
@@ -663,14 +664,23 @@ async fn proxy_websocket_streams(
                     if let Some(value) = parse_ws_json_text(text.as_ref()) {
                         failover_error_context = build_ws_failover_error_context(&value);
                         parsed_upstream_value = Some(value);
+                    } else {
+                        let plain_text = text.to_string();
+                        failover_error_context = build_upstream_error_context(
+                            StatusCode::BAD_REQUEST,
+                            &HeaderMap::new(),
+                            plain_text.as_bytes(),
+                        );
                     }
                 }
 
-                if let (Some(value), Some(error_context)) =
-                    (parsed_upstream_value.as_ref(), failover_error_context.as_ref())
-                {
+                if let Some(error_context) = failover_error_context.as_ref() {
                     if should_rotate_ws_session_on_error(error_context) {
-                        if let Some(original_tracked) = tracker.find_retryable_request(value) {
+                        let original_tracked = match parsed_upstream_value.as_ref() {
+                            Some(value) => tracker.find_retryable_request(value),
+                            None => tracker.latest_unstarted_request(),
+                        };
+                        if let Some(original_tracked) = original_tracked {
                             let recovery_outcome = apply_recovery_action(
                                 state.as_ref(),
                                 ws_usage_context.account_id,
@@ -727,7 +737,10 @@ async fn proxy_websocket_streams(
                                             }
                                         }
                                         if replay_succeeded {
-                                            let _ = tracker.take_retryable_request(value);
+                                            let _ = match parsed_upstream_value.as_ref() {
+                                                Some(value) => tracker.take_retryable_request(value),
+                                                None => tracker.take_latest_unstarted_request(),
+                                            };
                                             if original_tracked.billing_session.is_some() {
                                                 release_billing_hold_best_effort(
                                                     state.clone(),
@@ -1102,9 +1115,8 @@ fn parse_ws_request_policy_context(
         stream: true,
         request_id,
         estimated_input_tokens,
-        sticky_key_hint: previous_response_id
-            .clone()
-            .or_else(|| header_or_metadata_session_key.clone()),
+        continuation_key_hint: previous_response_id.clone(),
+        sticky_key_hint: header_or_metadata_session_key.clone(),
         session_key_hint: previous_response_id.or(header_or_metadata_session_key),
     }
 }

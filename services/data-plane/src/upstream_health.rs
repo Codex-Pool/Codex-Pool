@@ -3,6 +3,7 @@ use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
 
 use anyhow::Context;
+use serde::Serialize;
 use uuid::Uuid;
 
 const ALIVE_RING_REDIS_PREFIX_ENV: &str = "DATA_PLANE_HEALTH_REDIS_PREFIX";
@@ -132,6 +133,13 @@ impl AliveRingRouter {
     }
 }
 
+#[derive(Debug, Serialize)]
+struct ModelSeenOkReportRequest {
+    model: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    status_code: Option<u16>,
+}
+
 #[derive(Clone)]
 pub struct SeenOkReporter {
     client: reqwest::Client,
@@ -139,6 +147,7 @@ pub struct SeenOkReporter {
     internal_auth_token: Arc<str>,
     min_interval: Duration,
     latest_reported: Arc<RwLock<HashMap<Uuid, Instant>>>,
+    latest_model_reported: Arc<RwLock<HashMap<(Uuid, String), Instant>>>,
 }
 
 impl SeenOkReporter {
@@ -158,6 +167,7 @@ impl SeenOkReporter {
             internal_auth_token,
             min_interval,
             latest_reported: Arc::new(RwLock::new(HashMap::new())),
+            latest_model_reported: Arc::new(RwLock::new(HashMap::new())),
         })
     }
 
@@ -173,6 +183,27 @@ impl SeenOkReporter {
             }
         }
         latest.insert(account_id, now);
+        true
+    }
+
+    fn should_report_model(&self, account_id: Uuid, model: &str) -> bool {
+        let model = model.trim();
+        if model.is_empty() {
+            return false;
+        }
+
+        let now = Instant::now();
+        let mut latest = match self.latest_model_reported.write() {
+            Ok(lock) => lock,
+            Err(_) => return false,
+        };
+        let key = (account_id, model.to_string());
+        if let Some(last) = latest.get(&key) {
+            if now.duration_since(*last) < self.min_interval {
+                return false;
+            }
+        }
+        latest.insert(key, now);
         true
     }
 
@@ -194,6 +225,34 @@ impl SeenOkReporter {
                 error = %err,
                 account_id = %account_id,
                 "failed to report seen_ok signal to control plane"
+            );
+        }
+    }
+
+    pub async fn report_model_seen_ok(&self, account_id: Uuid, model: &str) {
+        let model = model.trim();
+        if !self.should_report_model(account_id, model) {
+            return;
+        }
+
+        let endpoint = format!(
+            "{}/internal/v1/upstream-accounts/{account_id}/models/seen-ok",
+            self.endpoint_base
+        );
+        let request = self
+            .client
+            .post(endpoint)
+            .bearer_auth(self.internal_auth_token.as_ref())
+            .json(&ModelSeenOkReportRequest {
+                model: model.to_string(),
+                status_code: Some(200),
+            });
+        if let Err(err) = request.send().await {
+            tracing::warn!(
+                error = %err,
+                account_id = %account_id,
+                model,
+                "failed to report model seen_ok signal to control plane"
             );
         }
     }
@@ -252,6 +311,29 @@ pub fn seen_ok_report_config_from_env() -> SeenOkReportConfig {
         enabled,
         min_interval: Duration::from_secs(min_interval_sec),
         timeout: Duration::from_millis(timeout_ms),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn seen_ok_reporter_rate_limits_per_account_and_model() {
+        let reporter = SeenOkReporter::new(
+            "http://127.0.0.1:8090".to_string(),
+            Arc::<str>::from("internal-token"),
+            Duration::from_millis(250),
+            Duration::from_secs(60),
+        )
+        .expect("reporter must build");
+        let account_id = Uuid::new_v4();
+
+        assert!(reporter.should_report_model(account_id, "gpt-5.3-codex"));
+        assert!(!reporter.should_report_model(account_id, "gpt-5.3-codex"));
+        assert!(reporter.should_report_model(account_id, "gpt-5.4"));
+        assert!(reporter.should_report_model(Uuid::new_v4(), "gpt-5.3-codex"));
+        assert!(!reporter.should_report_model(account_id, "   "));
     }
 }
 

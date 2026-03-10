@@ -603,6 +603,82 @@ async fn spawn_ws_scripted_upstream(turns: Vec<Vec<Value>>) -> String {
     format!("http://{}", addr)
 }
 
+async fn spawn_ws_text_scripted_upstream(turns: Vec<Vec<String>>) -> String {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let turn_scripts = Arc::new(Mutex::new(VecDeque::from(turns)));
+
+    tokio::spawn({
+        let turn_scripts = turn_scripts.clone();
+        async move {
+            loop {
+                let (stream, _) = match listener.accept().await {
+                    Ok(value) => value,
+                    Err(_) => break,
+                };
+                let turn_scripts = turn_scripts.clone();
+                tokio::spawn(async move {
+                    let ws_stream = accept_hdr_async(
+                        stream,
+                        |_request: &tokio_tungstenite::tungstenite::handshake::server::Request,
+                         response: tokio_tungstenite::tungstenite::handshake::server::Response|
+                         -> Result<
+                            tokio_tungstenite::tungstenite::handshake::server::Response,
+                            ErrorResponse,
+                        > { Ok(response) },
+                    )
+                    .await;
+                    let Ok(ws_stream) = ws_stream else {
+                        return;
+                    };
+
+                    let (mut writer, mut reader) = ws_stream.split();
+                    while let Some(message) = reader.next().await {
+                        let Ok(message) = message else {
+                            break;
+                        };
+                        match message {
+                            Message::Text(text) => {
+                                let Ok(value) = serde_json::from_str::<Value>(&text) else {
+                                    continue;
+                                };
+                                let is_create = value
+                                    .get("type")
+                                    .and_then(Value::as_str)
+                                    .map(|item| item == "response.create")
+                                    .unwrap_or(false);
+                                if !is_create {
+                                    continue;
+                                }
+
+                                let scripted_events =
+                                    turn_scripts.lock().unwrap().pop_front().unwrap_or_default();
+                                for event in scripted_events {
+                                    if writer.send(Message::Text(event.into())).await.is_err() {
+                                        return;
+                                    }
+                                }
+                            }
+                            Message::Close(frame) => {
+                                let _ = writer.send(Message::Close(frame)).await;
+                                break;
+                            }
+                            Message::Ping(payload) => {
+                                if writer.send(Message::Pong(payload)).await.is_err() {
+                                    break;
+                                }
+                            }
+                            Message::Binary(_) | Message::Pong(_) | Message::Frame(_) => {}
+                        }
+                    }
+                });
+            }
+        }
+    });
+
+    format!("http://{}", addr)
+}
+
 async fn spawn_ws_scripted_upstream_and_close(turns: Vec<Vec<Value>>) -> String {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
@@ -2259,6 +2335,83 @@ async fn ws_session_rebind_uses_new_billing_request_id_after_releasing_old_autho
 }
 
 #[tokio::test]
+async fn ws_session_retries_plain_text_auth_error_on_new_account_before_any_output() {
+    let auth_upstream_base = spawn_ws_text_scripted_upstream(vec![vec![
+        "Failed to extract accountId from token".to_string(),
+    ]])
+    .await;
+    let healthy_upstream_base = spawn_ws_scripted_upstream(vec![vec![
+        json!({
+            "type": "response.created",
+            "response": { "id": "resp-retry-text", "model": "gpt-5.4" }
+        }),
+        json!({
+            "type": "response.completed",
+            "response": {
+                "id": "resp-retry-text",
+                "model": "gpt-5.4",
+                "usage": { "input_tokens": 8, "output_tokens": 4 }
+            }
+        }),
+    ]])
+    .await;
+
+    let data_plane_base = spawn_data_plane_server(vec![
+        test_account(auth_upstream_base, "upstream-token-a"),
+        test_account(healthy_upstream_base, "upstream-token-b"),
+    ])
+    .await;
+
+    let request = ws_url(&data_plane_base, "/v1/responses")
+        .into_client_request()
+        .unwrap();
+    let mut request = request;
+    request
+        .headers_mut()
+        .insert("authorization", "Bearer cp_identity".parse().unwrap());
+    let (mut ws_client, response) = connect_async(request).await.unwrap();
+    assert_eq!(response.status(), StatusCode::SWITCHING_PROTOCOLS);
+
+    ws_client
+        .send(Message::Text(
+            json!({
+                "type": "response.create",
+                "request_id": "req-retry-text",
+                "response": { "model": "gpt-5.4" }
+            })
+            .to_string()
+            .into(),
+        ))
+        .await
+        .unwrap();
+
+    let (first, second) = tokio::time::timeout(Duration::from_secs(2), async {
+        let first = ws_client.next().await.unwrap().unwrap();
+        let second = ws_client.next().await.unwrap().unwrap();
+        (first, second)
+    })
+    .await
+    .expect("same request should be retried on a new account");
+
+    let first_text = match first {
+        Message::Text(text) => text.to_string(),
+        other => panic!("expected first text message, got {other:?}"),
+    };
+    let second_text = match second {
+        Message::Text(text) => text.to_string(),
+        other => panic!("expected second text message, got {other:?}"),
+    };
+    let first_payload: Value = serde_json::from_str(&first_text).unwrap();
+    let second_payload: Value = serde_json::from_str(&second_text).unwrap();
+
+    assert_eq!(first_payload["type"], "response.created");
+    assert_eq!(second_payload["type"], "response.completed");
+    assert_eq!(second_payload["response"]["id"], "resp-retry-text");
+
+    ws_client.close(None).await.unwrap();
+}
+
+#[tokio::test]
 async fn ws_session_retries_same_request_without_request_id_on_new_account_before_any_output() {
     let quota_upstream_base = spawn_ws_scripted_upstream(vec![vec![json!({
         "type": "error",
@@ -2300,7 +2453,6 @@ async fn ws_session_retries_same_request_without_request_id_on_new_account_befor
         .send(Message::Text(
             json!({
                 "type": "response.create",
-                "request_id": "req-retry-no-id",
                 "response": { "model": "gpt-5.4" }
             })
             .to_string()

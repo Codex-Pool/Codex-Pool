@@ -56,7 +56,8 @@ const DEFAULT_AUTH_VALIDATE_URL: &str = "http://127.0.0.1:8090/internal/v1/auth/
 const ADMIN_LOG_CAPACITY: usize = 500;
 const MODEL_PROBE_CACHE_TTL_SEC: i64 = 3600;
 const MODEL_PROBE_DEFAULT_INTERVAL_SEC: u64 = 3600;
-const MODEL_PROBE_REQUEST_TIMEOUT_SEC: u64 = 20;
+const MODEL_PROBE_REQUEST_TIMEOUT_SEC: u64 = 8;
+const MODEL_PROBE_ACCOUNT_FETCH_CONCURRENCY: usize = 64;
 const MODEL_PROBE_INTERVAL_ENV: &str = "CONTROL_PLANE_MODEL_PROBE_INTERVAL_SEC";
 const INTERNAL_AUTH_TOKEN_ENV: &str = "CONTROL_PLANE_INTERNAL_AUTH_TOKEN";
 const OAUTH_IMPORT_MULTIPART_MAX_MB_ENV: &str = "CONTROL_PLANE_OAUTH_IMPORT_MULTIPART_MAX_MB";
@@ -332,6 +333,7 @@ struct ModelProbeCacheEntry {
     checked_at: DateTime<Utc>,
     http_status: Option<u16>,
     error: Option<String>,
+    owned_by: Option<String>,
 }
 
 #[derive(Debug, Default)]
@@ -340,7 +342,6 @@ struct ModelProbeCache {
     source_account_label: Option<String>,
     entries: HashMap<String, ModelProbeCacheEntry>,
 }
-
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -1048,7 +1049,6 @@ pub fn build_app_with_store_ttl_usage_repo_import_store_and_admin_auth(
             "/api/v1/admin/api-key-group-model-policies/{policy_id}",
             delete(delete_admin_api_key_group_model_policy),
         )
-
         .route(
             "/api/v1/admin/impersonations",
             post(create_admin_impersonation),
@@ -1168,6 +1168,10 @@ pub fn build_app_with_store_ttl_usage_repo_import_store_and_admin_auth(
         .route(
             "/internal/v1/upstream-accounts/{account_id}/health/seen-ok",
             post(internal_mark_upstream_account_seen_ok),
+        )
+        .route(
+            "/internal/v1/upstream-accounts/{account_id}/models/seen-ok",
+            post(internal_mark_upstream_model_seen_ok),
         )
         .route("/internal/v1/auth/validate", post(validate_api_key))
         .route(

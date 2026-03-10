@@ -924,9 +924,12 @@ fn parse_stream_prelude_error_context(
         if let Some(context) = parse_json_error_payload(status, headers, payload.as_bytes()) {
             return Some(context);
         }
+        if let Some(context) = build_upstream_error_context(status, headers, payload.as_bytes()) {
+            return Some(context);
+        }
     }
 
-    None
+    build_upstream_error_context(status, headers, chunk)
 }
 
 fn parse_json_error_payload(

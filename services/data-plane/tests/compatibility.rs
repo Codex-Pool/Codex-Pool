@@ -371,6 +371,151 @@ async fn rewrites_v1_responses_to_codex_responses_for_codex_base_profile() {
 }
 
 #[tokio::test]
+async fn adapts_openai_non_stream_responses_request_for_codex_profile() {
+    let upstream = MockServer::start().await;
+    let sse_payload = concat!(
+        "event: response.created\n",
+        "data: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_compat\",\"status\":\"in_progress\"}}\n\n",
+        "event: response.completed\n",
+        "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_compat\",\"status\":\"completed\",\"usage\":{\"input_tokens\":3,\"output_tokens\":1},\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"OK\"}]}]}}\n\n",
+        "data: [DONE]\n\n",
+    );
+
+    Mock::given(method("POST"))
+        .and(path("/backend-api/codex/responses"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(sse_payload, "text/event-stream"))
+        .mount(&upstream)
+        .await;
+
+    let codex_base = format!("{}/backend-api/codex", upstream.uri());
+    let app = test_app(vec![test_account(codex_base, "upstream-token")]).await;
+
+    let request_body = json!({
+        "model": "gpt-5.4",
+        "input": "Reply with exactly OK.",
+        "max_output_tokens": 16
+    });
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/responses")
+                .header("content-type", "application/json")
+                .body(Body::from(request_body.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response
+            .headers()
+            .get("content-type")
+            .and_then(|value| value.to_str().ok()),
+        Some("application/json")
+    );
+    let bytes = response.into_body().collect().await.unwrap().to_bytes();
+    let payload: Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(payload["id"], "resp_compat");
+    assert_eq!(payload["status"], "completed");
+    assert_eq!(payload["usage"]["input_tokens"], 3);
+    assert_eq!(
+        payload["output"][0]["content"][0]["text"],
+        "OK"
+    );
+
+    let requests = upstream.received_requests().await.unwrap();
+    assert_eq!(requests.len(), 1);
+    let forwarded: Value = serde_json::from_slice(&requests[0].body).unwrap();
+    assert_eq!(forwarded["instructions"], "");
+    assert_eq!(forwarded["store"], false);
+    assert_eq!(forwarded["stream"], true);
+    assert!(forwarded.get("max_output_tokens").is_none());
+    assert_eq!(
+        forwarded["input"],
+        json!([{
+            "role": "user",
+            "content": [{
+                "type": "input_text",
+                "text": "Reply with exactly OK."
+            }]
+        }])
+    );
+}
+
+#[tokio::test]
+async fn adapts_openai_streaming_responses_request_for_codex_profile() {
+    let upstream = MockServer::start().await;
+    let sse_payload = concat!(
+        "event: response.created\n",
+        "data: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_stream\",\"status\":\"in_progress\"}}\n\n",
+        "event: response.completed\n",
+        "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_stream\",\"status\":\"completed\"}}\n\n",
+        "data: [DONE]\n\n",
+    );
+
+    Mock::given(method("POST"))
+        .and(path("/backend-api/codex/responses"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(sse_payload, "text/event-stream"))
+        .mount(&upstream)
+        .await;
+
+    let codex_base = format!("{}/backend-api/codex", upstream.uri());
+    let app = test_app(vec![test_account(codex_base, "upstream-token")]).await;
+
+    let request_body = json!({
+        "model": "gpt-5.4",
+        "stream": true,
+        "input": "Reply with exactly OK.",
+        "max_output_tokens": 16
+    });
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/responses")
+                .header("content-type", "application/json")
+                .body(Body::from(request_body.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response
+            .headers()
+            .get("content-type")
+            .and_then(|value| value.to_str().ok()),
+        Some("text/event-stream")
+    );
+    let bytes = response.into_body().collect().await.unwrap().to_bytes();
+    let body = std::str::from_utf8(&bytes).unwrap();
+    assert!(body.contains("response.completed"));
+
+    let requests = upstream.received_requests().await.unwrap();
+    assert_eq!(requests.len(), 1);
+    let forwarded: Value = serde_json::from_slice(&requests[0].body).unwrap();
+    assert_eq!(forwarded["instructions"], "");
+    assert_eq!(forwarded["store"], false);
+    assert_eq!(forwarded["stream"], true);
+    assert!(forwarded.get("max_output_tokens").is_none());
+    assert_eq!(
+        forwarded["input"],
+        json!([{
+            "role": "user",
+            "content": [{
+                "type": "input_text",
+                "text": "Reply with exactly OK."
+            }]
+        }])
+    );
+}
+
+#[tokio::test]
 async fn rewrites_v1_responses_compact_to_codex_responses_compact_for_codex_base_profile() {
     let upstream = MockServer::start().await;
 
@@ -396,7 +541,15 @@ async fn rewrites_v1_responses_compact_to_codex_responses_compact_for_codex_base
             Request::builder()
                 .method("POST")
                 .uri("/v1/responses/compact")
-                .body(Body::from("{}"))
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    json!({
+                        "model": "gpt-5.4",
+                        "input": "compress this history",
+                        "max_output_tokens": 16
+                    })
+                    .to_string(),
+                ))
                 .unwrap(),
         )
         .await
@@ -406,6 +559,25 @@ async fn rewrites_v1_responses_compact_to_codex_responses_compact_for_codex_base
     let bytes = response.into_body().collect().await.unwrap().to_bytes();
     let payload: Value = serde_json::from_slice(&bytes).unwrap();
     assert_eq!(payload["output"][0]["type"], "message");
+
+    let requests = upstream.received_requests().await.unwrap();
+    assert_eq!(requests.len(), 1);
+    let forwarded: Value = serde_json::from_slice(&requests[0].body).unwrap();
+    assert_eq!(forwarded["model"], "gpt-5.4");
+    assert_eq!(forwarded["instructions"], "");
+    assert!(forwarded.get("store").is_none());
+    assert!(forwarded.get("stream").is_none());
+    assert!(forwarded.get("max_output_tokens").is_none());
+    assert_eq!(
+        forwarded["input"],
+        json!([{
+            "role": "user",
+            "content": [{
+                "type": "input_text",
+                "text": "compress this history"
+            }]
+        }])
+    );
 }
 
 #[tokio::test]
@@ -2026,6 +2198,135 @@ async fn token_invalidated_should_failover_without_waiting_internal_refresh_comp
     let body = response.into_body().collect().await.unwrap().to_bytes();
     let payload: Value = serde_json::from_slice(&body).unwrap();
     assert_eq!(payload["account"], "b");
+}
+
+#[tokio::test]
+async fn accountid_extraction_failure_should_failover_across_accounts() {
+    let upstream_a = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v1/responses"))
+        .respond_with(
+            ResponseTemplate::new(400).set_body_json(
+                json!({"error": {"message": "Failed to extract accountId from token"}}),
+            ),
+        )
+        .mount(&upstream_a)
+        .await;
+
+    let upstream_b = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v1/responses"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"account": "b"})))
+        .mount(&upstream_b)
+        .await;
+
+    let app = test_app(vec![
+        test_account(upstream_a.uri(), "token-a"),
+        test_account(upstream_b.uri(), "token-b"),
+    ])
+    .await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/responses")
+                .body(Body::from("{}"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    let payload: Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(payload["account"], "b");
+}
+
+#[tokio::test]
+async fn plain_text_accountid_extraction_failure_should_failover_across_accounts() {
+    let upstream_a = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v1/responses"))
+        .respond_with(
+            ResponseTemplate::new(400)
+                .insert_header("content-type", "text/plain; charset=utf-8")
+                .set_body_string("Failed to extract accountId from token"),
+        )
+        .mount(&upstream_a)
+        .await;
+
+    let upstream_b = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v1/responses"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"account": "b"})))
+        .mount(&upstream_b)
+        .await;
+
+    let app = test_app(vec![
+        test_account(upstream_a.uri(), "token-a"),
+        test_account(upstream_b.uri(), "token-b"),
+    ])
+    .await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/responses")
+                .body(Body::from("{}"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    let payload: Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(payload["account"], "b");
+}
+
+#[tokio::test]
+async fn plain_text_stream_accountid_extraction_failure_should_failover_across_accounts() {
+    let upstream_a = MockServer::start().await;
+    let auth_error_payload = "data: Failed to extract accountId from token\n\n";
+    Mock::given(method("POST"))
+        .and(path("/v1/responses"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_raw(auth_error_payload, "text/event-stream"),
+        )
+        .mount(&upstream_a)
+        .await;
+
+    let upstream_b = MockServer::start().await;
+    let success_payload =
+        "data: {\"type\":\"response.output_text.delta\",\"delta\":\"from-b\"}\n\n";
+    Mock::given(method("POST"))
+        .and(path("/v1/responses"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(success_payload, "text/event-stream"))
+        .mount(&upstream_b)
+        .await;
+
+    let app = test_app(vec![
+        test_account(upstream_a.uri(), "token-a"),
+        test_account(upstream_b.uri(), "token-b"),
+    ])
+    .await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/responses")
+                .body(Body::from("{}"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let bytes = response.into_body().collect().await.unwrap().to_bytes();
+    assert_eq!(bytes.as_ref(), success_payload.as_bytes());
 }
 
 #[tokio::test]

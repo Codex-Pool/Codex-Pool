@@ -79,11 +79,27 @@ fn upstream_seen_ok_min_write_interval_sec_from_env() -> i64 {
         .clamp(0, 3600)
 }
 
+#[derive(Debug, Deserialize)]
+struct InternalModelSeenOkRequest {
+    model: String,
+    #[serde(default)]
+    status_code: Option<u16>,
+}
+
 #[derive(Debug, Serialize)]
 struct InternalSeenOkResponse {
     ok: bool,
     accepted: bool,
     account_id: Uuid,
+    seen_ok_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Serialize)]
+struct InternalModelSeenOkResponse {
+    ok: bool,
+    accepted: bool,
+    account_id: Uuid,
+    model: String,
     seen_ok_at: DateTime<Utc>,
 }
 
@@ -121,6 +137,44 @@ async fn internal_mark_upstream_account_seen_ok(
         ok: true,
         accepted,
         account_id,
+        seen_ok_at,
+    }))
+}
+
+async fn internal_mark_upstream_model_seen_ok(
+    Path(account_id): Path<Uuid>,
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(req): Json<InternalModelSeenOkRequest>,
+) -> Result<Json<InternalModelSeenOkResponse>, (StatusCode, Json<ErrorEnvelope>)> {
+    require_internal_service_token(&state, &headers)?;
+
+    let model = req.model.trim();
+    if model.is_empty() {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(ErrorEnvelope::new("invalid_model", "model is required")),
+        ));
+    }
+
+    let seen_ok_at = Utc::now();
+    let http_status = req
+        .status_code
+        .filter(|status| (200..600).contains(status))
+        .unwrap_or(200);
+    {
+        let mut cache = state
+            .model_probe_cache
+            .write()
+            .expect("model_probe_cache lock poisoned");
+        mark_model_available_in_probe_cache(&mut cache, model, seen_ok_at, http_status);
+    }
+
+    Ok(Json(InternalModelSeenOkResponse {
+        ok: true,
+        accepted: true,
+        account_id,
+        model: model.to_string(),
         seen_ok_at,
     }))
 }

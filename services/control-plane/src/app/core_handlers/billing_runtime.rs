@@ -73,18 +73,45 @@ fn map_internal_billing_error(err: anyhow::Error) -> (StatusCode, Json<ErrorEnve
     if lowered.contains("insufficient credits") {
         return (
             StatusCode::PAYMENT_REQUIRED,
-            Json(ErrorEnvelope::new("insufficient_credits", "insufficient credits")),
+            Json(ErrorEnvelope::new(
+                "insufficient_credits",
+                "insufficient credits",
+            )),
+        );
+    }
+    if lowered.contains("request_id must not be empty") {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(ErrorEnvelope::new(
+                "billing_request_id_missing",
+                "billing request id is required",
+            )),
         );
     }
     if lowered.contains("model pricing is not configured")
         || lowered.contains("billing_model_missing")
+        || lowered.contains("model must not be empty")
     {
         return (
             StatusCode::BAD_REQUEST,
-            Json(ErrorEnvelope::new("billing_model_missing", "billing model missing")),
+            Json(ErrorEnvelope::new(
+                "billing_model_missing",
+                "billing model missing",
+            )),
         );
     }
-    if lowered.contains("api key group is unavailable") {
+    if lowered.contains("reserved_microcredits must be positive") {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(ErrorEnvelope::new(
+                "billing_reserve_invalid",
+                "reserved microcredits must be positive",
+            )),
+        );
+    }
+    if lowered.contains("api key group is unavailable")
+        || lowered.contains("api key group is deleted")
+    {
         return (
             StatusCode::FORBIDDEN,
             Json(ErrorEnvelope::new(
@@ -96,7 +123,19 @@ fn map_internal_billing_error(err: anyhow::Error) -> (StatusCode, Json<ErrorEnve
     if lowered.contains("model is not allowed for api key group") {
         return (
             StatusCode::FORBIDDEN,
-            Json(ErrorEnvelope::new("model_not_allowed", "requested model is not allowed")),
+            Json(ErrorEnvelope::new(
+                "model_not_allowed",
+                "requested model is not allowed",
+            )),
+        );
+    }
+    if lowered.contains("billing authorization is in invalid status") {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(ErrorEnvelope::new(
+                "billing_authorization_invalid_status",
+                "billing authorization is in invalid status",
+            )),
         );
     }
     if lowered.contains("authorization not found") {
@@ -108,6 +147,10 @@ fn map_internal_billing_error(err: anyhow::Error) -> (StatusCode, Json<ErrorEnve
             )),
         );
     }
+    tracing::warn!(
+        error = %err,
+        "falling back to generic tenant error mapping for internal billing error"
+    );
     map_tenant_error(err)
 }
 
@@ -198,10 +241,16 @@ async fn update_admin_runtime_config(
         .runtime_config
         .write()
         .expect("runtime_config lock poisoned");
-    if let Some(value) = req.data_plane_base_url.filter(|value| !value.trim().is_empty()) {
+    if let Some(value) = req
+        .data_plane_base_url
+        .filter(|value| !value.trim().is_empty())
+    {
         config.data_plane_base_url = value;
     }
-    if let Some(value) = req.auth_validate_url.filter(|value| !value.trim().is_empty()) {
+    if let Some(value) = req
+        .auth_validate_url
+        .filter(|value| !value.trim().is_empty())
+    {
         config.auth_validate_url = value;
     }
     if let Some(value) = req.oauth_refresh_enabled {
@@ -238,12 +287,7 @@ async fn list_admin_logs(
     let _principal = require_admin_principal(&state, &headers)?;
     let limit = query.limit.unwrap_or(200).min(ADMIN_LOG_CAPACITY);
     let logs = state.admin_logs.read().expect("admin_logs lock poisoned");
-    let items = logs
-        .iter()
-        .rev()
-        .take(limit)
-        .cloned()
-        .collect::<Vec<_>>();
+    let items = logs.iter().rev().take(limit).cloned().collect::<Vec<_>>();
     Ok(Json(AdminLogsResponse { items }))
 }
 
@@ -469,11 +513,9 @@ async fn list_admin_models(
         .admin_list_model_pricing()
         .await
         .map_err(map_tenant_error)?;
-    Ok(Json(build_admin_models_response(
-        &state,
-        official_catalog,
-        pricing_overrides,
-    )))
+    Ok(Json(
+        build_admin_models_response(&state, official_catalog, pricing_overrides).await,
+    ))
 }
 
 async fn probe_admin_models(
@@ -505,13 +547,10 @@ async fn probe_admin_models(
         .admin_list_model_pricing()
         .await
         .map_err(map_tenant_error)?;
-    Ok(Json(build_admin_models_response(
-        &state,
-        official_catalog,
-        pricing_overrides,
-    )))
+    Ok(Json(
+        build_admin_models_response(&state, official_catalog, pricing_overrides).await,
+    ))
 }
-
 
 async fn sync_openai_admin_models_catalog(
     State(state): State<AppState>,
@@ -572,4 +611,33 @@ async fn sync_openai_admin_models_catalog(
     )
     .await;
     Ok(Json(response))
+}
+
+#[cfg(test)]
+mod billing_runtime_tests {
+    use super::*;
+
+    #[test]
+    fn map_internal_billing_error_maps_model_missing_precisely() {
+        let (status, Json(envelope)) =
+            map_internal_billing_error(anyhow::anyhow!("model must not be empty"));
+
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(envelope.error.code, "billing_model_missing");
+        assert_eq!(envelope.error.message, "billing model missing");
+    }
+
+    #[test]
+    fn map_internal_billing_error_maps_invalid_authorization_status_precisely() {
+        let (status, Json(envelope)) = map_internal_billing_error(anyhow::anyhow!(
+            "billing authorization is in invalid status: released"
+        ));
+
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(envelope.error.code, "billing_authorization_invalid_status");
+        assert_eq!(
+            envelope.error.message,
+            "billing authorization is in invalid status"
+        );
+    }
 }
