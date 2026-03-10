@@ -203,6 +203,7 @@ pub struct ValidateApiKeyResponse {
     pub tenant_id: Uuid,
     pub api_key_id: Uuid,
     pub enabled: bool,
+    #[serde(default)]
     pub group: ApiKeyGroupStatus,
     #[serde(default)]
     pub policy: ApiKeyPolicy,
@@ -215,7 +216,7 @@ pub struct ValidateApiKeyResponse {
     pub cache_ttl_sec: u64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ApiKeyGroupStatus {
     pub id: Uuid,
     pub name: String,
