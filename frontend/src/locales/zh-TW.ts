@@ -192,6 +192,10 @@ export default {
                 github: "GitHub",
                 oneWeek: "週限制"
             },
+            shortLabels: {
+                fiveHours: "5h",
+                oneWeek: "7d"
+            },
             moreDetails: "查看更多（+{{count}}）",
             noReset: "暫無刷新時間",
             remainingPrefix: "剩餘",

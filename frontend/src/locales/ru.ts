@@ -192,6 +192,10 @@ export default {
                 github: "GitHub",
                 oneWeek: "Недельный лимит"
             },
+            shortLabels: {
+                fiveHours: "5h",
+                oneWeek: "7d"
+            },
             moreDetails: "Подробнее (+{{count}})",
             noReset: "Нет времени сброса",
             remainingPrefix: "Осталось",

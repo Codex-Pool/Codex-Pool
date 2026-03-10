@@ -192,6 +192,10 @@ export default {
                 github: "GitHub",
                 oneWeek: "週次制限"
             },
+            shortLabels: {
+                fiveHours: "5h",
+                oneWeek: "7d"
+            },
             moreDetails: "詳細を表示（+{{count}}）",
             noReset: "リセット時刻なし",
             remainingPrefix: "残り",
