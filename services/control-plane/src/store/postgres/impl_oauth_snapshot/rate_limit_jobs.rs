@@ -14,7 +14,19 @@ impl PostgresStore {
                 a.auth_provider,
                 p.credential_kind,
                 p.token_expires_at AS profile_token_expires_at,
+                p.email,
+                p.oauth_subject,
+                p.oauth_identity_provider,
+                p.email_verified,
                 p.chatgpt_plan_type,
+                p.chatgpt_user_id,
+                p.chatgpt_subscription_active_start,
+                p.chatgpt_subscription_active_until,
+                p.chatgpt_subscription_last_checked,
+                p.chatgpt_account_user_id,
+                p.chatgpt_compute_residency,
+                p.organizations_json::text AS organizations_json_text,
+                p.groups_json::text AS groups_json_text,
                 p.source_type,
                 c.access_token_enc,
                 c.token_family_id,
@@ -112,7 +124,27 @@ impl PostgresStore {
             account_id,
             auth_provider,
             credential_kind,
+            email: row.try_get::<Option<String>, _>("email")?,
+            oauth_subject: row.try_get::<Option<String>, _>("oauth_subject")?,
+            oauth_identity_provider: row
+                .try_get::<Option<String>, _>("oauth_identity_provider")?,
+            email_verified: row.try_get::<Option<bool>, _>("email_verified")?,
             chatgpt_plan_type: row.try_get::<Option<String>, _>("chatgpt_plan_type")?,
+            chatgpt_user_id: row.try_get::<Option<String>, _>("chatgpt_user_id")?,
+            chatgpt_subscription_active_start: row
+                .try_get::<Option<DateTime<Utc>>, _>("chatgpt_subscription_active_start")?,
+            chatgpt_subscription_active_until: row
+                .try_get::<Option<DateTime<Utc>>, _>("chatgpt_subscription_active_until")?,
+            chatgpt_subscription_last_checked: row
+                .try_get::<Option<DateTime<Utc>>, _>("chatgpt_subscription_last_checked")?,
+            chatgpt_account_user_id: row
+                .try_get::<Option<String>, _>("chatgpt_account_user_id")?,
+            chatgpt_compute_residency: row
+                .try_get::<Option<String>, _>("chatgpt_compute_residency")?,
+            organizations: parse_json_array(
+                row.try_get::<Option<String>, _>("organizations_json_text")?,
+            ),
+            groups: parse_json_array(row.try_get::<Option<String>, _>("groups_json_text")?),
             source_type: row.try_get::<Option<String>, _>("source_type")?,
             token_family_id: row.try_get::<Option<String>, _>("token_family_id")?,
             token_version: row
@@ -152,7 +184,19 @@ impl PostgresStore {
                 a.auth_provider,
                 p.credential_kind,
                 p.token_expires_at AS profile_token_expires_at,
+                p.email,
+                p.oauth_subject,
+                p.oauth_identity_provider,
+                p.email_verified,
                 p.chatgpt_plan_type,
+                p.chatgpt_user_id,
+                p.chatgpt_subscription_active_start,
+                p.chatgpt_subscription_active_until,
+                p.chatgpt_subscription_last_checked,
+                p.chatgpt_account_user_id,
+                p.chatgpt_compute_residency,
+                p.organizations_json::text AS organizations_json_text,
+                p.groups_json::text AS groups_json_text,
                 p.source_type,
                 c.access_token_enc,
                 c.token_family_id,
@@ -185,7 +229,19 @@ impl PostgresStore {
             account_id: Uuid,
             auth_provider: UpstreamAuthProvider,
             credential_kind: Option<SessionCredentialKind>,
+            email: Option<String>,
+            oauth_subject: Option<String>,
+            oauth_identity_provider: Option<String>,
+            email_verified: Option<bool>,
             chatgpt_plan_type: Option<String>,
+            chatgpt_user_id: Option<String>,
+            chatgpt_subscription_active_start: Option<DateTime<Utc>>,
+            chatgpt_subscription_active_until: Option<DateTime<Utc>>,
+            chatgpt_subscription_last_checked: Option<DateTime<Utc>>,
+            chatgpt_account_user_id: Option<String>,
+            chatgpt_compute_residency: Option<String>,
+            organizations: Option<Vec<serde_json::Value>>,
+            groups: Option<Vec<serde_json::Value>>,
             source_type: Option<String>,
             token_family_id: Option<String>,
             token_version: Option<u64>,
@@ -274,7 +330,27 @@ impl PostgresStore {
                 account_id,
                 auth_provider,
                 credential_kind,
+                email: row.try_get::<Option<String>, _>("email")?,
+                oauth_subject: row.try_get::<Option<String>, _>("oauth_subject")?,
+                oauth_identity_provider: row
+                    .try_get::<Option<String>, _>("oauth_identity_provider")?,
+                email_verified: row.try_get::<Option<bool>, _>("email_verified")?,
                 chatgpt_plan_type: row.try_get::<Option<String>, _>("chatgpt_plan_type")?,
+                chatgpt_user_id: row.try_get::<Option<String>, _>("chatgpt_user_id")?,
+                chatgpt_subscription_active_start: row
+                    .try_get::<Option<DateTime<Utc>>, _>("chatgpt_subscription_active_start")?,
+                chatgpt_subscription_active_until: row
+                    .try_get::<Option<DateTime<Utc>>, _>("chatgpt_subscription_active_until")?,
+                chatgpt_subscription_last_checked: row
+                    .try_get::<Option<DateTime<Utc>>, _>("chatgpt_subscription_last_checked")?,
+                chatgpt_account_user_id: row
+                    .try_get::<Option<String>, _>("chatgpt_account_user_id")?,
+                chatgpt_compute_residency: row
+                    .try_get::<Option<String>, _>("chatgpt_compute_residency")?,
+                organizations: parse_json_array(
+                    row.try_get::<Option<String>, _>("organizations_json_text")?,
+                ),
+                groups: parse_json_array(row.try_get::<Option<String>, _>("groups_json_text")?),
                 source_type: row.try_get::<Option<String>, _>("source_type")?,
                 token_family_id: row.try_get::<Option<String>, _>("token_family_id")?,
                 token_version: row
@@ -304,7 +380,20 @@ impl PostgresStore {
                     account_id: item.account_id,
                     auth_provider: item.auth_provider,
                     credential_kind: item.credential_kind,
+                    email: item.email,
+                    oauth_subject: item.oauth_subject,
+                    oauth_identity_provider: item.oauth_identity_provider,
+                    email_verified: item.email_verified,
                     chatgpt_plan_type: item.chatgpt_plan_type,
+                    chatgpt_user_id: item.chatgpt_user_id,
+                    chatgpt_subscription_active_start: item.chatgpt_subscription_active_start,
+                    chatgpt_subscription_active_until: item.chatgpt_subscription_active_until,
+                    chatgpt_subscription_last_checked: item
+                        .chatgpt_subscription_last_checked,
+                    chatgpt_account_user_id: item.chatgpt_account_user_id,
+                    chatgpt_compute_residency: item.chatgpt_compute_residency,
+                    organizations: item.organizations,
+                    groups: item.groups,
                     source_type: item.source_type,
                     token_family_id: item.token_family_id,
                     token_version: item.token_version,
@@ -1087,5 +1176,15 @@ impl PostgresStore {
             .context("failed to commit oauth rate-limit refresh recovery transaction")?;
 
         Ok(u64::try_from(running_ids.len()).unwrap_or(u64::MAX))
+    }
+}
+
+fn parse_json_array(raw: Option<String>) -> Option<Vec<serde_json::Value>> {
+    let value = raw
+        .as_deref()
+        .and_then(|payload| serde_json::from_str::<serde_json::Value>(payload).ok())?;
+    match value {
+        serde_json::Value::Array(items) => Some(items),
+        _ => None,
     }
 }

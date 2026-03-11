@@ -20,6 +20,7 @@ use codex_pool_core::model::{
 };
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use sha2::{Digest, Sha256};
 use sqlx_postgres::PgPool;
 use uuid::Uuid;
@@ -321,8 +322,131 @@ impl OAuthCredentialRecord {
 struct SessionProfileRecord {
     credential_kind: SessionCredentialKind,
     token_expires_at: Option<DateTime<Utc>>,
+    email: Option<String>,
+    oauth_subject: Option<String>,
+    oauth_identity_provider: Option<String>,
+    email_verified: Option<bool>,
     chatgpt_plan_type: Option<String>,
+    chatgpt_user_id: Option<String>,
+    chatgpt_subscription_active_start: Option<DateTime<Utc>>,
+    chatgpt_subscription_active_until: Option<DateTime<Utc>>,
+    chatgpt_subscription_last_checked: Option<DateTime<Utc>>,
+    chatgpt_account_user_id: Option<String>,
+    chatgpt_compute_residency: Option<String>,
+    organizations: Option<Vec<Value>>,
+    groups: Option<Vec<Value>>,
     source_type: Option<String>,
+}
+
+impl SessionProfileRecord {
+    fn from_oauth_token_info(
+        token_info: &OAuthTokenInfo,
+        credential_kind: SessionCredentialKind,
+        chatgpt_plan_type: Option<String>,
+        source_type: Option<String>,
+    ) -> Self {
+        Self {
+            credential_kind,
+            token_expires_at: Some(token_info.expires_at),
+            email: token_info.email.clone(),
+            oauth_subject: token_info.oauth_subject.clone(),
+            oauth_identity_provider: token_info.oauth_identity_provider.clone(),
+            email_verified: token_info.email_verified,
+            chatgpt_plan_type: chatgpt_plan_type.or(token_info.chatgpt_plan_type.clone()),
+            chatgpt_user_id: token_info.chatgpt_user_id.clone(),
+            chatgpt_subscription_active_start: token_info
+                .chatgpt_subscription_active_start
+                .as_ref()
+                .cloned(),
+            chatgpt_subscription_active_until: token_info
+                .chatgpt_subscription_active_until
+                .as_ref()
+                .cloned(),
+            chatgpt_subscription_last_checked: token_info
+                .chatgpt_subscription_last_checked
+                .as_ref()
+                .cloned(),
+            chatgpt_account_user_id: token_info.chatgpt_account_user_id.clone(),
+            chatgpt_compute_residency: token_info.chatgpt_compute_residency.clone(),
+            organizations: token_info.organizations.clone(),
+            groups: token_info.groups.clone(),
+            source_type,
+        }
+    }
+
+    fn one_time_access_token(
+        token_expires_at: Option<DateTime<Utc>>,
+        chatgpt_plan_type: Option<String>,
+        source_type: Option<String>,
+    ) -> Self {
+        Self {
+            credential_kind: SessionCredentialKind::OneTimeAccessToken,
+            token_expires_at,
+            email: None,
+            oauth_subject: None,
+            oauth_identity_provider: None,
+            email_verified: None,
+            chatgpt_plan_type,
+            chatgpt_user_id: None,
+            chatgpt_subscription_active_start: None,
+            chatgpt_subscription_active_until: None,
+            chatgpt_subscription_last_checked: None,
+            chatgpt_account_user_id: None,
+            chatgpt_compute_residency: None,
+            organizations: None,
+            groups: None,
+            source_type,
+        }
+    }
+
+    fn merge_oauth_token_info(
+        mut self,
+        token_info: &OAuthTokenInfo,
+        credential_kind: SessionCredentialKind,
+        chatgpt_plan_type: Option<String>,
+        source_type: Option<String>,
+    ) -> Self {
+        self.credential_kind = credential_kind;
+        self.token_expires_at = Some(token_info.expires_at);
+        self.email = token_info.email.clone().or(self.email);
+        self.oauth_subject = token_info.oauth_subject.clone().or(self.oauth_subject);
+        self.oauth_identity_provider = token_info
+            .oauth_identity_provider
+            .clone()
+            .or(self.oauth_identity_provider);
+        self.email_verified = token_info.email_verified.or(self.email_verified);
+        self.chatgpt_plan_type = chatgpt_plan_type
+            .or(token_info.chatgpt_plan_type.clone())
+            .or(self.chatgpt_plan_type);
+        self.chatgpt_user_id = token_info.chatgpt_user_id.clone().or(self.chatgpt_user_id);
+        self.chatgpt_subscription_active_start = token_info
+            .chatgpt_subscription_active_start
+            .as_ref()
+            .cloned()
+            .or(self.chatgpt_subscription_active_start);
+        self.chatgpt_subscription_active_until = token_info
+            .chatgpt_subscription_active_until
+            .as_ref()
+            .cloned()
+            .or(self.chatgpt_subscription_active_until);
+        self.chatgpt_subscription_last_checked = token_info
+            .chatgpt_subscription_last_checked
+            .as_ref()
+            .cloned()
+            .or(self.chatgpt_subscription_last_checked);
+        self.chatgpt_account_user_id = token_info
+            .chatgpt_account_user_id
+            .clone()
+            .or(self.chatgpt_account_user_id);
+        self.chatgpt_compute_residency = token_info
+            .chatgpt_compute_residency
+            .clone()
+            .or(self.chatgpt_compute_residency);
+        self.organizations = token_info.organizations.clone().or(self.organizations);
+        self.groups = token_info.groups.clone().or(self.groups);
+        self.source_type = source_type.or(self.source_type);
+        self
+    }
 }
 
 #[derive(Debug, Clone, Default)]

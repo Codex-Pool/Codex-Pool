@@ -1,7 +1,11 @@
+import type { ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import type { OAuthAccountStatusResponse, UpstreamAccount } from '@/api/accounts'
 import { localizeOAuthErrorCodeDisplay } from '@/api/errorI18n'
+import { AccessibleTabList } from '@/components/ui/accessible-tabs'
+import { Badge } from '@/components/ui/badge'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import {
   Dialog,
   DialogContent,
@@ -9,8 +13,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import { AccessibleTabList } from '@/components/ui/accessible-tabs'
-import { Badge } from '@/components/ui/badge'
 import { cn } from '@/lib/utils'
 
 import type { AccountDetailTab, RateLimitDisplay } from './types'
@@ -20,8 +22,12 @@ import {
   clampPercent,
   formatAbsoluteDateTime,
   formatRateLimitResetText,
+  getAuthProviderLabel,
+  getCredentialKindLabel,
   getModeLabel,
+  getPlanLabel,
   getRefreshStatusLabel,
+  getSourceTypeLabel,
 } from './utils'
 
 type AccountDetailDialogProps = {
@@ -34,6 +40,82 @@ type AccountDetailDialogProps = {
   oauthStatusLoading: boolean
   rateLimitDisplays: RateLimitDisplay[]
   locale: string
+}
+
+type DetailSectionProps = {
+  title: string
+  children: ReactNode
+  className?: string
+}
+
+type DetailFieldProps = {
+  label: string
+  children?: ReactNode
+  mono?: boolean
+  scrollable?: boolean
+  title?: string
+  containerClassName?: string
+  className?: string
+}
+
+function DetailSection({ title, children, className }: DetailSectionProps) {
+  return (
+    <Card className={cn('gap-0 overflow-hidden border-border/70 py-0 shadow-none', className)}>
+      <CardHeader className="border-b bg-muted/20 px-4 py-3">
+        <CardTitle className="text-sm font-semibold">{title}</CardTitle>
+      </CardHeader>
+      <CardContent className="px-4 py-4">{children}</CardContent>
+    </Card>
+  )
+}
+
+function DetailField({
+  label,
+  children,
+  mono = false,
+  scrollable = false,
+  title,
+  containerClassName,
+  className,
+}: DetailFieldProps) {
+  const isEmpty = children === null || children === undefined || children === ''
+
+  return (
+    <div className={cn('space-y-1.5', containerClassName)}>
+      <div className="text-xs font-medium text-muted-foreground">{label}</div>
+      <div
+        className={cn(
+          'rounded-lg border bg-background px-3 py-2 text-sm',
+          mono ? 'font-mono text-xs break-all' : 'break-words',
+          scrollable ? 'max-h-32 overflow-auto' : '',
+          className,
+        )}
+        title={title}
+      >
+        {isEmpty ? <span className="text-muted-foreground">-</span> : children}
+      </div>
+    </div>
+  )
+}
+
+function formatOptionalDateTime(value?: string) {
+  if (!value) {
+    return '-'
+  }
+  return formatAbsoluteDateTime(value)
+}
+
+function renderRefreshStatusBadge(
+  status: OAuthAccountStatusResponse['last_refresh_status'],
+  label: string,
+) {
+  if (status === 'failed') {
+    return <Badge variant="destructive">{label}</Badge>
+  }
+  if (status === 'ok') {
+    return <Badge variant="success">{label}</Badge>
+  }
+  return <Badge variant="secondary">{label}</Badge>
 }
 
 export function AccountDetailDialog({
@@ -51,419 +133,405 @@ export function AccountDetailDialog({
   const fieldLabel = (key: string, defaultValue: string) =>
     t(`accounts.details.fields.${key}`, { defaultValue })
 
+  const primaryIdentity = oauthStatus?.email?.trim() || account?.label || '-'
+  const refreshErrorDisplay = localizeOAuthErrorCodeDisplay(t, oauthStatus?.last_refresh_error_code)
+  const rateLimitErrorDisplay = localizeOAuthErrorCodeDisplay(
+    t,
+    oauthStatus?.rate_limits_last_error_code,
+  )
+  const sourceTypeLabel = getSourceTypeLabel(oauthStatus?.source_type, t)
+
   return (
     <Dialog open={Boolean(account)} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-5xl">
-        <DialogHeader>
+      <DialogContent className="flex max-h-[90vh] flex-col gap-0 overflow-hidden p-0 sm:max-w-6xl">
+        <DialogHeader className="shrink-0 border-b px-6 py-5 pr-14">
           <DialogTitle>
             {account
-              ? `${t('accounts.actions.viewDetails', { defaultValue: 'View Details' })} · ${account.label}`
+              ? `${t('accounts.actions.viewDetails', { defaultValue: 'View Details' })} · ${primaryIdentity}`
               : t('accounts.actions.viewDetails', { defaultValue: 'View Details' })}
           </DialogTitle>
           <DialogDescription>
             {t('accounts.details.description', {
-              defaultValue: 'Description',
+              defaultValue: 'View account profile, OAuth status, limits, and raw payloads.',
             })}
           </DialogDescription>
         </DialogHeader>
 
         {account ? (
-          <div className="space-y-4">
-            <AccessibleTabList
-              idBase="account-detail"
-              ariaLabel={t('accounts.details.tabAria', { defaultValue: 'Account detail tabs' })}
-              value={detailTab}
-              onValueChange={onDetailTabChange}
-              items={[
-                {
-                  value: 'profile',
-                  label: t('accounts.details.tabs.profile', { defaultValue: 'Profile' }),
-                },
-                {
-                  value: 'oauth',
-                  label: t('accounts.details.tabs.oauth', { defaultValue: 'OAuth' }),
-                },
-                {
-                  value: 'limits',
-                  label: t('accounts.details.tabs.limits', { defaultValue: 'Limits' }),
-                },
-                {
-                  value: 'raw',
-                  label: t('accounts.details.tabs.raw', { defaultValue: 'Raw' }),
-                },
-              ]}
-            />
+          <div className="flex min-h-0 flex-1 flex-col">
+            <div className="shrink-0 border-b px-6 py-4">
+              <AccessibleTabList
+                idBase="account-detail"
+                ariaLabel={t('accounts.details.tabAria', { defaultValue: 'Account detail tabs' })}
+                value={detailTab}
+                onValueChange={onDetailTabChange}
+                items={[
+                  {
+                    value: 'profile',
+                    label: t('accounts.details.tabs.profile', { defaultValue: 'Profile' }),
+                  },
+                  {
+                    value: 'oauth',
+                    label: t('accounts.details.tabs.oauth', { defaultValue: 'OAuth' }),
+                  },
+                  {
+                    value: 'limits',
+                    label: t('accounts.details.tabs.limits', { defaultValue: 'Limits' }),
+                  },
+                  {
+                    value: 'raw',
+                    label: t('accounts.details.tabs.raw', { defaultValue: 'Raw' }),
+                  },
+                ]}
+              />
+            </div>
 
-            {detailTab === 'profile' ? (
-              <section
-                id="account-detail-panel-profile"
-                role="tabpanel"
-                tabIndex={0}
-                aria-labelledby="account-detail-tab-profile"
-                className="space-y-3 rounded-lg border p-4"
-              >
-                <h3 className="text-base font-medium">
-                  {t('accounts.details.profileTitle', { defaultValue: 'Profile Title' })}
-                </h3>
-                <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-                  <div className="space-y-1.5">
-                    <label className="text-xs font-medium text-muted-foreground">
-                      {fieldLabel('label', 'Label')}
-                    </label>
-                    <div className="rounded border px-3 py-2 text-sm">{account.label}</div>
-                  </div>
-                  <div className="space-y-1.5">
-                    <label className="text-xs font-medium text-muted-foreground">
-                      {fieldLabel('mode', 'Mode')}
-                    </label>
-                    <div className="rounded border px-3 py-2 text-sm">
-                      {getModeLabel(account.mode, t)}
-                    </div>
-                  </div>
-                  <div className="space-y-1.5">
-                    <label className="text-xs font-medium text-muted-foreground">
-                      {fieldLabel('accountId', 'Account ID')}
-                    </label>
-                    <div className="rounded border px-3 py-2 font-mono text-xs break-all">
-                      {account.id}
-                    </div>
-                  </div>
-                  <div className="space-y-1.5">
-                    <label className="text-xs font-medium text-muted-foreground">
-                      {fieldLabel('enabled', 'Enabled')}
-                    </label>
-                    <div className="rounded border px-3 py-2 text-sm">
-                      <Badge variant={account.enabled ? 'success' : 'warning'}>
-                        {account.enabled
-                          ? t('accounts.status.active')
-                          : t('accounts.status.disabled')}
-                      </Badge>
-                    </div>
-                  </div>
-                  <div className="space-y-1.5">
-                    <label className="text-xs font-medium text-muted-foreground">
-                      {fieldLabel('baseUrl', 'Base URL')}
-                    </label>
-                    <div className="rounded border px-3 py-2 font-mono text-xs break-all">
-                      {account.base_url}
-                    </div>
-                  </div>
-                  <div className="space-y-1.5">
-                    <label className="text-xs font-medium text-muted-foreground">
-                      {fieldLabel('chatgptAccountId', 'ChatGPT Account ID')}
-                    </label>
-                    <div className="rounded border px-3 py-2 font-mono text-xs break-all">
-                      {account.chatgpt_account_id ?? '-'}
-                    </div>
-                  </div>
-                  <div className="space-y-1.5">
-                    <label className="text-xs font-medium text-muted-foreground">
-                      {fieldLabel('priority', 'Priority')}
-                    </label>
-                    <div className="rounded border px-3 py-2 text-sm">{account.priority}</div>
-                  </div>
-                  <div className="space-y-1.5">
-                    <label className="text-xs font-medium text-muted-foreground">
-                      {fieldLabel('createdAt', 'Created At')}
-                    </label>
-                    <div className="rounded border px-3 py-2 text-sm">
-                      {formatAbsoluteDateTime(account.created_at)}
-                    </div>
-                  </div>
-                </div>
-                <div className="space-y-1.5">
-                  <label className="text-xs font-medium text-muted-foreground">
-                    {fieldLabel('bearerToken', 'Bearer Token')}
-                  </label>
-                  <div className="max-h-32 overflow-auto rounded border px-3 py-2 font-mono text-xs break-all">
-                    {account.bearer_token}
-                  </div>
-                </div>
-              </section>
-            ) : null}
+            <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5">
+              {detailTab === 'profile' ? (
+                <section
+                  id="account-detail-panel-profile"
+                  role="tabpanel"
+                  tabIndex={0}
+                  aria-labelledby="account-detail-tab-profile"
+                  className="space-y-4"
+                >
+                  <h3 className="text-base font-semibold">
+                    {t('accounts.details.profileTitle', { defaultValue: 'Account Profile' })}
+                  </h3>
 
-            {detailTab === 'oauth' ? (
-              <section
-                id="account-detail-panel-oauth"
-                role="tabpanel"
-                tabIndex={0}
-                aria-labelledby="account-detail-tab-oauth"
-                className="space-y-3 rounded-lg border p-4"
-              >
-                <h3 className="text-base font-medium">
-                  {t('accounts.details.oauthTitle', { defaultValue: 'Oauth Title' })}
-                </h3>
-                {!isSessionAccount ? (
-                  <p className="text-sm text-muted-foreground">
-                    {t('accounts.details.oauthNotApplicable', {
-                      defaultValue: 'Oauth Not Applicable',
-                    })}
-                  </p>
-                ) : oauthStatusLoading && !oauthStatus ? (
-                  <p className="text-sm text-muted-foreground">{t('accounts.oauth.loading')}</p>
-                ) : oauthStatus ? (
-                  <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-                    <div className="space-y-1.5">
-                      <label className="text-xs font-medium text-muted-foreground">
-                        {fieldLabel('authProvider', 'Auth Provider')}
-                      </label>
-                      <div className="rounded border px-3 py-2 text-sm">
-                        {oauthStatus.auth_provider}
+                  <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]">
+                    <DetailSection
+                      title={t('accounts.details.sections.identity', {
+                        defaultValue: 'Identity',
+                      })}
+                    >
+                      <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                        <DetailField label={fieldLabel('email', 'Email')}>
+                          {oauthStatus?.email ?? '-'}
+                        </DetailField>
+                        <DetailField label={fieldLabel('label', 'Label')}>
+                          {account.label}
+                        </DetailField>
+                        <DetailField label={fieldLabel('mode', 'Mode')}>
+                          {getModeLabel(account.mode, t)}
+                        </DetailField>
+                        <DetailField label={fieldLabel('enabled', 'Enabled')}>
+                          <Badge variant={account.enabled ? 'success' : 'warning'}>
+                            {account.enabled
+                              ? t('accounts.status.active')
+                              : t('accounts.status.disabled')}
+                          </Badge>
+                        </DetailField>
+                        <DetailField label={fieldLabel('createdAt', 'Created At')}>
+                          {formatAbsoluteDateTime(account.created_at)}
+                        </DetailField>
                       </div>
-                    </div>
-                    <div className="space-y-1.5">
-                      <label className="text-xs font-medium text-muted-foreground">
-                        {fieldLabel('credentialKind', 'Credential Kind')}
-                      </label>
-                      <div className="rounded border px-3 py-2 text-sm">
-                        {oauthStatus.credential_kind ?? '-'}
-                      </div>
-                    </div>
-                    <div className="space-y-1.5">
-                      <label className="text-xs font-medium text-muted-foreground">
-                        {fieldLabel('lastRefreshStatus', 'Last Refresh Status')}
-                      </label>
-                      <div className="rounded border px-3 py-2 text-sm">
-                        {getRefreshStatusLabel(oauthStatus.last_refresh_status, t)}
-                      </div>
-                    </div>
-                    <div className="space-y-1.5">
-                      <label className="text-xs font-medium text-muted-foreground">
-                        {fieldLabel('effectiveEnabled', 'Effective Enabled')}
-                      </label>
-                      <div className="rounded border px-3 py-2 text-sm">
-                        {oauthStatus.effective_enabled ? t('common.yes') : t('common.no')}
-                      </div>
-                    </div>
-                    <div className="space-y-1.5">
-                      <label className="text-xs font-medium text-muted-foreground">
-                        {fieldLabel('chatgptPlanType', 'ChatGPT Plan Type')}
-                      </label>
-                      <div className="rounded border px-3 py-2 text-sm">
-                        {oauthStatus.chatgpt_plan_type ?? '-'}
-                      </div>
-                    </div>
-                    <div className="space-y-1.5">
-                      <label className="text-xs font-medium text-muted-foreground">
-                        {fieldLabel('sourceType', 'Source Type')}
-                      </label>
-                      <div className="rounded border px-3 py-2 text-sm">
-                        {oauthStatus.source_type ?? '-'}
-                      </div>
-                    </div>
-                    <div className="space-y-1.5">
-                      <label className="text-xs font-medium text-muted-foreground">
-                        {fieldLabel('tokenFamilyId', 'Token Family ID')}
-                      </label>
-                      <div className="rounded border px-3 py-2 font-mono text-xs break-all">
-                        {oauthStatus.token_family_id ?? '-'}
-                      </div>
-                    </div>
-                    <div className="space-y-1.5">
-                      <label className="text-xs font-medium text-muted-foreground">
-                        {fieldLabel('tokenVersion', 'Token Version')}
-                      </label>
-                      <div className="rounded border px-3 py-2 text-sm">
-                        {oauthStatus.token_version ?? '-'}
-                      </div>
-                    </div>
-                    <div className="space-y-1.5">
-                      <label className="text-xs font-medium text-muted-foreground">
-                        {fieldLabel('tokenExpiresAt', 'Token Expires At')}
-                      </label>
-                      <div className="rounded border px-3 py-2 text-sm">
-                        {oauthStatus.token_expires_at ?? '-'}
-                      </div>
-                    </div>
-                    <div className="space-y-1.5">
-                      <label className="text-xs font-medium text-muted-foreground">
-                        {fieldLabel('nextRefreshAt', 'Next Refresh At')}
-                      </label>
-                      <div className="rounded border px-3 py-2 text-sm">
-                        {oauthStatus.next_refresh_at ?? '-'}
-                      </div>
-                    </div>
-                    <div className="space-y-1.5">
-                      <label className="text-xs font-medium text-muted-foreground">
-                        {fieldLabel('lastRefreshAt', 'Last Refresh At')}
-                      </label>
-                      <div className="rounded border px-3 py-2 text-sm">
-                        {oauthStatus.last_refresh_at ?? '-'}
-                      </div>
-                    </div>
-                    <div className="space-y-1.5">
-                      <label className="text-xs font-medium text-muted-foreground">
-                        {fieldLabel('refreshReusedDetected', 'Refresh Reused Detected')}
-                      </label>
-                      <div className="rounded border px-3 py-2 text-sm">
-                        {oauthStatus.refresh_reused_detected ? t('common.yes') : t('common.no')}
-                      </div>
-                    </div>
-                    <div className="space-y-1.5">
-                      <label className="text-xs font-medium text-muted-foreground">
-                        {fieldLabel('lastRefreshErrorCode', 'Last Refresh Error Code')}
-                      </label>
-                      <div
-                        className="rounded border px-3 py-2 text-xs break-all"
-                        title={localizeOAuthErrorCodeDisplay(t, oauthStatus.last_refresh_error_code).tooltip}
-                      >
-                        {localizeOAuthErrorCodeDisplay(t, oauthStatus.last_refresh_error_code).label}
-                      </div>
-                    </div>
-                    <div className="space-y-1.5 md:col-span-2">
-                      <label className="text-xs font-medium text-muted-foreground">
-                        {fieldLabel('lastRefreshError', 'Last Refresh Error')}
-                      </label>
-                      <div
-                        className="rounded border px-3 py-2 text-sm break-all"
-                        title={import.meta.env.DEV ? oauthStatus.last_refresh_error ?? undefined : undefined}
-                      >
-                        {oauthStatus.last_refresh_error
-                          ? localizeOAuthErrorCodeDisplay(t, oauthStatus.last_refresh_error_code).label
-                          : '-'}
-                      </div>
-                    </div>
-                    <div className="space-y-1.5">
-                      <label className="text-xs font-medium text-muted-foreground">
-                        {fieldLabel('rateLimitsFetchedAt', 'Rate Limits Fetched At')}
-                      </label>
-                      <div className="rounded border px-3 py-2 text-sm">
-                        {oauthStatus.rate_limits_fetched_at ?? '-'}
-                      </div>
-                    </div>
-                    <div className="space-y-1.5">
-                      <label className="text-xs font-medium text-muted-foreground">
-                        {fieldLabel('rateLimitsExpiresAt', 'Rate Limits Expires At')}
-                      </label>
-                      <div className="rounded border px-3 py-2 text-sm">
-                        {oauthStatus.rate_limits_expires_at ?? '-'}
-                      </div>
-                    </div>
-                    <div className="space-y-1.5">
-                      <label className="text-xs font-medium text-muted-foreground">
-                        {fieldLabel('rateLimitsLastErrorCode', 'Rate Limits Last Error Code')}
-                      </label>
-                      <div
-                        className="rounded border px-3 py-2 text-xs break-all"
-                        title={localizeOAuthErrorCodeDisplay(t, oauthStatus.rate_limits_last_error_code).tooltip}
-                      >
-                        {localizeOAuthErrorCodeDisplay(t, oauthStatus.rate_limits_last_error_code).label}
-                      </div>
-                    </div>
-                    <div className="space-y-1.5 md:col-span-2">
-                      <label className="text-xs font-medium text-muted-foreground">
-                        {fieldLabel('rateLimitsLastError', 'Rate Limits Last Error')}
-                      </label>
-                      <div
-                        className="rounded border px-3 py-2 text-sm break-all"
-                        title={import.meta.env.DEV ? oauthStatus.rate_limits_last_error ?? undefined : undefined}
-                      >
-                        {oauthStatus.rate_limits_last_error
-                          ? localizeOAuthErrorCodeDisplay(t, oauthStatus.rate_limits_last_error_code).label
-                          : '-'}
-                      </div>
-                    </div>
-                  </div>
-                ) : (
-                  <p className="text-sm text-muted-foreground">
-                    {t('accounts.details.noOauthStatus', { defaultValue: 'No Oauth Status' })}
-                  </p>
-                )}
-              </section>
-            ) : null}
+                    </DetailSection>
 
-            {detailTab === 'limits' ? (
-              <section
-                id="account-detail-panel-limits"
-                role="tabpanel"
-                tabIndex={0}
-                aria-labelledby="account-detail-tab-limits"
-                className="space-y-3 rounded-lg border p-4"
-              >
-                <h3 className="text-base font-medium">
-                  {t('accounts.details.limitsTitle', { defaultValue: 'Limits Title' })}
-                </h3>
-                {!isSessionAccount ? (
-                  <p className="text-sm text-muted-foreground">
-                    {t('accounts.details.oauthNotApplicable', {
-                      defaultValue: 'Oauth Not Applicable',
-                    })}
-                  </p>
-                ) : rateLimitDisplays.length === 0 ? (
-                  <p className="text-sm text-muted-foreground">
-                    {t('accounts.rateLimits.unavailable')}
-                  </p>
-                ) : (
-                  <div className="space-y-2">
-                    {rateLimitDisplays.map((item) => {
-                      const remaining = clampPercent(item.remainingPercent)
-                      return (
-                        <div
-                          key={item.bucket}
-                          className="rounded-md border border-border/60 bg-muted/20 p-3"
+                    <DetailSection
+                      title={t('accounts.details.sections.connection', {
+                        defaultValue: 'Connection',
+                      })}
+                    >
+                      <div className="grid grid-cols-1 gap-3">
+                        <DetailField
+                          label={fieldLabel('baseUrl', 'Base URL')}
+                          mono
+                          title={account.base_url}
                         >
-                          <div className="flex items-center justify-between gap-2 text-sm">
-                            <span className="font-medium">{bucketLabel(item.bucket, t)}</span>
-                            <span className="tabular-nums text-muted-foreground">
-                              {t('accounts.rateLimits.remainingPrefix', { defaultValue: 'Remaining' })}{' '}
-                              {remaining.toFixed(1)}%
-                            </span>
-                          </div>
-                          <div className="mt-1 h-2 overflow-hidden rounded-full bg-muted-foreground/20">
-                            <div
-                              className={cn(
-                                'h-full transition-[width] duration-300',
-                                bucketBarClass(item.bucket),
-                              )}
-                              style={{ width: `${remaining}%` }}
-                            />
-                          </div>
-                          <p className="mt-1 text-xs text-muted-foreground">
-                            {formatRateLimitResetText({
-                              resetsAt: item.resetsAt,
-                              locale,
-                              t,
-                            })}
-                          </p>
-                        </div>
-                      )
-                    })}
-                  </div>
-                )}
-              </section>
-            ) : null}
+                          {account.base_url}
+                        </DetailField>
+                        <DetailField label={fieldLabel('priority', 'Priority')}>
+                          {String(account.priority)}
+                        </DetailField>
+                      </div>
+                    </DetailSection>
 
-            {detailTab === 'raw' ? (
-              <section
-                id="account-detail-panel-raw"
-                role="tabpanel"
-                tabIndex={0}
-                aria-labelledby="account-detail-tab-raw"
-                className="space-y-3 rounded-lg border p-4"
-              >
-                <h3 className="text-base font-medium">
-                  {t('accounts.details.rawTitle', { defaultValue: 'Raw Title' })}
-                </h3>
-                <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
-                  <div className="space-y-1.5">
-                    <label className="text-xs font-medium text-muted-foreground">
-                      {fieldLabel('rawAccount', 'Account')}
-                    </label>
-                    <pre className="max-h-72 overflow-auto rounded border bg-muted/20 p-3 text-xs leading-relaxed">
-                      {JSON.stringify(account, null, 2)}
-                    </pre>
+                    <DetailSection
+                      title={t('accounts.details.sections.credentials', {
+                        defaultValue: 'Credentials',
+                      })}
+                      className="xl:col-span-2"
+                    >
+                      <DetailField
+                        label={fieldLabel('bearerToken', 'Bearer Token')}
+                        mono
+                        scrollable
+                        title={account.bearer_token}
+                        className="max-h-40"
+                      >
+                        {account.bearer_token}
+                      </DetailField>
+                    </DetailSection>
                   </div>
-                  <div className="space-y-1.5">
-                    <label className="text-xs font-medium text-muted-foreground">
-                      {fieldLabel('rawOauthStatus', 'OAuth Status')}
-                    </label>
-                    <pre className="max-h-72 overflow-auto rounded border bg-muted/20 p-3 text-xs leading-relaxed">
-                      {JSON.stringify(oauthStatus ?? null, null, 2)}
-                    </pre>
+                </section>
+              ) : null}
+
+              {detailTab === 'oauth' ? (
+                <section
+                  id="account-detail-panel-oauth"
+                  role="tabpanel"
+                  tabIndex={0}
+                  aria-labelledby="account-detail-tab-oauth"
+                  className="space-y-4"
+                >
+                  <h3 className="text-base font-semibold">
+                    {t('accounts.details.oauthTitle', { defaultValue: 'OAuth Status' })}
+                  </h3>
+                  {!isSessionAccount ? (
+                    <p className="text-sm text-muted-foreground">
+                      {t('accounts.details.oauthNotApplicable', {
+                        defaultValue: 'OAuth details are not available for this account type.',
+                      })}
+                    </p>
+                  ) : oauthStatusLoading && !oauthStatus ? (
+                    <p className="text-sm text-muted-foreground">{t('accounts.oauth.loading')}</p>
+                  ) : oauthStatus ? (
+                    <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+                      <DetailSection
+                        title={t('accounts.details.sections.subscription', {
+                          defaultValue: 'Subscription',
+                        })}
+                      >
+                        <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                          <DetailField label={fieldLabel('chatgptPlanType', 'ChatGPT Plan Type')}>
+                            <Badge variant="outline" title={oauthStatus.chatgpt_plan_type ?? undefined}>
+                              {getPlanLabel(oauthStatus.chatgpt_plan_type, t)}
+                            </Badge>
+                          </DetailField>
+                          <DetailField
+                            label={fieldLabel('sourceType', 'Source Type')}
+                            title={oauthStatus.source_type ?? undefined}
+                          >
+                            {sourceTypeLabel ?? '-'}
+                          </DetailField>
+                          <DetailField label={fieldLabel('tokenExpiresAt', 'Token Expires At')}>
+                            {formatOptionalDateTime(oauthStatus.token_expires_at)}
+                          </DetailField>
+                          <DetailField label={fieldLabel('effectiveEnabled', 'Effective Enabled')}>
+                            <Badge variant={oauthStatus.effective_enabled ? 'success' : 'warning'}>
+                              {oauthStatus.effective_enabled ? t('common.yes') : t('common.no')}
+                            </Badge>
+                          </DetailField>
+                        </div>
+                      </DetailSection>
+
+                      <DetailSection
+                        title={t('accounts.details.sections.refresh', {
+                          defaultValue: 'Refresh State',
+                        })}
+                      >
+                        <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                          <DetailField
+                            label={fieldLabel('authProvider', 'Auth Provider')}
+                            title={oauthStatus.auth_provider}
+                          >
+                            {getAuthProviderLabel(oauthStatus.auth_provider, t)}
+                          </DetailField>
+                          <DetailField
+                            label={fieldLabel('credentialKind', 'Credential Kind')}
+                            title={oauthStatus.credential_kind ?? undefined}
+                          >
+                            {getCredentialKindLabel(oauthStatus.credential_kind, t)}
+                          </DetailField>
+                          <DetailField label={fieldLabel('lastRefreshStatus', 'Last Refresh Status')}>
+                            {renderRefreshStatusBadge(
+                              oauthStatus.last_refresh_status,
+                              getRefreshStatusLabel(oauthStatus.last_refresh_status, t),
+                            )}
+                          </DetailField>
+                          <DetailField label={fieldLabel('lastRefreshAt', 'Last Refresh At')}>
+                            {formatOptionalDateTime(oauthStatus.last_refresh_at)}
+                          </DetailField>
+                          <DetailField
+                            label={fieldLabel('refreshReusedDetected', 'Refresh Reused Detected')}
+                          >
+                            <Badge
+                              variant={oauthStatus.refresh_reused_detected ? 'warning' : 'secondary'}
+                            >
+                              {oauthStatus.refresh_reused_detected
+                                ? t('common.yes')
+                                : t('common.no')}
+                            </Badge>
+                          </DetailField>
+                          <DetailField
+                            label={fieldLabel('tokenVersion', 'Token Version')}
+                            title={
+                              typeof oauthStatus.token_version === 'number'
+                                ? String(oauthStatus.token_version)
+                                : undefined
+                            }
+                          >
+                            {oauthStatus.token_version?.toString() ?? '-'}
+                          </DetailField>
+                          <DetailField
+                            label={fieldLabel('tokenFamilyId', 'Token Family ID')}
+                            mono
+                            title={oauthStatus.token_family_id ?? undefined}
+                            containerClassName="md:col-span-2"
+                          >
+                            {oauthStatus.token_family_id ?? '-'}
+                          </DetailField>
+                          <DetailField
+                            label={fieldLabel('lastRefreshErrorCode', 'Last Refresh Error Code')}
+                            title={refreshErrorDisplay.tooltip}
+                          >
+                            {oauthStatus.last_refresh_error_code ? refreshErrorDisplay.label : '-'}
+                          </DetailField>
+                          <DetailField
+                            label={fieldLabel('lastRefreshError', 'Last Refresh Error')}
+                            scrollable
+                            title={
+                              import.meta.env.DEV
+                                ? oauthStatus.last_refresh_error ?? undefined
+                                : undefined
+                            }
+                            containerClassName="md:col-span-2"
+                            className="max-h-28"
+                          >
+                            {oauthStatus.last_refresh_error ? refreshErrorDisplay.label : '-'}
+                          </DetailField>
+                        </div>
+                      </DetailSection>
+
+                      <DetailSection
+                        title={t('accounts.details.sections.cache', {
+                          defaultValue: 'Rate Limit Cache',
+                        })}
+                        className="xl:col-span-2"
+                      >
+                        <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                          <DetailField label={fieldLabel('rateLimitsFetchedAt', 'Rate Limits Fetched At')}>
+                            {formatOptionalDateTime(oauthStatus.rate_limits_fetched_at)}
+                          </DetailField>
+                          <DetailField label={fieldLabel('rateLimitsExpiresAt', 'Rate Limits Expires At')}>
+                            {formatOptionalDateTime(oauthStatus.rate_limits_expires_at)}
+                          </DetailField>
+                          <DetailField
+                            label={fieldLabel('rateLimitsLastErrorCode', 'Rate Limits Last Error Code')}
+                            title={rateLimitErrorDisplay.tooltip}
+                          >
+                            {oauthStatus.rate_limits_last_error_code ? rateLimitErrorDisplay.label : '-'}
+                          </DetailField>
+                          <DetailField
+                            label={fieldLabel('rateLimitsLastError', 'Rate Limits Last Error')}
+                            scrollable
+                            title={
+                              import.meta.env.DEV
+                                ? oauthStatus.rate_limits_last_error ?? undefined
+                                : undefined
+                            }
+                            containerClassName="md:col-span-2"
+                            className="max-h-28"
+                          >
+                            {oauthStatus.rate_limits_last_error ? rateLimitErrorDisplay.label : '-'}
+                          </DetailField>
+                        </div>
+                      </DetailSection>
+                    </div>
+                  ) : (
+                    <p className="text-sm text-muted-foreground">
+                      {t('accounts.details.noOauthStatus', {
+                        defaultValue: 'No OAuth status data yet.',
+                      })}
+                    </p>
+                  )}
+                </section>
+              ) : null}
+
+              {detailTab === 'limits' ? (
+                <section
+                  id="account-detail-panel-limits"
+                  role="tabpanel"
+                  tabIndex={0}
+                  aria-labelledby="account-detail-tab-limits"
+                  className="space-y-4"
+                >
+                  <h3 className="text-base font-semibold">
+                    {t('accounts.details.limitsTitle', { defaultValue: 'Rate Limits' })}
+                  </h3>
+                  {!isSessionAccount ? (
+                    <p className="text-sm text-muted-foreground">
+                      {t('accounts.details.oauthNotApplicable', {
+                        defaultValue: 'OAuth details are not available for this account type.',
+                      })}
+                    </p>
+                  ) : rateLimitDisplays.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">
+                      {t('accounts.rateLimits.unavailable')}
+                    </p>
+                  ) : (
+                    <DetailSection
+                      title={t('accounts.details.limitsTitle', { defaultValue: 'Rate Limits' })}
+                    >
+                      <div className="space-y-3">
+                        {rateLimitDisplays.map((item) => {
+                          const remaining = clampPercent(item.remainingPercent)
+                          return (
+                            <div
+                              key={item.bucket}
+                              className="rounded-lg border border-border/60 bg-muted/20 p-3"
+                            >
+                              <div className="flex items-center justify-between gap-2 text-sm">
+                                <span className="font-medium">{bucketLabel(item.bucket, t)}</span>
+                                <span className="tabular-nums text-muted-foreground">
+                                  {t('accounts.rateLimits.remainingPrefix', {
+                                    defaultValue: 'Remaining',
+                                  })}{' '}
+                                  {remaining.toFixed(1)}%
+                                </span>
+                              </div>
+                              <div className="mt-2 h-2 overflow-hidden rounded-full bg-muted-foreground/20">
+                                <div
+                                  className={cn(
+                                    'h-full transition-[width] duration-300',
+                                    bucketBarClass(item.bucket),
+                                  )}
+                                  style={{ width: `${remaining}%` }}
+                                />
+                              </div>
+                              <p className="mt-2 text-xs text-muted-foreground">
+                                {formatRateLimitResetText({
+                                  resetsAt: item.resetsAt,
+                                  locale,
+                                  t,
+                                })}
+                              </p>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    </DetailSection>
+                  )}
+                </section>
+              ) : null}
+
+              {detailTab === 'raw' ? (
+                <section
+                  id="account-detail-panel-raw"
+                  role="tabpanel"
+                  tabIndex={0}
+                  aria-labelledby="account-detail-tab-raw"
+                  className="space-y-4"
+                >
+                  <h3 className="text-base font-semibold">
+                    {t('accounts.details.rawTitle', { defaultValue: 'Raw Payload' })}
+                  </h3>
+                  <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+                    <DetailSection title={fieldLabel('rawAccount', 'Account Payload')}>
+                      <pre className="max-h-[28rem] overflow-auto rounded-lg border bg-muted/20 p-3 text-xs leading-relaxed">
+                        {JSON.stringify(account, null, 2)}
+                      </pre>
+                    </DetailSection>
+                    <DetailSection title={fieldLabel('rawOauthStatus', 'OAuth Status Payload')}>
+                      <pre className="max-h-[28rem] overflow-auto rounded-lg border bg-muted/20 p-3 text-xs leading-relaxed">
+                        {JSON.stringify(oauthStatus ?? null, null, 2)}
+                      </pre>
+                    </DetailSection>
                   </div>
-                </div>
-              </section>
-            ) : null}
+                </section>
+              ) : null}
+            </div>
           </div>
         ) : null}
       </DialogContent>

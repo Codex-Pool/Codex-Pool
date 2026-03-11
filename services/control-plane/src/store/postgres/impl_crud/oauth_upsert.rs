@@ -46,36 +46,75 @@ impl PostgresStore {
         &self,
         tx: &mut sqlx::PgConnection,
         account_id: Uuid,
-        credential_kind: SessionCredentialKind,
-        token_expires_at: Option<DateTime<Utc>>,
-        chatgpt_plan_type: Option<String>,
-        source_type: Option<String>,
+        profile: &SessionProfileRecord,
     ) -> Result<()> {
+        let organizations_json = profile
+            .organizations
+            .clone()
+            .map(serde_json::Value::Array);
+        let groups_json = profile.groups.clone().map(serde_json::Value::Array);
+
         sqlx::query(
             r#"
             INSERT INTO upstream_account_session_profiles (
                 account_id,
                 credential_kind,
                 token_expires_at,
+                email,
+                oauth_subject,
+                oauth_identity_provider,
+                email_verified,
                 chatgpt_plan_type,
+                chatgpt_user_id,
+                chatgpt_subscription_active_start,
+                chatgpt_subscription_active_until,
+                chatgpt_subscription_last_checked,
+                chatgpt_account_user_id,
+                chatgpt_compute_residency,
+                organizations_json,
+                groups_json,
                 source_type,
                 updated_at
             )
-            VALUES ($1, $2, $3, $4, $5, $6)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
             ON CONFLICT (account_id) DO UPDATE
             SET
                 credential_kind = EXCLUDED.credential_kind,
                 token_expires_at = EXCLUDED.token_expires_at,
+                email = COALESCE(EXCLUDED.email, upstream_account_session_profiles.email),
+                oauth_subject = COALESCE(EXCLUDED.oauth_subject, upstream_account_session_profiles.oauth_subject),
+                oauth_identity_provider = COALESCE(EXCLUDED.oauth_identity_provider, upstream_account_session_profiles.oauth_identity_provider),
+                email_verified = COALESCE(EXCLUDED.email_verified, upstream_account_session_profiles.email_verified),
                 chatgpt_plan_type = COALESCE(EXCLUDED.chatgpt_plan_type, upstream_account_session_profiles.chatgpt_plan_type),
+                chatgpt_user_id = COALESCE(EXCLUDED.chatgpt_user_id, upstream_account_session_profiles.chatgpt_user_id),
+                chatgpt_subscription_active_start = COALESCE(EXCLUDED.chatgpt_subscription_active_start, upstream_account_session_profiles.chatgpt_subscription_active_start),
+                chatgpt_subscription_active_until = COALESCE(EXCLUDED.chatgpt_subscription_active_until, upstream_account_session_profiles.chatgpt_subscription_active_until),
+                chatgpt_subscription_last_checked = COALESCE(EXCLUDED.chatgpt_subscription_last_checked, upstream_account_session_profiles.chatgpt_subscription_last_checked),
+                chatgpt_account_user_id = COALESCE(EXCLUDED.chatgpt_account_user_id, upstream_account_session_profiles.chatgpt_account_user_id),
+                chatgpt_compute_residency = COALESCE(EXCLUDED.chatgpt_compute_residency, upstream_account_session_profiles.chatgpt_compute_residency),
+                organizations_json = COALESCE(EXCLUDED.organizations_json, upstream_account_session_profiles.organizations_json),
+                groups_json = COALESCE(EXCLUDED.groups_json, upstream_account_session_profiles.groups_json),
                 source_type = COALESCE(EXCLUDED.source_type, upstream_account_session_profiles.source_type),
                 updated_at = EXCLUDED.updated_at
             "#,
         )
         .bind(account_id)
-        .bind(session_credential_kind_to_db(&credential_kind))
-        .bind(token_expires_at)
-        .bind(chatgpt_plan_type)
-        .bind(source_type)
+        .bind(session_credential_kind_to_db(&profile.credential_kind))
+        .bind(profile.token_expires_at.as_ref().cloned())
+        .bind(profile.email.clone())
+        .bind(profile.oauth_subject.clone())
+        .bind(profile.oauth_identity_provider.clone())
+        .bind(profile.email_verified)
+        .bind(profile.chatgpt_plan_type.clone())
+        .bind(profile.chatgpt_user_id.clone())
+        .bind(profile.chatgpt_subscription_active_start.as_ref().cloned())
+        .bind(profile.chatgpt_subscription_active_until.as_ref().cloned())
+        .bind(profile.chatgpt_subscription_last_checked.as_ref().cloned())
+        .bind(profile.chatgpt_account_user_id.clone())
+        .bind(profile.chatgpt_compute_residency.clone())
+        .bind(organizations_json)
+        .bind(groups_json)
+        .bind(profile.source_type.clone())
         .bind(Utc::now())
         .execute(tx)
         .await
@@ -335,14 +374,13 @@ impl PostgresStore {
         .await
         .context("failed to insert oauth credential")?;
 
-        self.upsert_session_profile_tx(
-            tx.as_mut(),
-            account_id,
+        let session_profile = SessionProfileRecord::from_oauth_token_info(
+            &token_info,
             SessionCredentialKind::RefreshRotatable,
-            Some(token_info.expires_at),
             resolved_chatgpt_plan_type.clone(),
             req.source_type.clone(),
-        )
+        );
+        self.upsert_session_profile_tx(tx.as_mut(), account_id, &session_profile)
         .await?;
 
         self.bump_revision_tx(&mut tx).await?;
@@ -397,49 +435,24 @@ impl PostgresStore {
             .chatgpt_plan_type
             .clone()
             .or(token_info.chatgpt_plan_type.clone());
-
-        let matched_account_id =
-            if let Some(chatgpt_account_id) = target_chatgpt_account_id.as_deref() {
-                sqlx::query(
-                    r#"
-                SELECT id
-                FROM upstream_accounts
-                WHERE auth_provider = $1 AND chatgpt_account_id = $2
-                ORDER BY created_at ASC
-                LIMIT 1
-                "#,
-                )
-                .bind(AUTH_PROVIDER_OAUTH_REFRESH_TOKEN)
-                .bind(chatgpt_account_id)
-                .fetch_optional(&self.pool)
-                .await
-                .context("failed to query oauth account by chatgpt_account_id")?
-                .map(|row| row.try_get::<Uuid, _>("id"))
-                .transpose()?
-            } else {
-                None
-            };
-
-        let matched_account_id = if let Some(account_id) = matched_account_id {
-            Some(account_id)
-        } else {
-            sqlx::query(
-                r#"
-                SELECT c.account_id
-                FROM upstream_account_oauth_credentials c
-                INNER JOIN upstream_accounts a ON a.id = c.account_id
-                WHERE a.auth_provider = $1 AND c.refresh_token_sha256 = $2
-                LIMIT 1
-                "#,
-            )
-            .bind(AUTH_PROVIDER_OAUTH_REFRESH_TOKEN)
-            .bind(&refresh_token_sha256)
-            .fetch_optional(&self.pool)
-            .await
-            .context("failed to query oauth account by refresh token hash")?
-            .map(|row| row.try_get::<Uuid, _>("account_id"))
-            .transpose()?
-        };
+        // Only treat the exact refresh token family as the same account. The same ChatGPT
+        // account id can legitimately appear in multiple workspaces/team contexts.
+        let matched_account_id = sqlx::query(
+            r#"
+            SELECT c.account_id
+            FROM upstream_account_oauth_credentials c
+            INNER JOIN upstream_accounts a ON a.id = c.account_id
+            WHERE a.auth_provider = $1 AND c.refresh_token_sha256 = $2
+            LIMIT 1
+            "#,
+        )
+        .bind(AUTH_PROVIDER_OAUTH_REFRESH_TOKEN)
+        .bind(&refresh_token_sha256)
+        .fetch_optional(&self.pool)
+        .await
+        .context("failed to query oauth account by refresh token hash")?
+        .map(|row| row.try_get::<Uuid, _>("account_id"))
+        .transpose()?;
 
         if let Some(account_id) = matched_account_id {
             let mut tx = self
@@ -540,14 +553,13 @@ impl PostgresStore {
             .await
             .context("failed to upsert oauth credential row")?;
 
-            self.upsert_session_profile_tx(
-                tx.as_mut(),
-                account_id,
+            let session_profile = SessionProfileRecord::from_oauth_token_info(
+                &token_info,
                 SessionCredentialKind::RefreshRotatable,
-                Some(token_info.expires_at),
                 target_chatgpt_plan_type,
                 req.source_type.clone(),
-            )
+            );
+            self.upsert_session_profile_tx(tx.as_mut(), account_id, &session_profile)
             .await?;
 
             self.bump_revision_tx(&mut tx).await?;
@@ -732,14 +744,12 @@ impl PostgresStore {
             account_id
         };
 
-        self.upsert_session_profile_tx(
-            tx.as_mut(),
-            account_id,
-            SessionCredentialKind::OneTimeAccessToken,
+        let session_profile = SessionProfileRecord::one_time_access_token(
             req.token_expires_at,
             req.chatgpt_plan_type,
             req.source_type,
-        )
+        );
+        self.upsert_session_profile_tx(tx.as_mut(), account_id, &session_profile)
         .await?;
 
         self.bump_revision_tx(&mut tx).await?;

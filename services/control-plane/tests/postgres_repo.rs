@@ -27,6 +27,7 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, LazyLock, Mutex};
 use std::time::Instant;
 use uuid::Uuid;
+use serde_json::json;
 
 fn test_db_url() -> Option<String> {
     std::env::var("CONTROL_PLANE_DATABASE_URL")
@@ -127,8 +128,38 @@ impl OAuthTokenClient for RefreshThenRateLimitOAuthClient {
             expires_at: Utc::now() + Duration::hours(1),
             token_type: Some("Bearer".to_string()),
             scope: Some("model.read".to_string()),
+            email: Some("rate-limit@example.com".to_string()),
+            oauth_subject: Some("auth0|rate-limit".to_string()),
+            oauth_identity_provider: Some("google-oauth2".to_string()),
+            email_verified: Some(true),
             chatgpt_account_id: Some("acct-rate-limit-refresh".to_string()),
+            chatgpt_user_id: Some("user-rate-limit".to_string()),
             chatgpt_plan_type: Some("team".to_string()),
+            chatgpt_subscription_active_start: Some(
+                chrono::DateTime::parse_from_rfc3339("2026-03-01T00:00:00Z")
+                    .unwrap()
+                    .with_timezone(&Utc),
+            ),
+            chatgpt_subscription_active_until: Some(
+                chrono::DateTime::parse_from_rfc3339("2026-04-01T00:00:00Z")
+                    .unwrap()
+                    .with_timezone(&Utc),
+            ),
+            chatgpt_subscription_last_checked: Some(
+                chrono::DateTime::parse_from_rfc3339("2026-03-11T00:00:00Z")
+                    .unwrap()
+                    .with_timezone(&Utc),
+            ),
+            chatgpt_account_user_id: Some("acct_user_rate_limit".to_string()),
+            chatgpt_compute_residency: Some("us".to_string()),
+            organizations: Some(vec![json!({
+                "id": "org_rate_limit",
+                "title": "Personal",
+            })]),
+            groups: Some(vec![json!({
+                "id": "grp_rate_limit",
+                "name": "Rate Limit Team",
+            })]),
         })
     }
 
@@ -182,8 +213,23 @@ impl OAuthTokenClient for SuccessThenQuotaOAuthClient {
             expires_at: Utc::now() + Duration::hours(1),
             token_type: Some("Bearer".to_string()),
             scope: Some("model.read".to_string()),
+            email: Some("outbox@example.com".to_string()),
+            oauth_subject: Some("auth0|outbox".to_string()),
+            oauth_identity_provider: Some("google-oauth2".to_string()),
+            email_verified: Some(true),
             chatgpt_account_id: Some("acct-outbox".to_string()),
+            chatgpt_user_id: Some("user-outbox".to_string()),
             chatgpt_plan_type: Some("plus".to_string()),
+            chatgpt_subscription_active_start: None,
+            chatgpt_subscription_active_until: None,
+            chatgpt_subscription_last_checked: None,
+            chatgpt_account_user_id: Some("acct_user_outbox".to_string()),
+            chatgpt_compute_residency: Some("eu".to_string()),
+            organizations: Some(vec![json!({
+                "id": "org_outbox",
+                "title": "Personal",
+            })]),
+            groups: Some(vec![]),
         })
     }
 
@@ -238,6 +284,43 @@ impl RecordingOAuthClient {
     }
 }
 
+#[derive(Default)]
+struct SharedAccountIdRecordingOAuthClient;
+
+#[async_trait::async_trait]
+impl OAuthTokenClient for SharedAccountIdRecordingOAuthClient {
+    async fn refresh_token(
+        &self,
+        refresh_token: &str,
+        _base_url: Option<&str>,
+    ) -> Result<OAuthTokenInfo, OAuthTokenClientError> {
+        Ok(OAuthTokenInfo {
+            access_token: format!("shared-access-{refresh_token}"),
+            refresh_token: refresh_token.to_string(),
+            expires_at: Utc::now() + Duration::hours(1),
+            token_type: Some("Bearer".to_string()),
+            scope: Some("model.read".to_string()),
+            email: Some("shared-workspace@example.com".to_string()),
+            oauth_subject: Some("auth0|shared".to_string()),
+            oauth_identity_provider: Some("google-oauth2".to_string()),
+            email_verified: Some(true),
+            chatgpt_account_id: Some("acct-shared-workspace".to_string()),
+            chatgpt_user_id: Some("user-shared".to_string()),
+            chatgpt_plan_type: Some("team".to_string()),
+            chatgpt_subscription_active_start: None,
+            chatgpt_subscription_active_until: None,
+            chatgpt_subscription_last_checked: None,
+            chatgpt_account_user_id: Some("acct_user_shared".to_string()),
+            chatgpt_compute_residency: Some("us".to_string()),
+            organizations: Some(vec![json!({
+                "id": "org_shared",
+                "title": "Personal",
+            })]),
+            groups: Some(vec![]),
+        })
+    }
+}
+
 #[async_trait::async_trait]
 impl OAuthTokenClient for RecordingOAuthClient {
     async fn refresh_token(
@@ -252,8 +335,23 @@ impl OAuthTokenClient for RecordingOAuthClient {
             expires_at: Utc::now() + Duration::hours(1),
             token_type: Some("Bearer".to_string()),
             scope: Some("model.read".to_string()),
+            email: Some("recording@example.com".to_string()),
+            oauth_subject: Some("auth0|recording".to_string()),
+            oauth_identity_provider: Some("google-oauth2".to_string()),
+            email_verified: Some(true),
             chatgpt_account_id: Some("acct-recording".to_string()),
+            chatgpt_user_id: Some("user-recording".to_string()),
             chatgpt_plan_type: Some("team".to_string()),
+            chatgpt_subscription_active_start: None,
+            chatgpt_subscription_active_until: None,
+            chatgpt_subscription_last_checked: None,
+            chatgpt_account_user_id: Some("acct_user_recording".to_string()),
+            chatgpt_compute_residency: Some("us".to_string()),
+            organizations: Some(vec![json!({
+                "id": "org_recording",
+                "title": "Personal",
+            })]),
+            groups: Some(vec![]),
         })
     }
 
@@ -342,6 +440,56 @@ async fn postgres_repo_refetches_rate_limits_after_forced_oauth_refresh() {
 
     assert!(oauth_client.refresh_calls.load(Ordering::SeqCst) >= 2);
     assert!(oauth_client.fetch_calls.load(Ordering::SeqCst) >= 2);
+}
+
+#[tokio::test]
+async fn postgres_repo_oauth_status_exposes_email() {
+    let Some(db_url) = test_db_url() else {
+        eprintln!("skip postgres_repo_oauth_status_exposes_email: set CONTROL_PLANE_DATABASE_URL");
+        return;
+    };
+
+    let cipher_key = base64::engine::general_purpose::STANDARD.encode([13_u8; 32]);
+    let cipher = CredentialCipher::from_base64_key(&cipher_key).unwrap();
+    let oauth_client = Arc::new(RefreshThenRateLimitOAuthClient::default());
+    let repo = PostgresStore::connect_with_oauth(&db_url, oauth_client, Some(cipher))
+        .await
+        .unwrap();
+
+    let account = repo
+        .import_oauth_refresh_token(ImportOAuthRefreshTokenRequest {
+            label: format!("oauth-email-{}", Uuid::new_v4().simple()),
+            base_url: "https://chatgpt.com/backend-api/codex".to_string(),
+            refresh_token: format!("rt-email-{}", Uuid::new_v4().simple()),
+            chatgpt_account_id: None,
+            mode: Some(UpstreamMode::CodexOauth),
+            enabled: Some(true),
+            priority: Some(100),
+            chatgpt_plan_type: None,
+            source_type: Some("codex".to_string()),
+        })
+        .await
+        .unwrap();
+
+    let status = repo.oauth_account_status(account.id).await.unwrap();
+    assert_eq!(status.email.as_deref(), Some("rate-limit@example.com"));
+    assert_eq!(status.oauth_subject.as_deref(), Some("auth0|rate-limit"));
+    assert_eq!(
+        status.oauth_identity_provider.as_deref(),
+        Some("google-oauth2")
+    );
+    assert_eq!(status.email_verified, Some(true));
+    assert_eq!(status.chatgpt_user_id.as_deref(), Some("user-rate-limit"));
+    assert_eq!(
+        status.chatgpt_account_user_id.as_deref(),
+        Some("acct_user_rate_limit")
+    );
+    assert_eq!(
+        status.chatgpt_compute_residency.as_deref(),
+        Some("us")
+    );
+    assert_eq!(status.organizations.as_ref().map(Vec::len), Some(1));
+    assert_eq!(status.groups.as_ref().map(Vec::len), Some(1));
 }
 
 #[tokio::test]
@@ -530,6 +678,71 @@ async fn postgres_repo_rate_limit_refresh_respects_global_max_rps() {
         "expected refresh batch to take at least one second with max_rps=1, got {:?}",
         elapsed
     );
+}
+
+#[tokio::test]
+async fn postgres_repo_oauth_upsert_keeps_distinct_accounts_with_shared_chatgpt_account_id() {
+    let Some(db_url) = test_db_url() else {
+        eprintln!(
+            "skip postgres_repo_oauth_upsert_keeps_distinct_accounts_with_shared_chatgpt_account_id: set CONTROL_PLANE_DATABASE_URL"
+        );
+        return;
+    };
+
+    let cipher_key = base64::engine::general_purpose::STANDARD.encode([13_u8; 32]);
+    let cipher = CredentialCipher::from_base64_key(&cipher_key).unwrap();
+    let oauth_client = Arc::new(SharedAccountIdRecordingOAuthClient);
+    let repo = PostgresStore::connect_with_oauth(&db_url, oauth_client, Some(cipher))
+        .await
+        .unwrap();
+
+    let first = repo
+        .upsert_oauth_refresh_token(ImportOAuthRefreshTokenRequest {
+            label: format!("oauth-shared-a-{}", Uuid::new_v4().simple()),
+            base_url: "https://chatgpt.com/backend-api/codex".to_string(),
+            refresh_token: format!("rt-shared-a-{}", Uuid::new_v4().simple()),
+            chatgpt_account_id: None,
+            mode: Some(UpstreamMode::CodexOauth),
+            enabled: Some(true),
+            priority: Some(100),
+            chatgpt_plan_type: None,
+            source_type: Some("codex".to_string()),
+        })
+        .await
+        .unwrap();
+    let second = repo
+        .upsert_oauth_refresh_token(ImportOAuthRefreshTokenRequest {
+            label: format!("oauth-shared-b-{}", Uuid::new_v4().simple()),
+            base_url: "https://chatgpt.com/backend-api/codex".to_string(),
+            refresh_token: format!("rt-shared-b-{}", Uuid::new_v4().simple()),
+            chatgpt_account_id: None,
+            mode: Some(UpstreamMode::CodexOauth),
+            enabled: Some(true),
+            priority: Some(100),
+            chatgpt_plan_type: None,
+            source_type: Some("codex".to_string()),
+        })
+        .await
+        .unwrap();
+
+    assert!(first.created);
+    assert!(second.created);
+    assert_ne!(first.account.id, second.account.id);
+
+    let snapshot = repo.snapshot().await.unwrap();
+    let expected_ids = [first.account.id, second.account.id]
+        .into_iter()
+        .collect::<std::collections::HashSet<_>>();
+    let shared_accounts = snapshot
+        .accounts
+        .into_iter()
+        .filter(|account| expected_ids.contains(&account.id))
+        .collect::<Vec<_>>();
+
+    assert_eq!(shared_accounts.len(), 2);
+    assert!(shared_accounts.iter().all(|account| {
+        account.chatgpt_account_id.as_deref() == Some("acct-shared-workspace")
+    }));
 }
 
 #[tokio::test]

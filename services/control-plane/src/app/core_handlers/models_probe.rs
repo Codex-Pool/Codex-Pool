@@ -1344,6 +1344,9 @@ mod models_probe_tests {
             oauth_login_sessions: std::sync::Arc::new(std::sync::RwLock::new(
                 std::collections::HashMap::new(),
             )),
+            oauth_probe_sessions: std::sync::Arc::new(std::sync::RwLock::new(
+                std::collections::HashMap::new(),
+            )),
             codex_oauth_callback_listen_mode: CodexOAuthCallbackListenMode::Off,
             codex_oauth_callback_listen_addr: None,
             codex_oauth_callback_listener: std::sync::Arc::new(tokio::sync::Mutex::new(None)),

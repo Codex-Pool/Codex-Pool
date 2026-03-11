@@ -21,9 +21,9 @@ export default {
             filter: "篩選列表",
             oneTimeNoGroupAction: "一次性會話帳號不支援同組操作",
             pauseGroup: "暫停同組帳號",
-            refreshAccounts: "刷新帳號",
-            refreshLogin: "立即刷新登入",
-            refreshingAccounts: "刷新帳號",
+            refreshAccounts: "刷新",
+            refreshLogin: "刷新登入",
+            refreshingAccounts: "刷新中",
             resumeGroup: "恢復同組帳號",
             selectAll: "全選目前篩選結果",
             selectOne: "選擇帳號 {{label}}",
@@ -37,6 +37,7 @@ export default {
         },
         columns: {
             actions: "操作",
+            account: "帳號",
             added: "加入時間",
             credentialType: "憑證類型",
             health: "健康狀態",
@@ -65,7 +66,16 @@ export default {
                 profile: "資料",
                 raw: "原始"
             },
+            sections: {
+                cache: "限額快取",
+                connection: "連線資訊",
+                credentials: "憑證",
+                identity: "身份資訊",
+                refresh: "刷新狀態",
+                subscription: "訂閱資訊"
+            },
             fields: {
+                email: "電子郵件",
                 label: "標籤",
                 mode: "帳號類型",
                 accountId: "帳號 ID",
@@ -135,17 +145,21 @@ export default {
             rateLimitPollingTimeout: "輪詢帳號刷新任務逾時。",
             rateLimitRefreshFailedStatus: "帳號刷新任務失敗，狀態={{status}}",
             rateLimitRefreshFailedSummary: "帳號刷新任務失敗：{{summary}}",
+            batchRefreshStarted: "已開始為 {{count}} 個帳號刷新登入",
             refreshFailed: "登入刷新失敗",
+            refreshFailedStatus: "登入刷新失敗，狀態={{status}}",
+            refreshFailedSummary: "登入刷新失敗：{{summary}}",
+            refreshPollingTimeout: "輪詢登入刷新任務逾時。",
             refreshJobId: "任務 ID：{{jobId}}",
             refreshJobSummary: "任務 ID：{{jobId}} · {{processed}}/{{total}}",
-            refreshListFailed: "帳號清單刷新失敗",
-            refreshListSuccess: "帳號清單刷新成功",
-            refreshSuccess: "登入刷新成功",
+            refreshListFailed: "刷新用量失敗",
+            refreshListSuccess: "用量已刷新",
+            refreshSuccess: "登入刷新完成",
             requestFailed: "請求失敗，請稍後重試",
             resumeFamilyFailed: "恢復同族群帳號失敗",
             resumeFamilySuccess: "同族群帳號已恢復",
             toggleUnsupported: "目前後端版本不支援帳號啟用/停用介面，請升級 control-plane。",
-            refreshTriggered: "已觸發帳號刷新"
+            refreshTriggered: "已開始刷新登入"
         },
         rateLimitRefreshJobStatus: {
             queued: "排隊中",
@@ -172,6 +186,14 @@ export default {
             },
             loading: "載入中",
             notApplicable: "-",
+            provider: {
+                legacyBearer: "舊版 Bearer 權杖",
+                refreshToken: "Refresh Token"
+            },
+            sourceType: {
+                codex: "Codex",
+                unknown: "未知來源"
+            },
             status: {
                 failed: "失敗",
                 never: "未刷新",
@@ -203,7 +225,7 @@ export default {
             unavailable: "暫無額度資料",
             usedPrefix: "已用"
         },
-        searchPlaceholder: "依標籤、帳號 ID、URL 搜尋…",
+        searchPlaceholder: "依電子郵件、標籤、URL 搜尋…",
         status: {
             active: "正常",
             disabled: "已停用"
@@ -804,6 +826,72 @@ export default {
             unknownError: "發生未知錯誤，請稍後再試。"
         }
     },
+    oauthProbe: {
+        title: "OAuth 載荷探測",
+        subtitle: "走一條獨立的 Codex OAuth 登入鏈路，只擷取回傳載荷，不把帳號匯入帳號池。",
+        start: {
+            title: "開始探測會話",
+            description: "建立臨時探測會話，完成 OAuth 授權後，直接檢視並下載擷取到的 JSON。"
+        },
+        form: {
+            baseUrl: "基礎 URL"
+        },
+        actions: {
+            startProbe: "開始 OAuth 探測",
+            reopenAuth: "重新開啟 OAuth 視窗",
+            downloadJson: "下載 JSON",
+            submitCallback: "提交回呼 URL"
+        },
+        status: {
+            label: "探測狀態",
+            idle: "尚未開始",
+            waiting_callback: "等待回呼",
+            exchanging: "正在交換權杖",
+            importing: "正在處理載荷",
+            completed: "已完成",
+            failed: "失敗",
+            expired: "已過期",
+            sessionId: "會話 ID：{{id}}",
+            callbackUrl: "回呼位址：{{url}}",
+            expiresAt: "過期時間：{{time}}",
+            memoryOnly: "探測結果只保存在記憶體中，會話過期或服務重啟後會消失。"
+        },
+        error: {
+            failed: "OAuth 探測失敗。"
+        },
+        result: {
+            success: "已成功擷取探測結果。",
+            email: "電子郵件：{{email}}",
+            accountId: "ChatGPT Account ID：{{id}}",
+            plan: "方案：{{plan}}",
+            expiresAt: "權杖過期時間：{{time}}",
+            accessTokenPreview: "Access Token 預覽：{{value}}",
+            refreshTokenPreview: "Refresh Token 預覽：{{value}}"
+        },
+        payload: {
+            title: "擷取到的 JSON",
+            description: "這裡顯示的是 OAuth code exchange 完成後保存在記憶體中的探測結果。",
+            empty: "尚未擷取到探測載荷。"
+        },
+        manual: {
+            title: "手動回呼備援",
+            description: "當自動回呼無法到達時，可將完整回呼 URL 貼上並提交。",
+            placeholder: "貼上包含 code/state 的完整回呼 URL…",
+            hint: "僅在自動回呼失敗時使用。"
+        },
+        notifications: {
+            popupBlockedTitle: "彈窗被封鎖",
+            popupBlockedDescription: "請允許彈窗後重新開啟 OAuth 視窗。",
+            sessionCreatedTitle: "探測會話已建立",
+            sessionCreatedDescription: "OAuth 視窗已開啟，請完成登入以擷取回傳載荷。",
+            sessionCreateFailedTitle: "建立探測會話失敗",
+            manualSubmitTitle: "回呼已提交",
+            manualSubmitSuccess: "手動回呼已完成，探測載荷已擷取。",
+            manualSubmitAccepted: "手動回呼已接收，正在處理中。",
+            manualSubmitFailedTitle: "手動回呼失敗",
+            unknownError: "發生未知錯誤，請稍後再試。"
+        }
+    },
     login: {
         brand: {
             badge: "控制平面入口",
@@ -1170,6 +1258,7 @@ export default {
         },
         importJobs: "批次上傳",
         oauthImport: "登入匯入",
+        oauthProbe: "載荷探測",
         logs: "系統日誌",
         mainNavigation: "主導覽",
         models: "模型池",

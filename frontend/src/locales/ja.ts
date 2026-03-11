@@ -21,9 +21,9 @@ export default {
             filter: "リストのフィルタリング",
             oneTimeNoGroupAction: "ワンタイムセッションは関連アクション対象外です",
             pauseGroup: "関連アカウントを停止",
-            refreshAccounts: "アカウントを更新",
+            refreshAccounts: "更新",
             refreshLogin: "ログインを更新",
-            refreshingAccounts: "アカウントを更新",
+            refreshingAccounts: "更新中",
             resumeGroup: "関連アカウントを再開",
             selectAll: "現在のフィルター結果をすべて選択",
             selectOne: "アカウント {{label}} を選択",
@@ -37,6 +37,7 @@ export default {
         },
         columns: {
             actions: "アクション",
+            account: "アカウント",
             added: "追加日",
             credentialType: "資格情報タイプ",
             health: "健康状態",
@@ -65,7 +66,16 @@ export default {
                 profile: "プロフィール",
                 raw: "生"
             },
+            sections: {
+                cache: "レート制限キャッシュ",
+                connection: "接続情報",
+                credentials: "資格情報",
+                identity: "識別情報",
+                refresh: "更新状態",
+                subscription: "契約情報"
+            },
             fields: {
+                email: "メールアドレス",
                 label: "ラベル",
                 mode: "モード",
                 accountId: "アカウント ID",
@@ -135,17 +145,21 @@ export default {
             rateLimitPollingTimeout: "レート制限更新ジョブのポーリングがタイムアウトしました。",
             rateLimitRefreshFailedStatus: "レート制限更新ジョブが失敗しました。ステータス={{status}}",
             rateLimitRefreshFailedSummary: "レート制限更新ジョブが失敗しました: {{summary}}",
+            batchRefreshStarted: "{{count}} 件のログイン更新を開始しました",
             refreshFailed: "ログイン更新失敗",
+            refreshFailedStatus: "ログイン更新に失敗しました。状態={{status}}",
+            refreshFailedSummary: "ログイン更新に失敗しました: {{summary}}",
+            refreshPollingTimeout: "ログイン更新ジョブのポーリングがタイムアウトしました。",
             refreshJobId: "ジョブ ID: {{jobId}}",
             refreshJobSummary: "ジョブ ID: {{jobId}} · {{processed}}/{{total}}",
-            refreshListFailed: "リストの更新に失敗しました",
-            refreshListSuccess: "リストの更新に成功しました",
-            refreshSuccess: "ログイン更新成功",
+            refreshListFailed: "使用量の更新に失敗しました",
+            refreshListSuccess: "使用量を更新しました",
+            refreshSuccess: "ログイン更新が完了しました",
             requestFailed: "リクエストに失敗しました。しばらくしてから再試行してください。",
             resumeFamilyFailed: "関連アカウントの再開に失敗しました",
             resumeFamilySuccess: "関連アカウントを再開しました",
             toggleUnsupported: "現在のバックエンドバージョンではアカウントの有効化/無効化はサポートされていません。control-plane をアップグレードしてください。",
-            refreshTriggered: "アカウント更新をトリガーしました"
+            refreshTriggered: "ログイン更新を開始しました"
         },
         rateLimitRefreshJobStatus: {
             queued: "待機中",
@@ -172,6 +186,14 @@ export default {
             },
             loading: "読み込み中",
             notApplicable: "-",
+            provider: {
+                legacyBearer: "旧 Bearer トークン",
+                refreshToken: "リフレッシュトークン"
+            },
+            sourceType: {
+                codex: "Codex",
+                unknown: "不明なソース"
+            },
             status: {
                 failed: "失敗",
                 never: "未更新",
@@ -203,7 +225,7 @@ export default {
             unavailable: "Rate Limit 情報なし",
             usedPrefix: "使用済み"
         },
-        searchPlaceholder: "ラベル、アカウント ID、URL で検索…",
+        searchPlaceholder: "メール、ラベル、URL で検索…",
         status: {
             active: "アクティブ",
             disabled: "無効"
@@ -804,6 +826,72 @@ export default {
             unknownError: "予期しないエラーです。しばらくして再試行してください。"
         }
     },
+    oauthProbe: {
+        title: "OAuth ペイロードプローブ",
+        subtitle: "独立した Codex OAuth ログインフローを実行し、返却ペイロードだけを取得してアカウントはプールに取り込みません。",
+        start: {
+            title: "プローブセッションを開始",
+            description: "一時的なプローブセッションを作成し、OAuth 認可完了後に取得した JSON を確認・ダウンロードします。"
+        },
+        form: {
+            baseUrl: "ベース URL"
+        },
+        actions: {
+            startProbe: "OAuth プローブ開始",
+            reopenAuth: "OAuth ウィンドウを再表示",
+            downloadJson: "JSON をダウンロード",
+            submitCallback: "コールバック URL を送信"
+        },
+        status: {
+            label: "プローブ状態",
+            idle: "未開始",
+            waiting_callback: "コールバック待機中",
+            exchanging: "トークン交換中",
+            importing: "ペイロード処理中",
+            completed: "完了",
+            failed: "失敗",
+            expired: "期限切れ",
+            sessionId: "セッション ID: {{id}}",
+            callbackUrl: "コールバック URL: {{url}}",
+            expiresAt: "有効期限: {{time}}",
+            memoryOnly: "プローブ結果はメモリ内のみに保持され、セッション期限切れまたはサービス再起動で消えます。"
+        },
+        error: {
+            failed: "OAuth プローブに失敗しました。"
+        },
+        result: {
+            success: "プローブ結果を取得しました。",
+            email: "メール: {{email}}",
+            accountId: "ChatGPT Account ID: {{id}}",
+            plan: "プラン: {{plan}}",
+            expiresAt: "トークン有効期限: {{time}}",
+            accessTokenPreview: "Access Token プレビュー: {{value}}",
+            refreshTokenPreview: "Refresh Token プレビュー: {{value}}"
+        },
+        payload: {
+            title: "取得した JSON",
+            description: "OAuth code exchange 完了後にメモリへ保存されたプローブ結果です。",
+            empty: "まだプローブペイロードは取得されていません。"
+        },
+        manual: {
+            title: "手動コールバックの代替手順",
+            description: "自動コールバックに到達できない場合は、リダイレクト URL 全体を貼り付けて送信します。",
+            placeholder: "code/state を含む完全なコールバック URL を貼り付け…",
+            hint: "自動コールバックが失敗した場合のみ使用してください。"
+        },
+        notifications: {
+            popupBlockedTitle: "ポップアップがブロックされました",
+            popupBlockedDescription: "ポップアップを許可して OAuth ウィンドウを再度開いてください。",
+            sessionCreatedTitle: "プローブセッションを作成しました",
+            sessionCreatedDescription: "OAuth ウィンドウを開きました。ログインを完了するとペイロードを取得します。",
+            sessionCreateFailedTitle: "プローブセッション作成に失敗しました",
+            manualSubmitTitle: "コールバックを送信しました",
+            manualSubmitSuccess: "手動コールバックが完了し、プローブ結果を取得しました。",
+            manualSubmitAccepted: "手動コールバックを受け付けました。現在処理中です。",
+            manualSubmitFailedTitle: "手動コールバックに失敗しました",
+            unknownError: "予期しないエラーです。しばらくして再試行してください。"
+        }
+    },
     login: {
         brand: {
             badge: "Control Plane Access",
@@ -1170,6 +1258,7 @@ export default {
         },
         importJobs: "インポート",
         oauthImport: "OAuth ログインインポート",
+        oauthProbe: "OAuth ペイロードプローブ",
         logs: "システムログ",
         mainNavigation: "メインナビゲーション",
         models: "モデル",

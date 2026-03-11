@@ -21,9 +21,9 @@ export default {
             filter: "Filter List",
             oneTimeNoGroupAction: "One-time session account: no linked-account action",
             pauseGroup: "Pause Linked Accounts",
-            refreshAccounts: "Refresh Accounts",
+            refreshAccounts: "Refresh",
             refreshLogin: "Refresh Login",
-            refreshingAccounts: "Refresh Accounts",
+            refreshingAccounts: "Refreshing",
             resumeGroup: "Resume Linked Accounts",
             selectAll: "Select all filtered results",
             selectOne: "Select account {{label}}",
@@ -37,6 +37,7 @@ export default {
         },
         columns: {
             actions: "Actions",
+            account: "Account",
             added: "Added",
             credentialType: "Credential Type",
             health: "Health Status",
@@ -65,7 +66,16 @@ export default {
                 profile: "Profile",
                 raw: "Raw"
             },
+            sections: {
+                cache: "Rate Limit Cache",
+                connection: "Connection",
+                credentials: "Credentials",
+                identity: "Identity",
+                refresh: "Refresh State",
+                subscription: "Subscription"
+            },
             fields: {
+                email: "Email",
                 label: "Label",
                 mode: "Mode",
                 accountId: "Account ID",
@@ -135,17 +145,21 @@ export default {
             rateLimitPollingTimeout: "Rate-limit refresh job polling timed out.",
             rateLimitRefreshFailedStatus: "Rate-limit refresh job failed, status={{status}}",
             rateLimitRefreshFailedSummary: "Rate-limit refresh job failed: {{summary}}",
+            batchRefreshStarted: "Started login refresh for {{count}} accounts",
             refreshFailed: "Login refresh failed",
+            refreshFailedStatus: "Login refresh failed, status={{status}}",
+            refreshFailedSummary: "Login refresh failed: {{summary}}",
+            refreshPollingTimeout: "Login refresh job polling timed out.",
             refreshJobId: "Job ID: {{jobId}}",
             refreshJobSummary: "Job ID: {{jobId}} · {{processed}}/{{total}}",
-            refreshListFailed: "Refresh List Failed",
-            refreshListSuccess: "Refresh List Success",
-            refreshSuccess: "Login refreshed successfully",
+            refreshListFailed: "Failed to refresh usage",
+            refreshListSuccess: "Usage refreshed",
+            refreshSuccess: "Login refresh completed",
             requestFailed: "Request failed. Please try again later.",
             resumeFamilyFailed: "Failed to resume linked accounts",
             resumeFamilySuccess: "Linked accounts resumed",
             toggleUnsupported: "Current backend does not support account enable/disable. Please upgrade control-plane.",
-            refreshTriggered: "Account refresh triggered"
+            refreshTriggered: "Login refresh started"
         },
         rateLimitRefreshJobStatus: {
             queued: "Queued",
@@ -172,6 +186,14 @@ export default {
             },
             loading: "Loading…",
             notApplicable: "-",
+            provider: {
+                legacyBearer: "Legacy bearer token",
+                refreshToken: "Refresh token"
+            },
+            sourceType: {
+                codex: "Codex",
+                unknown: "Unknown source"
+            },
             status: {
                 failed: "Failed",
                 never: "Not refreshed",
@@ -203,7 +225,7 @@ export default {
             unavailable: "No rate limit data",
             usedPrefix: "Used"
         },
-        searchPlaceholder: "Search by label, account ID, URL…",
+        searchPlaceholder: "Search by email, label, URL…",
         status: {
             active: "Active",
             disabled: "Disabled"
@@ -804,6 +826,72 @@ export default {
             unknownError: "Unexpected error. Please try again."
         }
     },
+    oauthProbe: {
+        title: "OAuth Payload Probe",
+        subtitle: "Run a standalone Codex OAuth login and capture the returned payload without importing any account into the pool.",
+        start: {
+            title: "Start Probe Session",
+            description: "Create a temporary probe session, complete OAuth authorization, then inspect and download the captured payload."
+        },
+        form: {
+            baseUrl: "Base URL"
+        },
+        actions: {
+            startProbe: "Start OAuth Probe",
+            reopenAuth: "Open OAuth Window Again",
+            downloadJson: "Download JSON",
+            submitCallback: "Submit Callback URL"
+        },
+        status: {
+            label: "Probe Status",
+            idle: "Not started",
+            waiting_callback: "Waiting for callback",
+            exchanging: "Exchanging token",
+            importing: "Processing payload",
+            completed: "Completed",
+            failed: "Failed",
+            expired: "Expired",
+            sessionId: "Session ID: {{id}}",
+            callbackUrl: "Callback URL: {{url}}",
+            expiresAt: "Expires at: {{time}}",
+            memoryOnly: "Probe data is kept in memory only and will disappear after session expiry or service restart."
+        },
+        error: {
+            failed: "OAuth probe failed."
+        },
+        result: {
+            success: "Probe captured successfully.",
+            email: "Email: {{email}}",
+            accountId: "ChatGPT Account ID: {{id}}",
+            plan: "Plan: {{plan}}",
+            expiresAt: "Token expires at: {{time}}",
+            accessTokenPreview: "Access token preview: {{value}}",
+            refreshTokenPreview: "Refresh token preview: {{value}}"
+        },
+        payload: {
+            title: "Captured JSON",
+            description: "This is the in-memory probe result returned after OAuth code exchange.",
+            empty: "No probe payload captured yet."
+        },
+        manual: {
+            title: "Manual Callback Fallback",
+            description: "If the automatic callback is unreachable, paste the full redirect URL here.",
+            placeholder: "Paste full callback URL containing code/state…",
+            hint: "Use this only when automatic callback fails."
+        },
+        notifications: {
+            popupBlockedTitle: "Popup blocked",
+            popupBlockedDescription: "Allow popups and reopen the OAuth window.",
+            sessionCreatedTitle: "Probe session created",
+            sessionCreatedDescription: "OAuth window opened. Complete sign-in to capture the payload.",
+            sessionCreateFailedTitle: "Failed to create probe session",
+            manualSubmitTitle: "Callback submitted",
+            manualSubmitSuccess: "Manual callback completed and probe payload captured.",
+            manualSubmitAccepted: "Manual callback accepted. Probe session is processing.",
+            manualSubmitFailedTitle: "Manual callback failed",
+            unknownError: "Unexpected error. Please try again."
+        }
+    },
     login: {
         brand: {
             badge: "Control Plane Access",
@@ -1170,6 +1258,7 @@ export default {
         },
         importJobs: "Import Jobs",
         oauthImport: "OAuth Login Import",
+        oauthProbe: "OAuth Payload Probe",
         logs: "System Logs",
         mainNavigation: "Main navigation",
         models: "Models",

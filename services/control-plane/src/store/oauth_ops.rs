@@ -56,14 +56,12 @@ impl InMemoryStore {
         self.upsert_oauth_credential(account.id, oauth_credential);
         self.upsert_session_profile(
             account.id,
-            SessionProfileRecord {
-                credential_kind: SessionCredentialKind::RefreshRotatable,
-                token_expires_at: Some(token_info.expires_at),
-                chatgpt_plan_type: req
-                    .chatgpt_plan_type
-                    .or(token_info.chatgpt_plan_type.clone()),
-                source_type: req.source_type,
-            },
+            SessionProfileRecord::from_oauth_token_info(
+                &token_info,
+                SessionCredentialKind::RefreshRotatable,
+                req.chatgpt_plan_type,
+                req.source_type,
+            ),
         );
         self.revision.fetch_add(1, Ordering::Relaxed);
 
@@ -93,7 +91,7 @@ impl InMemoryStore {
             let providers = self.account_auth_providers.read().unwrap();
             let credentials = self.oauth_credentials.read().unwrap();
 
-            accounts.iter().find_map(|(account_id, account)| {
+            accounts.iter().find_map(|(account_id, _account)| {
                 let provider = providers
                     .get(account_id)
                     .cloned()
@@ -102,12 +100,7 @@ impl InMemoryStore {
                     return None;
                 }
 
-                if let Some(target_account_id) = normalized_chatgpt_account_id.as_deref() {
-                    if account.chatgpt_account_id.as_deref() == Some(target_account_id) {
-                        return Some(*account_id);
-                    }
-                }
-
+                // Do not collapse distinct workspace logins that reuse the same ChatGPT account id.
                 credentials
                     .get(account_id)
                     .filter(|credential| credential.refresh_token_sha256 == normalized_refresh_hash)
@@ -145,23 +138,23 @@ impl InMemoryStore {
                 .unwrap()
                 .get(&account_id)
                 .cloned();
-            let existing_chatgpt_plan_type = existing_profile
-                .as_ref()
-                .and_then(|item| item.chatgpt_plan_type.clone());
-            let existing_source_type = existing_profile
-                .as_ref()
-                .and_then(|item| item.source_type.clone());
             self.upsert_session_profile(
                 account_id,
-                SessionProfileRecord {
-                    credential_kind: SessionCredentialKind::RefreshRotatable,
-                    token_expires_at: Some(token_info.expires_at),
-                    chatgpt_plan_type: req
-                        .chatgpt_plan_type
-                        .or(token_info.chatgpt_plan_type.clone())
-                        .or(existing_chatgpt_plan_type),
-                    source_type: req.source_type.or(existing_source_type),
-                },
+                existing_profile
+                    .unwrap_or_else(|| {
+                        SessionProfileRecord::from_oauth_token_info(
+                            &token_info,
+                            SessionCredentialKind::RefreshRotatable,
+                            None,
+                            None,
+                        )
+                    })
+                    .merge_oauth_token_info(
+                        &token_info,
+                        SessionCredentialKind::RefreshRotatable,
+                        req.chatgpt_plan_type,
+                        req.source_type,
+                    ),
             );
             self.revision.fetch_add(1, Ordering::Relaxed);
 
@@ -247,15 +240,14 @@ impl InMemoryStore {
                 .write()
                 .unwrap()
                 .insert(account_id, UpstreamAuthProvider::LegacyBearer);
-            self.upsert_session_profile(
-                account_id,
-                SessionProfileRecord {
-                    credential_kind: SessionCredentialKind::OneTimeAccessToken,
-                    token_expires_at: req.token_expires_at,
-                    chatgpt_plan_type: req.chatgpt_plan_type,
-                    source_type: req.source_type,
-                },
-            );
+        self.upsert_session_profile(
+            account_id,
+            SessionProfileRecord::one_time_access_token(
+                req.token_expires_at,
+                req.chatgpt_plan_type,
+                req.source_type,
+            ),
+        );
             self.revision.fetch_add(1, Ordering::Relaxed);
 
             let account = self
@@ -294,12 +286,11 @@ impl InMemoryStore {
             .insert(account.id, UpstreamAuthProvider::LegacyBearer);
         self.upsert_session_profile(
             account.id,
-            SessionProfileRecord {
-                credential_kind: SessionCredentialKind::OneTimeAccessToken,
-                token_expires_at: req.token_expires_at,
-                chatgpt_plan_type: req.chatgpt_plan_type,
-                source_type: req.source_type,
-            },
+            SessionProfileRecord::one_time_access_token(
+                req.token_expires_at,
+                req.chatgpt_plan_type,
+                req.source_type,
+            ),
         );
         self.revision.fetch_add(1, Ordering::Relaxed);
 
@@ -395,22 +386,22 @@ impl InMemoryStore {
                     .get(&account_id)
                     .cloned();
                 if let Some(mut profile) = existing_profile {
-                    profile.credential_kind = SessionCredentialKind::RefreshRotatable;
-                    profile.token_expires_at = Some(token_info.expires_at);
-                    profile.chatgpt_plan_type = token_info
-                        .chatgpt_plan_type
-                        .clone()
-                        .or(profile.chatgpt_plan_type);
+                    profile = profile.merge_oauth_token_info(
+                        &token_info,
+                        SessionCredentialKind::RefreshRotatable,
+                        None,
+                        None,
+                    );
                     self.upsert_session_profile(account_id, profile);
                 } else {
                     self.upsert_session_profile(
                         account_id,
-                        SessionProfileRecord {
-                            credential_kind: SessionCredentialKind::RefreshRotatable,
-                            token_expires_at: Some(token_info.expires_at),
-                            chatgpt_plan_type: token_info.chatgpt_plan_type,
-                            source_type: None,
-                        },
+                        SessionProfileRecord::from_oauth_token_info(
+                            &token_info,
+                            SessionCredentialKind::RefreshRotatable,
+                            None,
+                            None,
+                        ),
                     );
                 }
                 self.revision.fetch_add(1, Ordering::Relaxed);

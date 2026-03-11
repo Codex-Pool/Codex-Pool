@@ -3,7 +3,7 @@ use base64::Engine;
 use chrono::{DateTime, Duration, Utc};
 use codex_pool_core::api::{OAuthRateLimitSnapshot, OAuthRateLimitWindow};
 use reqwest::StatusCode;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use thiserror::Error;
 
@@ -15,6 +15,7 @@ const DEFAULT_OAUTH_EXPIRES_IN_SEC: i64 = 3600;
 const CODEX_DEFAULT_USER_AGENT: &str = "codex-cli";
 const CHATGPT_ACCOUNT_ID_HEADER: &str = "ChatGPT-Account-Id";
 const OPENAI_AUTH_NESTED_CLAIM_KEY: &str = "https://api.openai.com/auth";
+const OPENAI_PROFILE_NESTED_CLAIM_KEY: &str = "https://api.openai.com/profile";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OAuthRefreshErrorCode {
@@ -56,8 +57,20 @@ pub struct OAuthTokenInfo {
     pub expires_at: DateTime<Utc>,
     pub token_type: Option<String>,
     pub scope: Option<String>,
+    pub email: Option<String>,
+    pub oauth_subject: Option<String>,
+    pub oauth_identity_provider: Option<String>,
+    pub email_verified: Option<bool>,
     pub chatgpt_account_id: Option<String>,
+    pub chatgpt_user_id: Option<String>,
     pub chatgpt_plan_type: Option<String>,
+    pub chatgpt_subscription_active_start: Option<DateTime<Utc>>,
+    pub chatgpt_subscription_active_until: Option<DateTime<Utc>>,
+    pub chatgpt_subscription_last_checked: Option<DateTime<Utc>>,
+    pub chatgpt_account_user_id: Option<String>,
+    pub chatgpt_compute_residency: Option<String>,
+    pub organizations: Option<Vec<Value>>,
+    pub groups: Option<Vec<Value>>,
 }
 
 #[derive(Debug, Error)]
@@ -255,6 +268,7 @@ impl OpenAiOAuthClient {
             .json::<OAuthTokenEndpointResponse>()
             .await
             .map_err(|_| OAuthTokenClientError::Parse)?;
+        let raw_payload = serde_json::to_value(&payload).unwrap_or(Value::Null);
         let expires_in = payload
             .expires_in
             .filter(|value| *value > 0)
@@ -274,6 +288,8 @@ impl OpenAiOAuthClient {
             scope: payload.scope,
             chatgpt_account_id,
             id_token_claims,
+            id_token_raw: payload.id_token,
+            raw_payload,
         })
     }
 }
@@ -281,8 +297,30 @@ impl OpenAiOAuthClient {
 #[derive(Debug, Clone)]
 pub struct OAuthIdTokenClaims {
     pub email: Option<String>,
+    pub oauth_subject: Option<String>,
+    pub oauth_identity_provider: Option<String>,
+    pub email_verified: Option<bool>,
     pub chatgpt_account_id: Option<String>,
+    pub chatgpt_user_id: Option<String>,
     pub chatgpt_plan_type: Option<String>,
+    pub chatgpt_subscription_active_start: Option<DateTime<Utc>>,
+    pub chatgpt_subscription_active_until: Option<DateTime<Utc>>,
+    pub chatgpt_subscription_last_checked: Option<DateTime<Utc>>,
+    pub organizations: Option<Vec<Value>>,
+    pub groups: Option<Vec<Value>>,
+    pub raw_claims: Value,
+}
+
+#[derive(Debug, Clone)]
+struct OAuthAccessTokenClaims {
+    oauth_subject: Option<String>,
+    email: Option<String>,
+    email_verified: Option<bool>,
+    chatgpt_account_id: Option<String>,
+    chatgpt_account_user_id: Option<String>,
+    chatgpt_compute_residency: Option<String>,
+    chatgpt_plan_type: Option<String>,
+    chatgpt_user_id: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -294,9 +332,11 @@ pub struct OAuthCodeExchangeInfo {
     pub scope: Option<String>,
     pub chatgpt_account_id: Option<String>,
     pub id_token_claims: Option<OAuthIdTokenClaims>,
+    pub id_token_raw: Option<String>,
+    pub raw_payload: Value,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct OAuthTokenEndpointResponse {
     access_token: String,
     #[serde(default)]
@@ -431,14 +471,36 @@ impl OAuthTokenClient for OpenAiOAuthClient {
             .filter(|value| *value > 0)
             .unwrap_or(DEFAULT_OAUTH_EXPIRES_IN_SEC);
         let id_token_claims = payload.id_token.as_deref().and_then(parse_id_token_claims);
-        let chatgpt_account_id = payload.chatgpt_account_id.clone().or_else(|| {
-            id_token_claims
-                .as_ref()
-                .and_then(|claims| claims.chatgpt_account_id.clone())
-        });
+        let access_token_claims = parse_access_token_claims(&payload.access_token);
+        let chatgpt_account_id = payload
+            .chatgpt_account_id
+            .clone()
+            .or_else(|| {
+                id_token_claims
+                    .as_ref()
+                    .and_then(|claims| claims.chatgpt_account_id.clone())
+            })
+            .or_else(|| {
+                access_token_claims
+                    .as_ref()
+                    .and_then(|claims| claims.chatgpt_account_id.clone())
+            });
         let chatgpt_plan_type = id_token_claims
             .as_ref()
-            .and_then(|claims| claims.chatgpt_plan_type.clone());
+            .and_then(|claims| claims.chatgpt_plan_type.clone())
+            .or_else(|| {
+                access_token_claims
+                    .as_ref()
+                    .and_then(|claims| claims.chatgpt_plan_type.clone())
+            });
+        let email = id_token_claims
+            .as_ref()
+            .and_then(|claims| claims.email.clone())
+            .or_else(|| {
+                access_token_claims
+                    .as_ref()
+                    .and_then(|claims| claims.email.clone())
+            });
 
         Ok(OAuthTokenInfo {
             access_token: payload.access_token,
@@ -448,8 +510,57 @@ impl OAuthTokenClient for OpenAiOAuthClient {
             expires_at: Utc::now() + Duration::seconds(expires_in),
             token_type: payload.token_type,
             scope: payload.scope,
+            email,
+            oauth_subject: id_token_claims
+                .as_ref()
+                .and_then(|claims| claims.oauth_subject.clone())
+                .or_else(|| {
+                    access_token_claims
+                        .as_ref()
+                        .and_then(|claims| claims.oauth_subject.clone())
+                }),
+            oauth_identity_provider: id_token_claims
+                .as_ref()
+                .and_then(|claims| claims.oauth_identity_provider.clone()),
+            email_verified: id_token_claims
+                .as_ref()
+                .and_then(|claims| claims.email_verified)
+                .or_else(|| {
+                    access_token_claims
+                        .as_ref()
+                        .and_then(|claims| claims.email_verified)
+                }),
             chatgpt_account_id,
+            chatgpt_user_id: id_token_claims
+                .as_ref()
+                .and_then(|claims| claims.chatgpt_user_id.clone())
+                .or_else(|| {
+                    access_token_claims
+                        .as_ref()
+                        .and_then(|claims| claims.chatgpt_user_id.clone())
+                }),
             chatgpt_plan_type,
+            chatgpt_subscription_active_start: id_token_claims
+                .as_ref()
+                .and_then(|claims| claims.chatgpt_subscription_active_start),
+            chatgpt_subscription_active_until: id_token_claims
+                .as_ref()
+                .and_then(|claims| claims.chatgpt_subscription_active_until),
+            chatgpt_subscription_last_checked: id_token_claims
+                .as_ref()
+                .and_then(|claims| claims.chatgpt_subscription_last_checked),
+            chatgpt_account_user_id: access_token_claims
+                .as_ref()
+                .and_then(|claims| claims.chatgpt_account_user_id.clone()),
+            chatgpt_compute_residency: access_token_claims
+                .as_ref()
+                .and_then(|claims| claims.chatgpt_compute_residency.clone()),
+            organizations: id_token_claims
+                .as_ref()
+                .and_then(|claims| claims.organizations.clone()),
+            groups: id_token_claims
+                .as_ref()
+                .and_then(|claims| claims.groups.clone()),
         })
     }
 
@@ -615,6 +726,9 @@ fn parse_id_token_claims(id_token: &str) -> Option<OAuthIdTokenClaims> {
 
     Some(OAuthIdTokenClaims {
         email: claim_string(&claims, &["email"]),
+        oauth_subject: claim_string(&claims, &["sub"]),
+        oauth_identity_provider: claim_string(&claims, &["auth_provider"]),
+        email_verified: claim_bool(&claims, &["email_verified"]),
         chatgpt_account_id: nested_auth_claims
             .and_then(|nested| {
                 claim_string(
@@ -636,6 +750,16 @@ fn parse_id_token_claims(id_token: &str) -> Option<OAuthIdTokenClaims> {
                         "account_id",
                         "accountId",
                     ],
+                )
+            }),
+        chatgpt_user_id: nested_auth_claims
+            .and_then(|nested| {
+                claim_string(nested, &["chatgpt_user_id", "chatgptUserId", "user_id", "userId"])
+            })
+            .or_else(|| {
+                claim_string(
+                    &claims,
+                    &["chatgpt_user_id", "chatgptUserId", "user_id", "userId"],
                 )
             }),
         chatgpt_plan_type: nested_auth_claims
@@ -663,6 +787,101 @@ fn parse_id_token_claims(id_token: &str) -> Option<OAuthIdTokenClaims> {
                     ],
                 )
             }),
+        chatgpt_subscription_active_start: nested_auth_claims.and_then(|nested| {
+            claim_datetime(
+                nested,
+                &[
+                    "chatgpt_subscription_active_start",
+                    "chatgptSubscriptionActiveStart",
+                ],
+            )
+        }),
+        chatgpt_subscription_active_until: nested_auth_claims.and_then(|nested| {
+            claim_datetime(
+                nested,
+                &[
+                    "chatgpt_subscription_active_until",
+                    "chatgptSubscriptionActiveUntil",
+                ],
+            )
+        }),
+        chatgpt_subscription_last_checked: nested_auth_claims.and_then(|nested| {
+            claim_datetime(
+                nested,
+                &[
+                    "chatgpt_subscription_last_checked",
+                    "chatgptSubscriptionLastChecked",
+                ],
+            )
+        }),
+        organizations: nested_auth_claims
+            .and_then(|nested| claim_array(nested, &["organizations"])),
+        groups: nested_auth_claims.and_then(|nested| claim_array(nested, &["groups"])),
+        raw_claims: claims,
+    })
+}
+
+fn parse_access_token_claims(access_token: &str) -> Option<OAuthAccessTokenClaims> {
+    let mut segments = access_token.split('.');
+    let _header = segments.next()?;
+    let payload = segments.next()?;
+    let decoded = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(payload)
+        .ok()?;
+    let claims: Value = serde_json::from_slice(&decoded).ok()?;
+    let nested_auth_claims = claims
+        .get(OPENAI_AUTH_NESTED_CLAIM_KEY)
+        .filter(|value| value.is_object());
+    let nested_profile_claims = claims
+        .get(OPENAI_PROFILE_NESTED_CLAIM_KEY)
+        .filter(|value| value.is_object());
+
+    Some(OAuthAccessTokenClaims {
+        oauth_subject: claim_string(&claims, &["sub"]),
+        email: nested_profile_claims
+            .and_then(|nested| claim_string(nested, &["email"]))
+            .or_else(|| claim_string(&claims, &["email"])),
+        email_verified: nested_profile_claims
+            .and_then(|nested| claim_bool(nested, &["email_verified"]))
+            .or_else(|| claim_bool(&claims, &["email_verified"])),
+        chatgpt_account_id: nested_auth_claims.and_then(|nested| {
+            claim_string(
+                nested,
+                &[
+                    "chatgpt_account_id",
+                    "chatgptAccountId",
+                    "account_id",
+                    "accountId",
+                ],
+            )
+        }),
+        chatgpt_account_user_id: nested_auth_claims.and_then(|nested| {
+            claim_string(
+                nested,
+                &["chatgpt_account_user_id", "chatgptAccountUserId"],
+            )
+        }),
+        chatgpt_compute_residency: nested_auth_claims.and_then(|nested| {
+            claim_string(
+                nested,
+                &["chatgpt_compute_residency", "chatgptComputeResidency"],
+            )
+        }),
+        chatgpt_plan_type: nested_auth_claims.and_then(|nested| {
+            claim_string(
+                nested,
+                &[
+                    "chatgpt_plan_type",
+                    "chatgptPlanType",
+                    "plan_type",
+                    "planType",
+                    "plan",
+                ],
+            )
+        }),
+        chatgpt_user_id: nested_auth_claims.and_then(|nested| {
+            claim_string(nested, &["chatgpt_user_id", "chatgptUserId", "user_id", "userId"])
+        }),
     })
 }
 
@@ -675,6 +894,40 @@ fn claim_string(claims: &Value, keys: &[&str]) -> Option<String> {
             .filter(|value| !value.is_empty());
         if let Some(value) = value {
             return Some(value.to_string());
+        }
+    }
+    None
+}
+
+fn claim_bool(claims: &Value, keys: &[&str]) -> Option<bool> {
+    for key in keys {
+        if let Some(value) = claims.get(*key).and_then(|value| value.as_bool()) {
+            return Some(value);
+        }
+    }
+    None
+}
+
+fn claim_datetime(claims: &Value, keys: &[&str]) -> Option<DateTime<Utc>> {
+    for key in keys {
+        let value = claims
+            .get(*key)
+            .and_then(|value| value.as_str())
+            .map(str::trim)
+            .filter(|value| !value.is_empty());
+        if let Some(value) = value {
+            if let Ok(parsed) = DateTime::parse_from_rfc3339(value) {
+                return Some(parsed.with_timezone(&Utc));
+            }
+        }
+    }
+    None
+}
+
+fn claim_array(claims: &Value, keys: &[&str]) -> Option<Vec<Value>> {
+    for key in keys {
+        if let Some(values) = claims.get(*key).and_then(|value| value.as_array()) {
+            return Some(values.clone());
         }
     }
     None
@@ -745,10 +998,12 @@ fn classify_oauth_error_code(
 #[cfg(test)]
 mod tests {
     use super::{
-        classify_oauth_error_code, parse_id_token_claims, resolve_usage_endpoint,
+        classify_oauth_error_code, parse_access_token_claims, parse_id_token_claims,
+        resolve_usage_endpoint,
         OAuthRefreshErrorCode, OAuthTokenEndpointError,
     };
     use base64::Engine;
+    use chrono::{DateTime, Utc};
     use reqwest::StatusCode;
     use serde_json::json;
 
@@ -838,5 +1093,100 @@ mod tests {
         let claims = parse_id_token_claims(&token).expect("claims should parse");
         assert_eq!(claims.chatgpt_account_id.as_deref(), Some("acct_top"));
         assert_eq!(claims.chatgpt_plan_type.as_deref(), Some("pro"));
+    }
+
+    #[test]
+    fn parse_id_token_claims_reads_structured_identity_and_subscription_fields() {
+        let payload = json!({
+            "sub": "google-oauth2|1234567890",
+            "auth_provider": "google",
+            "email": "demo@example.com",
+            "email_verified": true,
+            "https://api.openai.com/auth": {
+                "chatgpt_account_id": "acct_nested",
+                "chatgpt_plan_type": "team",
+                "chatgpt_user_id": "user_shared",
+                "chatgpt_subscription_active_start": "2026-03-07T07:34:14+00:00",
+                "chatgpt_subscription_active_until": "2026-04-07T07:34:14+00:00",
+                "chatgpt_subscription_last_checked": "2026-03-11T03:58:04.173746+00:00",
+                "organizations": [
+                    {
+                        "id": "org-123",
+                        "title": "Personal",
+                        "role": "owner",
+                        "is_default": true
+                    }
+                ],
+                "groups": [
+                    {
+                        "id": "grp-1",
+                        "title": "Workspace A"
+                    }
+                ]
+            }
+        });
+        let payload_bytes = serde_json::to_vec(&payload).expect("serialize payload");
+        let payload_segment =
+            base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(payload_bytes);
+        let token = format!("header.{payload_segment}.signature");
+
+        let claims = parse_id_token_claims(&token).expect("claims should parse");
+        assert_eq!(claims.oauth_subject.as_deref(), Some("google-oauth2|1234567890"));
+        assert_eq!(claims.oauth_identity_provider.as_deref(), Some("google"));
+        assert_eq!(claims.email.as_deref(), Some("demo@example.com"));
+        assert_eq!(claims.email_verified, Some(true));
+        assert_eq!(claims.chatgpt_user_id.as_deref(), Some("user_shared"));
+        assert_eq!(
+            claims.chatgpt_subscription_active_start,
+            Some(DateTime::parse_from_rfc3339("2026-03-07T07:34:14+00:00").unwrap().with_timezone(&Utc))
+        );
+        assert_eq!(
+            claims.chatgpt_subscription_active_until,
+            Some(DateTime::parse_from_rfc3339("2026-04-07T07:34:14+00:00").unwrap().with_timezone(&Utc))
+        );
+        assert_eq!(
+            claims.chatgpt_subscription_last_checked,
+            Some(DateTime::parse_from_rfc3339("2026-03-11T03:58:04.173746+00:00").unwrap().with_timezone(&Utc))
+        );
+        assert_eq!(claims.organizations.as_ref().map(Vec::len), Some(1));
+        assert_eq!(claims.groups.as_ref().map(Vec::len), Some(1));
+    }
+
+    #[test]
+    fn parse_access_token_claims_reads_account_instance_fields() {
+        let payload = json!({
+            "sub": "google-oauth2|1234567890",
+            "https://api.openai.com/auth": {
+                "chatgpt_account_id": "acct_nested",
+                "chatgpt_account_user_id": "user_shared__acct_nested",
+                "chatgpt_compute_residency": "no_constraint",
+                "chatgpt_plan_type": "team",
+                "chatgpt_user_id": "user_shared"
+            },
+            "https://api.openai.com/profile": {
+                "email": "demo@example.com",
+                "email_verified": true
+            }
+        });
+        let payload_bytes = serde_json::to_vec(&payload).expect("serialize payload");
+        let payload_segment =
+            base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(payload_bytes);
+        let token = format!("header.{payload_segment}.signature");
+
+        let claims = parse_access_token_claims(&token).expect("claims should parse");
+        assert_eq!(claims.oauth_subject.as_deref(), Some("google-oauth2|1234567890"));
+        assert_eq!(claims.email.as_deref(), Some("demo@example.com"));
+        assert_eq!(claims.email_verified, Some(true));
+        assert_eq!(claims.chatgpt_account_id.as_deref(), Some("acct_nested"));
+        assert_eq!(
+            claims.chatgpt_account_user_id.as_deref(),
+            Some("user_shared__acct_nested")
+        );
+        assert_eq!(
+            claims.chatgpt_compute_residency.as_deref(),
+            Some("no_constraint")
+        );
+        assert_eq!(claims.chatgpt_plan_type.as_deref(), Some("team"));
+        assert_eq!(claims.chatgpt_user_id.as_deref(), Some("user_shared"));
     }
 }

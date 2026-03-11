@@ -21,9 +21,9 @@ export default {
             filter: "筛选列表",
             oneTimeNoGroupAction: "一次性会话账号不支持同组操作",
             pauseGroup: "暂停同组账号",
-            refreshAccounts: "刷新账号",
-            refreshLogin: "立即刷新登录",
-            refreshingAccounts: "刷新账号",
+            refreshAccounts: "刷新",
+            refreshLogin: "刷新登录",
+            refreshingAccounts: "刷新中",
             resumeGroup: "恢复同组账号",
             selectAll: "全选当前筛选结果",
             selectOne: "选择账号 {{label}}",
@@ -37,6 +37,7 @@ export default {
         },
         columns: {
             actions: "操作",
+            account: "账号",
             added: "添加时间",
             credentialType: "凭据类型",
             health: "健康状态",
@@ -65,7 +66,16 @@ export default {
                 profile: "资料",
                 raw: "原始"
             },
+            sections: {
+                cache: "限额缓存",
+                connection: "连接信息",
+                credentials: "凭据",
+                identity: "身份信息",
+                refresh: "刷新状态",
+                subscription: "订阅信息"
+            },
             fields: {
+                email: "邮箱",
                 label: "标签",
                 mode: "账号类型",
                 accountId: "账号 ID",
@@ -135,17 +145,21 @@ export default {
             rateLimitPollingTimeout: "轮询账号刷新任务超时。",
             rateLimitRefreshFailedStatus: "账号刷新任务失败，状态={{status}}",
             rateLimitRefreshFailedSummary: "账号刷新任务失败：{{summary}}",
+            batchRefreshStarted: "已开始为 {{count}} 个账号刷新登录",
             refreshFailed: "登录刷新失败",
+            refreshFailedStatus: "登录刷新失败，状态={{status}}",
+            refreshFailedSummary: "登录刷新失败：{{summary}}",
+            refreshPollingTimeout: "轮询登录刷新任务超时。",
             refreshJobId: "任务 ID：{{jobId}}",
             refreshJobSummary: "任务 ID：{{jobId}} · {{processed}}/{{total}}",
-            refreshListFailed: "账号列表刷新失败",
-            refreshListSuccess: "账号列表刷新成功",
-            refreshSuccess: "登录刷新成功",
+            refreshListFailed: "刷新用量失败",
+            refreshListSuccess: "用量已刷新",
+            refreshSuccess: "登录刷新完成",
             requestFailed: "请求失败，请稍后重试",
             resumeFamilyFailed: "恢复同家族账号失败",
             resumeFamilySuccess: "同家族账号已恢复",
             toggleUnsupported: "当前后端版本不支持账号启用/禁用接口，请升级 control-plane。",
-            refreshTriggered: "已触发账号刷新"
+            refreshTriggered: "已开始刷新登录"
         },
         rateLimitRefreshJobStatus: {
             queued: "排队中",
@@ -172,6 +186,14 @@ export default {
             },
             loading: "加载中",
             notApplicable: "-",
+            provider: {
+                legacyBearer: "旧版 Bearer 令牌",
+                refreshToken: "Refresh Token"
+            },
+            sourceType: {
+                codex: "Codex",
+                unknown: "未知来源"
+            },
             status: {
                 failed: "失败",
                 never: "未刷新",
@@ -203,7 +225,7 @@ export default {
             unavailable: "暂无限额数据",
             usedPrefix: "已用"
         },
-        searchPlaceholder: "按标签、账号 ID、URL 搜索…",
+        searchPlaceholder: "按邮箱、标签、URL 搜索…",
         status: {
             active: "正常",
             disabled: "已禁用"
@@ -804,6 +826,72 @@ export default {
             unknownError: "发生未知错误，请稍后重试。"
         }
     },
+    oauthProbe: {
+        title: "OAuth 载荷探测",
+        subtitle: "走一条独立的 Codex OAuth 登录链路，只捕获返回载荷，不把账号导入账号池。",
+        start: {
+            title: "开始探测会话",
+            description: "创建临时探测会话，完成 OAuth 授权后，直接查看并下载捕获到的 JSON。"
+        },
+        form: {
+            baseUrl: "基础 URL"
+        },
+        actions: {
+            startProbe: "开始 OAuth 探测",
+            reopenAuth: "重新打开 OAuth 窗口",
+            downloadJson: "下载 JSON",
+            submitCallback: "提交回调 URL"
+        },
+        status: {
+            label: "探测状态",
+            idle: "未开始",
+            waiting_callback: "等待回调",
+            exchanging: "正在换取令牌",
+            importing: "正在处理载荷",
+            completed: "已完成",
+            failed: "失败",
+            expired: "已过期",
+            sessionId: "会话 ID：{{id}}",
+            callbackUrl: "回调地址：{{url}}",
+            expiresAt: "过期时间：{{time}}",
+            memoryOnly: "探测结果只保存在内存中，会话过期或服务重启后会消失。"
+        },
+        error: {
+            failed: "OAuth 探测失败。"
+        },
+        result: {
+            success: "探测结果已成功捕获。",
+            email: "邮箱：{{email}}",
+            accountId: "ChatGPT Account ID：{{id}}",
+            plan: "套餐：{{plan}}",
+            expiresAt: "令牌过期时间：{{time}}",
+            accessTokenPreview: "Access Token 预览：{{value}}",
+            refreshTokenPreview: "Refresh Token 预览：{{value}}"
+        },
+        payload: {
+            title: "捕获到的 JSON",
+            description: "这里展示的是 OAuth code exchange 完成后保存在内存中的探测结果。",
+            empty: "还没有捕获到探测载荷。"
+        },
+        manual: {
+            title: "手动回调兜底",
+            description: "当自动回调不可达时，可将完整回调 URL 粘贴到这里提交。",
+            placeholder: "粘贴包含 code/state 的完整回调 URL…",
+            hint: "仅在自动回调失败时使用。"
+        },
+        notifications: {
+            popupBlockedTitle: "弹窗被拦截",
+            popupBlockedDescription: "请允许弹窗后重新打开 OAuth 窗口。",
+            sessionCreatedTitle: "探测会话已创建",
+            sessionCreatedDescription: "OAuth 窗口已打开，请完成登录以捕获返回载荷。",
+            sessionCreateFailedTitle: "创建探测会话失败",
+            manualSubmitTitle: "回调已提交",
+            manualSubmitSuccess: "手动回调已完成，探测载荷已捕获。",
+            manualSubmitAccepted: "手动回调已接收，正在处理中。",
+            manualSubmitFailedTitle: "手动回调失败",
+            unknownError: "发生未知错误，请稍后重试。"
+        }
+    },
     login: {
         brand: {
             badge: "控制平面入口",
@@ -1170,6 +1258,7 @@ export default {
         },
         importJobs: "批量上传",
         oauthImport: "登录导入",
+        oauthProbe: "载荷探测",
         logs: "系统日志",
         mainNavigation: "主导航",
         models: "模型池",

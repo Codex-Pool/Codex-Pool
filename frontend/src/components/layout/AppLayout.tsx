@@ -13,6 +13,7 @@ import {
     Cpu,
     Network,
     TerminalSquare,
+    FlaskConical,
     LogOut,
     ChevronsLeft,
     ChevronsRight,
@@ -175,6 +176,7 @@ export function AppLayout({
             items: [
                 { path: '/groups', icon: Layers3, label: t('nav.apiKeyGroups') },
                 { path: '/oauth-import', icon: ShieldCheck, label: t('nav.oauthImport') },
+                { path: '/oauth-probe', icon: FlaskConical, label: t('nav.oauthProbe') },
                 { path: '/imports', icon: HardDriveDownload, label: t('nav.importJobs') },
             ]
         },

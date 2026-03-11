@@ -14,6 +14,7 @@ import {
 } from '@/api/accounts'
 import { extractApiErrorStatus } from '@/api/client'
 import { localizeApiErrorDisplay, localizeOAuthErrorCodeDisplay } from '@/api/errorI18n'
+import { importJobsApi, type OAuthImportJobSummary } from '@/api/importJobs'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { useConfirmDialog } from '@/components/ui/confirm-dialog'
@@ -70,6 +71,8 @@ const BATCH_CONCURRENCY: Record<AccountBatchAction, number> = {
   pauseFamily: 6,
   resumeFamily: 6,
 }
+const JOB_POLL_INTERVAL_MS = 2000
+const JOB_MAX_POLL_COUNT = 1200
 
 function localizeRateLimitRefreshJobStatus(
   t: TFunction,
@@ -90,6 +93,75 @@ function localizeRateLimitRefreshJobStatus(
     default:
       return t('accounts.rateLimitRefreshJobStatus.unknown', { defaultValue: 'Unknown' })
   }
+}
+
+function localizeImportJobStatus(
+  t: TFunction,
+  status: OAuthImportJobSummary['status'] | null | undefined,
+): string {
+  switch ((status ?? '').trim().toLowerCase()) {
+    case 'queued':
+      return t('importJobs.status.queued', { defaultValue: 'Queued' })
+    case 'running':
+      return t('importJobs.status.running', { defaultValue: 'Running' })
+    case 'completed':
+      return t('importJobs.status.completed', { defaultValue: 'Completed' })
+    case 'failed':
+      return t('importJobs.status.failed', { defaultValue: 'Failed' })
+    case 'cancelled':
+      return t('importJobs.status.cancelled', { defaultValue: 'Cancelled' })
+    default:
+      return t('accounts.rateLimitRefreshJobStatus.unknown', { defaultValue: 'Unknown' })
+  }
+}
+
+function isImportJobTerminal(status: OAuthImportJobSummary['status'] | undefined) {
+  return status === 'completed' || status === 'failed' || status === 'cancelled'
+}
+
+function getOAuthStatusFreshnessValue(status?: OAuthAccountStatusResponse) {
+  if (!status) {
+    return Number.NEGATIVE_INFINITY
+  }
+
+  const timestamps = [
+    status.last_refresh_at,
+    status.rate_limits_fetched_at,
+    status.token_expires_at,
+  ]
+    .map((value) => (value ? Date.parse(value) : Number.NaN))
+    .filter((value) => Number.isFinite(value))
+
+  if (timestamps.length > 0) {
+    return Math.max(...timestamps)
+  }
+
+  if (status.last_refresh_status === 'failed') {
+    return 2
+  }
+  if (status.last_refresh_status === 'ok') {
+    return 1
+  }
+  return 0
+}
+
+function pickFresherOAuthStatus(
+  primary?: OAuthAccountStatusResponse,
+  fallback?: OAuthAccountStatusResponse,
+) {
+  if (!primary) {
+    return fallback
+  }
+  if (!fallback) {
+    return primary
+  }
+  return getOAuthStatusFreshnessValue(fallback) > getOAuthStatusFreshnessValue(primary)
+    ? fallback
+    : primary
+}
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
 export default function Accounts() {
@@ -163,15 +235,24 @@ export default function Accounts() {
     return oauthStatusMap.get(detailAccount.id)
   }, [detailAccount, oauthStatusMap])
 
-  const detailOAuthStatusQuery = useQuery({
+  const {
+    data: detailOAuthStatusData,
+    isLoading: isDetailOAuthStatusLoading,
+    isFetching: isDetailOAuthStatusFetching,
+    refetch: refetchDetailOAuthStatus,
+  } = useQuery({
     queryKey: ['oauthStatusDetail', detailAccount?.id],
     enabled: Boolean(detailAccount?.id && detailIsSessionAccount),
     queryFn: () => accountsApi.getOAuthStatus(detailAccount!.id),
     staleTime: 30000,
+    refetchOnWindowFocus: 'always',
     retry: false,
   })
 
-  const detailOAuthStatus = detailOAuthStatusQuery.data ?? detailAccountStatusFromMap
+  const detailOAuthStatus = useMemo(
+    () => pickFresherOAuthStatus(detailOAuthStatusData, detailAccountStatusFromMap),
+    [detailAccountStatusFromMap, detailOAuthStatusData],
+  )
 
   const detailRateLimitDisplays = useMemo(
     () => sortRateLimitDisplays(extractRateLimitDisplays(detailOAuthStatus)),
@@ -188,12 +269,88 @@ export default function Accounts() {
 
   const invalidateAccountQueries = useCallback(() => {
     queryClient.invalidateQueries({ queryKey: ['oauthStatuses'] })
+    queryClient.invalidateQueries({ queryKey: ['oauthStatusDetail'] })
     queryClient.invalidateQueries({ queryKey: ['upstreamAccounts'] })
   }, [queryClient])
 
   const resolveErrorLabel = useCallback(
     (error: unknown, fallback: string) => localizeApiErrorDisplay(t, error, fallback).label,
     [t],
+  )
+
+  const resolveActionErrorLabel = useCallback(
+    (error: unknown, fallback: string) =>
+      error instanceof Error && error.message ? error.message : resolveErrorLabel(error, fallback),
+    [resolveErrorLabel],
+  )
+
+  const refreshVisibleAccountData = useCallback(async () => {
+    await refetchAccounts({ throwOnError: true })
+    if (oauthAccountIds.length > 0) {
+      await refetchOAuthStatuses({ throwOnError: true })
+    }
+    if (detailAccount?.id && detailIsSessionAccount) {
+      await refetchDetailOAuthStatus({ throwOnError: true })
+    }
+  }, [
+    detailAccount?.id,
+    detailIsSessionAccount,
+    oauthAccountIds.length,
+    refetchDetailOAuthStatus,
+    refetchAccounts,
+    refetchOAuthStatuses,
+  ])
+
+  const waitForRefreshJob = useCallback(
+    async (created: OAuthImportJobSummary) => {
+      let latest = created
+      let pollCount = 0
+
+      while (!isImportJobTerminal(latest.status)) {
+        await sleep(JOB_POLL_INTERVAL_MS)
+        latest = await importJobsApi.getJobSummary(latest.job_id)
+        pollCount += 1
+        if (pollCount >= JOB_MAX_POLL_COUNT) {
+          throw new Error(
+            t('accounts.messages.refreshPollingTimeout', {
+              defaultValue: 'Login refresh job polling timed out.',
+            }),
+          )
+        }
+      }
+
+      if (latest.status === 'failed' || latest.status === 'cancelled') {
+        const errorSummary = (latest.error_summary ?? [])
+          .slice(0, 3)
+          .map((item) => `${localizeOAuthErrorCodeDisplay(t, item.error_code).label}(${item.count})`)
+          .join(', ')
+        if (errorSummary) {
+          throw new Error(
+            t('accounts.messages.refreshFailedSummary', {
+              defaultValue: 'Login refresh failed: {{summary}}',
+              summary: errorSummary,
+            }),
+          )
+        }
+        throw new Error(
+          t('accounts.messages.refreshFailedStatus', {
+            defaultValue: 'Login refresh failed, status={{status}}',
+            status: localizeImportJobStatus(t, latest.status),
+          }),
+        )
+      }
+
+      return latest
+    },
+    [t],
+  )
+
+  const waitForRefreshJobById = useCallback(
+    async (jobId: string) => {
+      const summary = await importJobsApi.getJobSummary(jobId)
+      return waitForRefreshJob(summary)
+    },
+    [waitForRefreshJob],
   )
 
   const handleRefreshAccounts = useCallback(async () => {
@@ -208,14 +365,13 @@ export default function Accounts() {
       setRateLimitRefreshJob(created)
 
       let latest = created
-      const maxPollCount = 1200
       let pollCount = 0
       while (!isRateLimitRefreshJobTerminal(latest.status)) {
-        await new Promise((resolve) => setTimeout(resolve, 2000))
+        await sleep(JOB_POLL_INTERVAL_MS)
         latest = await accountsApi.getRateLimitRefreshJob(latest.job_id)
         setRateLimitRefreshJob(latest)
         pollCount += 1
-        if (pollCount >= maxPollCount) {
+        if (pollCount >= JOB_MAX_POLL_COUNT) {
           throw new Error(
             t('accounts.messages.rateLimitPollingTimeout', {
               defaultValue: 'Rate-limit refresh job polling timed out.',
@@ -224,14 +380,14 @@ export default function Accounts() {
         }
       }
 
-	      if (latest.status === 'failed' || latest.status === 'cancelled') {
-	        const errorSummary = (latest.error_summary ?? [])
-	          .slice(0, 3)
-	          .map((item) => `${localizeOAuthErrorCodeDisplay(t, item.error_code).label}(${item.count})`)
-	          .join(', ')
-	        if (errorSummary) {
-	          throw new Error(
-	            t('accounts.messages.rateLimitRefreshFailedSummary', {
+      if (latest.status === 'failed' || latest.status === 'cancelled') {
+        const errorSummary = (latest.error_summary ?? [])
+          .slice(0, 3)
+          .map((item) => `${localizeOAuthErrorCodeDisplay(t, item.error_code).label}(${item.count})`)
+          .join(', ')
+        if (errorSummary) {
+          throw new Error(
+            t('accounts.messages.rateLimitRefreshFailedSummary', {
               defaultValue: 'Rate-limit refresh job failed: {{summary}}',
               summary: errorSummary,
             }),
@@ -245,13 +401,12 @@ export default function Accounts() {
         )
       }
 
-      await refetchAccounts({ throwOnError: true })
-      if (oauthAccountIds.length > 0) {
-        await refetchOAuthStatuses({ throwOnError: true })
-      }
+      await refreshVisibleAccountData()
       notify({
         variant: 'success',
-        title: t('accounts.messages.refreshListSuccess', { defaultValue: 'Refresh List Success' }),
+        title: t('accounts.messages.refreshListSuccess', {
+          defaultValue: 'Usage refreshed',
+        }),
         description: t('accounts.messages.refreshJobSummary', {
           defaultValue: 'Job ID: {{jobId}} · {{processed}}/{{total}}',
           jobId: latest.job_id,
@@ -262,8 +417,10 @@ export default function Accounts() {
     } catch (error) {
       notify({
         variant: 'error',
-        title: t('accounts.messages.refreshListFailed', { defaultValue: 'Refresh List Failed' }),
-        description: resolveErrorLabel(
+        title: t('accounts.messages.refreshListFailed', {
+          defaultValue: 'Failed to refresh usage',
+        }),
+        description: resolveActionErrorLabel(
           error,
           t('accounts.messages.requestFailed', { defaultValue: 'Request failed. Please try again later.' }),
         ),
@@ -271,14 +428,12 @@ export default function Accounts() {
     } finally {
       setIsManualRefreshing(false)
     }
-	  }, [
-	    isManualRefreshing,
-	    oauthAccountIds.length,
-	    refetchAccounts,
-	    refetchOAuthStatuses,
-	    resolveErrorLabel,
-	    t,
-	  ])
+  }, [
+    isManualRefreshing,
+    refreshVisibleAccountData,
+    resolveActionErrorLabel,
+    t,
+  ])
 
   const performSetEnabled = useCallback(
     async (accountId: string, enabled: boolean) => {
@@ -316,13 +471,27 @@ export default function Accounts() {
   )
 
   const refreshMutation = useMutation({
-    mutationFn: (accountId: string) => accountsApi.refreshOAuthJob(accountId),
-    onSuccess: (job) => {
-      addRecentImportJobId(job.job_id)
+    onMutate: () => {
+      notify({
+        variant: 'info',
+        title: t('accounts.messages.refreshTriggered', {
+          defaultValue: 'Login refresh started',
+        }),
+      })
+    },
+    mutationFn: async (accountId: string) => {
+      const created = await accountsApi.refreshOAuthJob(accountId)
+      addRecentImportJobId(created.job_id)
+      return waitForRefreshJob(created)
+    },
+    onSuccess: async (job) => {
       invalidateAccountQueries()
+      await refreshVisibleAccountData()
       notify({
         variant: 'success',
-        title: t('accounts.messages.refreshSuccess', { defaultValue: 'Login refreshed successfully' }),
+        title: t('accounts.messages.refreshSuccess', {
+          defaultValue: 'Login refresh completed',
+        }),
         description: t('accounts.messages.refreshJobId', {
           defaultValue: 'Job ID: {{jobId}}',
           jobId: job.job_id,
@@ -333,7 +502,7 @@ export default function Accounts() {
       notify({
         variant: 'error',
         title: t('accounts.messages.refreshFailed', { defaultValue: 'Login refresh failed' }),
-        description: resolveErrorLabel(
+        description: resolveActionErrorLabel(
           error,
           t('accounts.messages.requestFailed', { defaultValue: 'Request failed. Please try again later.' }),
         ),
@@ -686,6 +855,7 @@ export default function Accounts() {
         })()
 
         const succeededIds: string[] = []
+        const refreshLoginJobs: Array<{ accountId: string; jobId: string }> = []
         let failed = 0
         let firstErrorMessage: string | null = null
 
@@ -697,23 +867,25 @@ export default function Accounts() {
 
         try {
           const batchResponse = await accountsApi.batchOperate(action, targetIds)
-	          batchResponse.items.forEach((item) => {
-	            if (item.ok) {
-	              succeededIds.push(item.account_id)
-	              if (action === 'refreshLogin' && item.job_id) {
+          batchResponse.items.forEach((item) => {
+            if (item.ok) {
+              if (action === 'refreshLogin' && item.job_id) {
+                refreshLoginJobs.push({ accountId: item.account_id, jobId: item.job_id })
                 addRecentImportJobId(item.job_id)
+              } else {
+                succeededIds.push(item.account_id)
               }
               return
-	            }
-	            failed += 1
-	            setFirstErrorMessage(
-	              item.error
-	                ? localizeOAuthErrorCodeDisplay(t, item.error.code).label
-	                : t('accounts.messages.batchUnknownError', {
-	                    defaultValue: 'Batch operation failed',
-	                  }),
-	            )
-	          })
+            }
+            failed += 1
+            setFirstErrorMessage(
+              item.error
+                ? localizeOAuthErrorCodeDisplay(t, item.error.code).label
+                : t('accounts.messages.batchUnknownError', {
+                    defaultValue: 'Batch operation failed',
+                  }),
+            )
+          })
         } catch (error) {
           const status = extractApiErrorStatus(error)
           if (status !== 404 && status !== 405 && status !== 501) {
@@ -729,7 +901,6 @@ export default function Accounts() {
             },
           )
           successes.forEach((result) => {
-            succeededIds.push(result.accountId)
             if (
               action === 'refreshLogin'
               && result.value
@@ -737,18 +908,57 @@ export default function Accounts() {
               && 'job_id' in result.value
               && typeof (result.value as { job_id?: unknown }).job_id === 'string'
             ) {
-              addRecentImportJobId((result.value as { job_id: string }).job_id)
+              const jobId = (result.value as { job_id: string }).job_id
+              addRecentImportJobId(jobId)
+              refreshLoginJobs.push({ accountId: result.accountId, jobId })
+              return
             }
+            succeededIds.push(result.accountId)
           })
-	          failures.forEach((result) => {
-	            setFirstErrorMessage(
-	              resolveErrorLabel(
-	                result.error,
-	                t('accounts.messages.batchUnknownError', { defaultValue: 'Batch operation failed' }),
-	              ),
-	            )
-	          })
+          failures.forEach((result) => {
+            setFirstErrorMessage(
+              resolveActionErrorLabel(
+                result.error,
+                t('accounts.messages.batchUnknownError', { defaultValue: 'Batch operation failed' }),
+              ),
+            )
+          })
           failed = failures.length
+        }
+
+        if (action === 'refreshLogin' && refreshLoginJobs.length > 0) {
+          notify({
+            variant: 'info',
+            title: t('accounts.messages.batchRefreshStarted', {
+              count: refreshLoginJobs.length,
+              defaultValue: 'Started login refresh for {{count}} accounts',
+            }),
+          })
+
+          const refreshResults = await Promise.all(
+            refreshLoginJobs.map(async (job) => {
+              try {
+                await waitForRefreshJobById(job.jobId)
+                return { accountId: job.accountId, ok: true as const }
+              } catch (error) {
+                return { accountId: job.accountId, ok: false as const, error }
+              }
+            }),
+          )
+
+          refreshResults.forEach((result) => {
+            if (result.ok) {
+              succeededIds.push(result.accountId)
+              return
+            }
+            failed += 1
+            setFirstErrorMessage(
+              resolveActionErrorLabel(
+                result.error,
+                t('accounts.messages.batchUnknownError', { defaultValue: 'Batch operation failed' }),
+              ),
+            )
+          })
         }
 
         if (succeededIds.length > 0) {
@@ -757,6 +967,9 @@ export default function Accounts() {
             setSelectedAccountIds((prev) => prev.filter((id) => !succeededSet.has(id)))
           }
           invalidateAccountQueries()
+          if (action === 'refreshLogin') {
+            await refreshVisibleAccountData()
+          }
         }
 
         if (failed === 0) {
@@ -804,12 +1017,14 @@ export default function Accounts() {
       confirm,
       invalidateAccountQueries,
       isBatchOperating,
-	      performSetEnabled,
-	      resolveErrorLabel,
-	      selectedAccounts,
-	      selectedFamilyActionAccountIds,
-	      selectedRefreshableAccountIds,
-	      t,
+      performSetEnabled,
+      refreshVisibleAccountData,
+      resolveActionErrorLabel,
+      selectedAccounts,
+      selectedFamilyActionAccountIds,
+      selectedRefreshableAccountIds,
+      t,
+      waitForRefreshJobById,
     ],
   )
 
@@ -895,9 +1110,9 @@ export default function Accounts() {
             {isManualRefreshing
               ? rateLimitRefreshJob && rateLimitRefreshJob.total > 0
                 ? t('accounts.actions.refreshingAccounts', {
-                  defaultValue: 'Refreshing Accounts',
+                  defaultValue: 'Refreshing',
                 }) + ` ${rateLimitRefreshJob.processed}/${rateLimitRefreshJob.total}`
-                : t('accounts.actions.refreshingAccounts', { defaultValue: 'Refreshing Accounts' })
+                : t('accounts.actions.refreshingAccounts', { defaultValue: 'Refreshing' })
               : t('accounts.actions.refreshAccounts')}
           </Button>
         </div>
@@ -1082,7 +1297,7 @@ export default function Accounts() {
         onOpenChange={handleCloseDetailDialog}
         isSessionAccount={detailIsSessionAccount}
         oauthStatus={detailOAuthStatus}
-        oauthStatusLoading={detailOAuthStatusQuery.isLoading}
+        oauthStatusLoading={isDetailOAuthStatusLoading || isDetailOAuthStatusFetching}
         rateLimitDisplays={detailRateLimitDisplays}
         locale={i18n.resolvedLanguage ?? i18n.language}
       />

@@ -118,21 +118,35 @@ export function useAccountsColumns({
       },
       {
         id: 'identity',
-        accessorFn: (row) => row.label.toLowerCase(),
-        header: t('accounts.columns.id'),
-        cell: ({ row }) => (
-          <div className="min-w-[180px]">
-            <div className="font-medium text-foreground truncate" title={row.original.label}>
-              {row.original.label}
+        accessorFn: (row) => {
+          const status = oauthStatusMap.get(row.id)
+          return (status?.email ?? row.label).toLowerCase()
+        },
+        header: t('accounts.columns.account', { defaultValue: 'Account' }),
+        cell: ({ row }) => {
+          const status = oauthStatusMap.get(row.original.id)
+          const primaryIdentity = status?.email?.trim() || row.original.label
+          const secondaryIdentity =
+            status?.email?.trim() && row.original.label.trim() !== primaryIdentity
+              ? row.original.label
+              : null
+
+          return (
+            <div className="min-w-[220px]">
+              <div className="font-medium text-foreground truncate" title={primaryIdentity}>
+                {primaryIdentity}
+              </div>
+              {secondaryIdentity ? (
+                <div
+                  className="mt-0.5 truncate text-xs text-muted-foreground"
+                  title={secondaryIdentity}
+                >
+                  {secondaryIdentity}
+                </div>
+              ) : null}
             </div>
-            <div
-              className="font-mono text-xs text-muted-foreground mt-0.5 truncate"
-              title={row.original.id}
-            >
-              {row.original.id}
-            </div>
-          </div>
-        ),
+          )
+        },
       },
       {
         accessorKey: 'mode',
@@ -298,41 +312,6 @@ export function useAccountsColumns({
             refreshing={isSessionMode(row.original.mode) && isOAuthStatusRefreshing}
           />
         ),
-      },
-      {
-        id: 'nextRefreshAt',
-        accessorFn: (row) => {
-          const value = oauthStatusMap.get(row.id)?.next_refresh_at
-          return value ? new Date(value).getTime() : 0
-        },
-        header: t('accounts.columns.nextRefresh'),
-        cell: ({ row }) => {
-          const cellClass = 'flex min-h-[36px] items-center'
-          if (isSessionMode(row.original.mode) && isOAuthStatusRefreshing) {
-            return (
-              <div className={cellClass}>
-                <Skeleton className="h-4 w-28" />
-              </div>
-            )
-          }
-          const value = oauthStatusMap.get(row.original.id)?.next_refresh_at
-          if (!value) {
-            return (
-              <div className={cellClass}>
-                <span className="text-sm text-muted-foreground">
-                  {t('accounts.nextRefresh.none')}
-                </span>
-              </div>
-            )
-          }
-          return (
-            <div className={cellClass}>
-              <span className="text-sm text-muted-foreground">
-                {formatRelativeTime(value, locale, true)}
-              </span>
-            </div>
-          )
-        },
       },
       {
         accessorKey: 'created_at',

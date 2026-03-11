@@ -174,11 +174,12 @@ mod tests {
     use crate::oauth::{OAuthTokenClient, OAuthTokenInfo};
     use async_trait::async_trait;
     use base64::Engine;
-    use chrono::{Duration, Utc};
+    use chrono::{DateTime, Duration, Utc};
     use codex_pool_core::api::{
         CreateApiKeyRequest, CreateTenantRequest, ImportOAuthRefreshTokenRequest,
     };
     use codex_pool_core::model::UpstreamMode;
+    use serde_json::json;
     use std::sync::Arc;
 
     #[tokio::test]
@@ -256,8 +257,75 @@ mod tests {
                 expires_at: Utc::now() + Duration::seconds(3600),
                 token_type: Some("Bearer".to_string()),
                 scope: Some("model.read".to_string()),
+                email: Some("demo@example.com".to_string()),
+                oauth_subject: Some("auth0|demo".to_string()),
+                oauth_identity_provider: Some("google-oauth2".to_string()),
+                email_verified: Some(true),
                 chatgpt_account_id: Some("acct_demo".to_string()),
+                chatgpt_user_id: Some("user_demo".to_string()),
                 chatgpt_plan_type: Some("pro".to_string()),
+                chatgpt_subscription_active_start: Some(
+                    DateTime::parse_from_rfc3339("2026-03-01T00:00:00Z")
+                        .unwrap()
+                        .with_timezone(&Utc),
+                ),
+                chatgpt_subscription_active_until: Some(
+                    DateTime::parse_from_rfc3339("2026-04-01T00:00:00Z")
+                        .unwrap()
+                        .with_timezone(&Utc),
+                ),
+                chatgpt_subscription_last_checked: Some(
+                    DateTime::parse_from_rfc3339("2026-03-11T00:00:00Z")
+                        .unwrap()
+                        .with_timezone(&Utc),
+                ),
+                chatgpt_account_user_id: Some("acct_user_demo".to_string()),
+                chatgpt_compute_residency: Some("us".to_string()),
+                organizations: Some(vec![json!({
+                    "id": "org_demo",
+                    "title": "Personal",
+                })]),
+                groups: Some(vec![json!({
+                    "id": "grp_demo",
+                    "name": "Demo Group",
+                })]),
+            })
+        }
+    }
+
+    #[derive(Clone)]
+    struct SharedAccountIdOAuthTokenClient;
+
+    #[async_trait]
+    impl OAuthTokenClient for SharedAccountIdOAuthTokenClient {
+        async fn refresh_token(
+            &self,
+            refresh_token: &str,
+            _base_url: Option<&str>,
+        ) -> Result<OAuthTokenInfo, crate::oauth::OAuthTokenClientError> {
+            Ok(OAuthTokenInfo {
+                access_token: format!("access-{refresh_token}"),
+                refresh_token: refresh_token.to_string(),
+                expires_at: Utc::now() + Duration::seconds(3600),
+                token_type: Some("Bearer".to_string()),
+                scope: Some("model.read".to_string()),
+                email: Some("shared@example.com".to_string()),
+                oauth_subject: Some("auth0|shared".to_string()),
+                oauth_identity_provider: Some("google-oauth2".to_string()),
+                email_verified: Some(true),
+                chatgpt_account_id: Some("acct_shared".to_string()),
+                chatgpt_user_id: Some("user_shared".to_string()),
+                chatgpt_plan_type: Some("team".to_string()),
+                chatgpt_subscription_active_start: None,
+                chatgpt_subscription_active_until: None,
+                chatgpt_subscription_last_checked: None,
+                chatgpt_account_user_id: Some("acct_user_shared".to_string()),
+                chatgpt_compute_residency: Some("us".to_string()),
+                organizations: Some(vec![json!({
+                    "id": "org_shared",
+                    "title": "Personal",
+                })]),
+                groups: Some(vec![]),
             })
         }
     }
@@ -300,6 +368,50 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn in_memory_oauth_status_exposes_email() {
+        let cipher = CredentialCipher::from_base64_key(
+            &base64::engine::general_purpose::STANDARD.encode([9_u8; 32]),
+        )
+        .unwrap();
+        let store = InMemoryStore::new_with_oauth(Arc::new(StaticOAuthTokenClient), Some(cipher));
+
+        let account = store
+            .import_oauth_refresh_token(ImportOAuthRefreshTokenRequest {
+                label: "oauth-email".to_string(),
+                base_url: "https://chatgpt.com/backend-api/codex".to_string(),
+                refresh_token: "rt-email".to_string(),
+                chatgpt_account_id: None,
+                mode: None,
+                enabled: Some(true),
+                priority: Some(100),
+                chatgpt_plan_type: None,
+                source_type: Some("codex".to_string()),
+            })
+            .await
+            .unwrap();
+
+        let status = store.oauth_account_status(account.id).await.unwrap();
+        assert_eq!(status.email.as_deref(), Some("demo@example.com"));
+        assert_eq!(status.oauth_subject.as_deref(), Some("auth0|demo"));
+        assert_eq!(
+            status.oauth_identity_provider.as_deref(),
+            Some("google-oauth2")
+        );
+        assert_eq!(status.email_verified, Some(true));
+        assert_eq!(status.chatgpt_user_id.as_deref(), Some("user_demo"));
+        assert_eq!(
+            status.chatgpt_account_user_id.as_deref(),
+            Some("acct_user_demo")
+        );
+        assert_eq!(
+            status.chatgpt_compute_residency.as_deref(),
+            Some("us")
+        );
+        assert_eq!(status.organizations.as_ref().map(Vec::len), Some(1));
+        assert_eq!(status.groups.as_ref().map(Vec::len), Some(1));
+    }
+
+    #[tokio::test]
     async fn in_memory_oauth_import_infers_codex_mode_from_source_type() {
         let cipher = CredentialCipher::from_base64_key(
             &base64::engine::general_purpose::STANDARD.encode([2_u8; 32]),
@@ -323,5 +435,59 @@ mod tests {
             .unwrap();
 
         assert_eq!(account.mode, UpstreamMode::CodexOauth);
+    }
+
+    #[tokio::test]
+    async fn in_memory_oauth_upsert_keeps_distinct_accounts_with_shared_chatgpt_account_id() {
+        let cipher = CredentialCipher::from_base64_key(
+            &base64::engine::general_purpose::STANDARD.encode([3_u8; 32]),
+        )
+        .unwrap();
+        let store = InMemoryStore::new_with_oauth(
+            Arc::new(SharedAccountIdOAuthTokenClient),
+            Some(cipher),
+        );
+
+        let first = store
+            .upsert_oauth_refresh_token(ImportOAuthRefreshTokenRequest {
+                label: "oauth-shared-a".to_string(),
+                base_url: "https://chatgpt.com/backend-api/codex".to_string(),
+                refresh_token: "rt-shared-a".to_string(),
+                chatgpt_account_id: None,
+                mode: Some(UpstreamMode::CodexOauth),
+                enabled: Some(true),
+                priority: Some(100),
+                chatgpt_plan_type: None,
+                source_type: Some("codex".to_string()),
+            })
+            .await
+            .unwrap();
+        let second = store
+            .upsert_oauth_refresh_token(ImportOAuthRefreshTokenRequest {
+                label: "oauth-shared-b".to_string(),
+                base_url: "https://chatgpt.com/backend-api/codex".to_string(),
+                refresh_token: "rt-shared-b".to_string(),
+                chatgpt_account_id: None,
+                mode: Some(UpstreamMode::CodexOauth),
+                enabled: Some(true),
+                priority: Some(100),
+                chatgpt_plan_type: None,
+                source_type: Some("codex".to_string()),
+            })
+            .await
+            .unwrap();
+
+        assert!(first.created);
+        assert!(second.created);
+        assert_ne!(first.account.id, second.account.id);
+
+        let snapshot = store.snapshot().await.unwrap();
+        let shared_accounts = snapshot
+            .accounts
+            .into_iter()
+            .filter(|account| account.chatgpt_account_id.as_deref() == Some("acct_shared"))
+            .collect::<Vec<_>>();
+
+        assert_eq!(shared_accounts.len(), 2);
     }
 }

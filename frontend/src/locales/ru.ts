@@ -21,9 +21,9 @@ export default {
             filter: "Фильтр списка",
             oneTimeNoGroupAction: "Для одноразовой сессии групповое действие недоступно",
             pauseGroup: "Отключить связанную группу",
-            refreshAccounts: "Обновить аккаунты",
+            refreshAccounts: "Обновить",
             refreshLogin: "Обновить вход",
-            refreshingAccounts: "Обновить аккаунты",
+            refreshingAccounts: "Обновление",
             resumeGroup: "Включить связанную группу",
             selectAll: "Выбрать все отфильтрованные",
             selectOne: "Выбрать аккаунт {{label}}",
@@ -37,6 +37,7 @@ export default {
         },
         columns: {
             actions: "Действия",
+            account: "Аккаунт",
             added: "Добавлено",
             credentialType: "Тип учетных данных",
             health: "Состояние",
@@ -65,7 +66,16 @@ export default {
                 profile: "Профиль",
                 raw: "Сырой"
             },
+            sections: {
+                cache: "Кэш лимитов",
+                connection: "Подключение",
+                credentials: "Учетные данные",
+                identity: "Идентификация",
+                refresh: "Состояние обновления",
+                subscription: "Подписка"
+            },
             fields: {
+                email: "Email",
                 label: "Метка",
                 mode: "Режим",
                 accountId: "ID аккаунта",
@@ -135,17 +145,21 @@ export default {
             rateLimitPollingTimeout: "Тайм-аут опроса обновления ограничения скорости.",
             rateLimitRefreshFailedStatus: "Задание обновления ограничения скорости не выполнено, статус = {{status}}",
             rateLimitRefreshFailedSummary: "Не удалось выполнить задание обновления ограничения скорости: {{summary}}",
+            batchRefreshStarted: "Запущено обновление входа для {{count}} аккаунтов",
             refreshFailed: "Не удалось обновить вход",
+            refreshFailedStatus: "Не удалось обновить вход, статус={{status}}",
+            refreshFailedSummary: "Не удалось обновить вход: {{summary}}",
+            refreshPollingTimeout: "Тайм-аут опроса задания обновления входа.",
             refreshJobId: "Идентификатор вакансии: {{jobId}}",
             refreshJobSummary: "Идентификатор вакансии: {{jobId}} · {{processed}}/{{total}}",
-            refreshListFailed: "Не удалось обновить список",
-            refreshListSuccess: "Обновление списка выполнено успешно",
-            refreshSuccess: "Вход успешно обновлен",
+            refreshListFailed: "Не удалось обновить использование",
+            refreshListSuccess: "Использование обновлено",
+            refreshSuccess: "Обновление входа завершено",
             requestFailed: "Запрос не удался. Попробуйте позже.",
             resumeFamilyFailed: "Не удалось возобновить связанные аккаунты",
             resumeFamilySuccess: "Связанные аккаунты возобновлены",
             toggleUnsupported: "Текущая версия бэкенда не поддерживает вкл./откл. аккаунтов. Обновите control-plane.",
-            refreshTriggered: "Обновление аккаунтов запущено"
+            refreshTriggered: "Обновление входа запущено"
         },
         rateLimitRefreshJobStatus: {
             queued: "В очереди",
@@ -172,6 +186,14 @@ export default {
             },
             loading: "Загрузка",
             notApplicable: "-",
+            provider: {
+                legacyBearer: "Старый bearer-токен",
+                refreshToken: "Refresh token"
+            },
+            sourceType: {
+                codex: "Codex",
+                unknown: "Неизвестный источник"
+            },
             status: {
                 failed: "Ошибка",
                 never: "Не обновлялся",
@@ -203,7 +225,7 @@ export default {
             unavailable: "Нет данных о лимитах",
             usedPrefix: "Использовано"
         },
-        searchPlaceholder: "Поиск по ярлыку, ID аккаунта, URL…",
+        searchPlaceholder: "Поиск по email, метке и URL…",
         status: {
             active: "Активен",
             disabled: "Отключен"
@@ -804,6 +826,72 @@ export default {
             unknownError: "Неизвестная ошибка. Повторите позже."
         }
     },
+    oauthProbe: {
+        title: "Проба OAuth payload",
+        subtitle: "Запустите отдельный вход через Codex OAuth, сохраните возвращенный payload и не импортируйте аккаунт в пул.",
+        start: {
+            title: "Запустить probe-сессию",
+            description: "Создайте временную probe-сессию, завершите OAuth-авторизацию и просмотрите или скачайте полученный JSON."
+        },
+        form: {
+            baseUrl: "Базовый URL"
+        },
+        actions: {
+            startProbe: "Запустить OAuth Probe",
+            reopenAuth: "Открыть OAuth-окно снова",
+            downloadJson: "Скачать JSON",
+            submitCallback: "Отправить callback URL"
+        },
+        status: {
+            label: "Статус probe-сессии",
+            idle: "Не запущено",
+            waiting_callback: "Ожидание callback",
+            exchanging: "Обмен токена",
+            importing: "Обработка payload",
+            completed: "Завершено",
+            failed: "Ошибка",
+            expired: "Истекло",
+            sessionId: "ID сессии: {{id}}",
+            callbackUrl: "Callback URL: {{url}}",
+            expiresAt: "Истекает: {{time}}",
+            memoryOnly: "Результат probe хранится только в памяти и исчезнет после истечения сессии или перезапуска сервиса."
+        },
+        error: {
+            failed: "OAuth probe завершился ошибкой."
+        },
+        result: {
+            success: "Probe payload успешно получен.",
+            email: "Email: {{email}}",
+            accountId: "ChatGPT Account ID: {{id}}",
+            plan: "План: {{plan}}",
+            expiresAt: "Токен истекает: {{time}}",
+            accessTokenPreview: "Предпросмотр access token: {{value}}",
+            refreshTokenPreview: "Предпросмотр refresh token: {{value}}"
+        },
+        payload: {
+            title: "Полученный JSON",
+            description: "Здесь показан результат probe, сохраненный в памяти после OAuth code exchange.",
+            empty: "Probe payload пока не получен."
+        },
+        manual: {
+            title: "Резервный ручной callback",
+            description: "Если автоматический callback недоступен, вставьте сюда полный redirect URL.",
+            placeholder: "Вставьте полный callback URL с code/state…",
+            hint: "Используйте только если автоматический callback не сработал."
+        },
+        notifications: {
+            popupBlockedTitle: "Всплывающее окно заблокировано",
+            popupBlockedDescription: "Разрешите всплывающие окна и снова откройте OAuth-окно.",
+            sessionCreatedTitle: "Probe-сессия создана",
+            sessionCreatedDescription: "OAuth-окно открыто. Завершите вход, чтобы захватить payload.",
+            sessionCreateFailedTitle: "Не удалось создать probe-сессию",
+            manualSubmitTitle: "Callback отправлен",
+            manualSubmitSuccess: "Ручной callback завершен, payload захвачен.",
+            manualSubmitAccepted: "Ручной callback принят в обработку.",
+            manualSubmitFailedTitle: "Ошибка ручного callback",
+            unknownError: "Неизвестная ошибка. Повторите позже."
+        }
+    },
     login: {
         brand: {
             badge: "Control Plane Access",
@@ -1170,6 +1258,7 @@ export default {
         },
         importJobs: "Импорт",
         oauthImport: "Импорт через OAuth",
+        oauthProbe: "Проба OAuth payload",
         logs: "Журнал",
         mainNavigation: "Основная навигация",
         models: "Модели",

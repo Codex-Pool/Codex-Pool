@@ -45,7 +45,19 @@ export interface OAuthAccountStatusResponse {
     account_id: string
     auth_provider: 'legacy_bearer' | 'oauth_refresh_token'
     credential_kind?: 'refresh_rotatable' | 'one_time_access_token'
+    email?: string
+    oauth_subject?: string
+    oauth_identity_provider?: string
+    email_verified?: boolean
     chatgpt_plan_type?: string
+    chatgpt_user_id?: string
+    chatgpt_subscription_active_start?: string
+    chatgpt_subscription_active_until?: string
+    chatgpt_subscription_last_checked?: string
+    chatgpt_account_user_id?: string
+    chatgpt_compute_residency?: string
+    organizations?: unknown[]
+    groups?: unknown[]
     source_type?: string
     token_family_id?: string
     token_version?: number

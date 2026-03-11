@@ -32,6 +32,7 @@ const Dashboard = lazy(() => import('@/pages/Dashboard'))
 const Accounts = lazy(() => import('@/pages/Accounts'))
 const ImportJobs = lazy(() => import('@/pages/ImportJobs'))
 const OAuthImport = lazy(() => import('@/pages/OAuthImport'))
+const OAuthProbe = lazy(() => import('@/pages/OAuthProbe'))
 const Groups = lazy(() => import('@/pages/Groups'))
 const Models = lazy(() => import('@/pages/Models'))
 const Usage = lazy(() => import('@/pages/Usage'))
@@ -203,6 +204,7 @@ function AdminApp() {
                   <Route path="/accounts" element={<Suspense fallback={<RouteSkeleton />}><Accounts /></Suspense>} />
                   <Route path="/imports" element={<Suspense fallback={<RouteSkeleton />}><ImportJobs /></Suspense>} />
                   <Route path="/oauth-import" element={<Suspense fallback={<RouteSkeleton />}><OAuthImport /></Suspense>} />
+                  <Route path="/oauth-probe" element={<Suspense fallback={<RouteSkeleton />}><OAuthProbe /></Suspense>} />
                   <Route path="/groups" element={<Suspense fallback={<RouteSkeleton />}><Groups /></Suspense>} />
                   <Route path="/models" element={<Suspense fallback={<RouteSkeleton />}><Models /></Suspense>} />
                   <Route path="/usage" element={<Suspense fallback={<RouteSkeleton />}><Usage /></Suspense>} />

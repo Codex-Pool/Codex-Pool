@@ -17,6 +17,12 @@ struct CreateCodexOAuthLoginSessionRequest {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+struct CreateCodexOAuthProbeSessionRequest {
+    #[serde(default)]
+    base_url: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
 struct CodexOAuthCallbackQuery {
     #[serde(default)]
     code: Option<String>,
@@ -46,6 +52,21 @@ struct CodexOAuthLoginSessionResponse {
     error: Option<CodexOAuthLoginSessionError>,
     #[serde(skip_serializing_if = "Option::is_none")]
     result: Option<CodexOAuthLoginSessionResult>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct CodexOAuthProbeSessionResponse {
+    session_id: String,
+    status: CodexOAuthLoginSessionStatus,
+    authorize_url: String,
+    callback_url: String,
+    created_at: DateTime<Utc>,
+    updated_at: DateTime<Utc>,
+    expires_at: DateTime<Utc>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error: Option<CodexOAuthLoginSessionError>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    result: Option<CodexOAuthProbeSessionResult>,
 }
 
 fn codex_oauth_provider_not_configured_error() -> (StatusCode, Json<ErrorEnvelope>) {
@@ -114,16 +135,33 @@ fn normalize_codex_import_base_url(base_url: Option<String>) -> String {
     normalized
 }
 
-fn resolve_codex_oauth_redirect_url() -> Option<String> {
-    let configured = std::env::var("CODEX_OAUTH_REDIRECT_URL")
+fn resolve_codex_oauth_redirect_url_with_default(
+    env_key: &str,
+    default_url: &str,
+) -> Option<String> {
+    let configured = std::env::var(env_key)
         .ok()
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty())
-        .unwrap_or_else(|| DEFAULT_CODEX_OAUTH_REDIRECT_URL.to_string());
+        .unwrap_or_else(|| default_url.to_string());
     let mut parsed = reqwest::Url::parse(&configured).ok()?;
     parsed.set_query(None);
     parsed.set_fragment(None);
     Some(parsed.to_string())
+}
+
+fn resolve_codex_oauth_redirect_url() -> Option<String> {
+    resolve_codex_oauth_redirect_url_with_default(
+        "CODEX_OAUTH_REDIRECT_URL",
+        DEFAULT_CODEX_OAUTH_REDIRECT_URL,
+    )
+}
+
+fn resolve_codex_oauth_probe_redirect_url() -> Option<String> {
+    resolve_codex_oauth_redirect_url_with_default(
+        "CODEX_OAUTH_PROBE_REDIRECT_URL",
+        DEFAULT_CODEX_OAUTH_REDIRECT_URL,
+    )
 }
 
 fn random_urlsafe_token() -> String {
@@ -138,6 +176,22 @@ fn pkce_code_challenge(code_verifier: &str) -> String {
 
 fn codex_session_response(record: &CodexOAuthLoginSessionRecord) -> CodexOAuthLoginSessionResponse {
     CodexOAuthLoginSessionResponse {
+        session_id: record.session_id.clone(),
+        status: record.status,
+        authorize_url: record.authorize_url.clone(),
+        callback_url: record.callback_url.clone(),
+        created_at: record.created_at,
+        updated_at: record.updated_at,
+        expires_at: record.expires_at,
+        error: record.error.clone(),
+        result: record.result.clone(),
+    }
+}
+
+fn codex_probe_session_response(
+    record: &CodexOAuthProbeSessionRecord,
+) -> CodexOAuthProbeSessionResponse {
+    CodexOAuthProbeSessionResponse {
         session_id: record.session_id.clone(),
         status: record.status,
         authorize_url: record.authorize_url.clone(),
@@ -257,6 +311,75 @@ fn codex_find_session_id_by_state(
         .map(|session| session.session_id.clone())
 }
 
+fn codex_find_probe_session_id_by_state(
+    sessions: &std::collections::HashMap<String, CodexOAuthProbeSessionRecord>,
+    state: &str,
+) -> Option<String> {
+    sessions
+        .values()
+        .find(|session| session.state == state)
+        .map(|session| session.session_id.clone())
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CodexOAuthCallbackTarget {
+    Login,
+    Probe,
+}
+
+fn codex_find_callback_target_by_state(
+    state: &AppState,
+    callback_state: &str,
+) -> Option<CodexOAuthCallbackTarget> {
+    {
+        let sessions = state
+            .oauth_login_sessions
+            .read()
+            .expect("oauth login session lock poisoned");
+        if codex_find_session_id_by_state(&sessions, callback_state).is_some() {
+            return Some(CodexOAuthCallbackTarget::Login);
+        }
+    }
+
+    {
+        let sessions = state
+            .oauth_probe_sessions
+            .read()
+            .expect("oauth probe session lock poisoned");
+        if codex_find_probe_session_id_by_state(&sessions, callback_state).is_some() {
+            return Some(CodexOAuthCallbackTarget::Probe);
+        }
+    }
+
+    None
+}
+
+fn codex_callback_state(query: &CodexOAuthCallbackQuery) -> Option<&str> {
+    query.state
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+}
+
+fn codex_oauth_callback_success_response(message: String) -> axum::response::Response {
+    (
+        StatusCode::OK,
+        axum::response::Html(codex_oauth_callback_html(true, &message)),
+    )
+        .into_response()
+}
+
+fn codex_oauth_callback_failure_response(envelope: ErrorEnvelope) -> axum::response::Response {
+    (
+        StatusCode::OK,
+        axum::response::Html(codex_oauth_callback_html(
+            false,
+            &format!("{} ({})", envelope.error.message, envelope.error.code),
+        )),
+    )
+        .into_response()
+}
+
 fn codex_mark_expired_if_needed(
     session: &mut CodexOAuthLoginSessionRecord,
     now: DateTime<Utc>,
@@ -288,6 +411,57 @@ fn cleanup_codex_oauth_login_sessions(
         codex_mark_expired_if_needed(session, now);
     }
     sessions.retain(|_, session| session.updated_at >= retention_cutoff);
+}
+
+fn codex_mark_probe_expired_if_needed(
+    session: &mut CodexOAuthProbeSessionRecord,
+    now: DateTime<Utc>,
+) {
+    if now < session.expires_at {
+        return;
+    }
+    if matches!(
+        session.status,
+        CodexOAuthLoginSessionStatus::WaitingCallback
+            | CodexOAuthLoginSessionStatus::Exchanging
+            | CodexOAuthLoginSessionStatus::Importing
+    ) {
+        session.status = CodexOAuthLoginSessionStatus::Expired;
+        session.error = Some(CodexOAuthLoginSessionError {
+            code: "invalid_request".to_string(),
+            message: "login session expired".to_string(),
+        });
+        session.updated_at = now;
+    }
+}
+
+fn cleanup_codex_oauth_probe_sessions(
+    sessions: &mut std::collections::HashMap<String, CodexOAuthProbeSessionRecord>,
+) {
+    let now = Utc::now();
+    let retention_cutoff = now - chrono::Duration::seconds(OAUTH_LOGIN_SESSION_RETENTION_SEC);
+    for session in sessions.values_mut() {
+        codex_mark_probe_expired_if_needed(session, now);
+    }
+    sessions.retain(|_, session| session.updated_at >= retention_cutoff);
+}
+
+fn preview_oauth_secret(raw: Option<&str>) -> Option<String> {
+    let value = raw.map(str::trim).filter(|value| !value.is_empty())?;
+    let chars = value.chars().collect::<Vec<_>>();
+    if chars.len() <= 12 {
+        return Some("••••".to_string());
+    }
+    let prefix = chars.iter().take(6).collect::<String>();
+    let suffix = chars
+        .iter()
+        .rev()
+        .take(4)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect::<String>();
+    Some(format!("{prefix}...{suffix}"))
 }
 
 fn parse_callback_query_from_redirect_url(
@@ -556,6 +730,196 @@ async fn process_codex_oauth_callback_flow(
         });
         codex_session_response(session)
     };
+    stop_codex_oauth_callback_listener_if_idle(state).await;
+    Ok(response)
+}
+
+async fn process_codex_oauth_probe_callback_flow(
+    state: &AppState,
+    session_id_hint: Option<String>,
+    callback: CodexOAuthCallbackQuery,
+) -> Result<CodexOAuthProbeSessionResponse, (StatusCode, Json<ErrorEnvelope>)> {
+    let now = Utc::now();
+    let callback_state = callback
+        .state
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToString::to_string);
+
+    let mut early_response = None;
+    let prepared_session = {
+        let mut sessions = state
+            .oauth_probe_sessions
+            .write()
+            .expect("oauth probe session lock poisoned");
+        cleanup_codex_oauth_probe_sessions(&mut sessions);
+        let session_id = match session_id_hint {
+            Some(session_id) => session_id,
+            None => {
+                let state_value = callback_state
+                    .as_deref()
+                    .ok_or_else(|| codex_oauth_invalid_request_error("missing callback state"))?;
+                codex_find_probe_session_id_by_state(&sessions, state_value)
+                    .ok_or_else(codex_oauth_not_found_error)?
+            }
+        };
+        let session = sessions
+            .get_mut(&session_id)
+            .ok_or_else(codex_oauth_not_found_error)?;
+        codex_mark_probe_expired_if_needed(session, now);
+        if session.status == CodexOAuthLoginSessionStatus::Expired {
+            return Err(codex_oauth_invalid_request_error("login session expired"));
+        }
+
+        if let Some(state_value) = callback_state.as_deref() {
+            if state_value != session.state {
+                return Err(codex_oauth_invalid_request_error("callback state mismatch"));
+            }
+        }
+
+        if let Some(error) = callback
+            .error
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        {
+            let denied_by_description = callback
+                .error_description
+                .as_deref()
+                .map(str::to_ascii_lowercase)
+                .is_some_and(|value| value.contains("access denied"));
+            let mapped_code = if error.eq_ignore_ascii_case("access_denied") || denied_by_description
+            {
+                "oauth_access_denied"
+            } else {
+                "oauth_exchange_failed"
+            };
+            session.status = CodexOAuthLoginSessionStatus::Failed;
+            session.error = Some(CodexOAuthLoginSessionError {
+                code: mapped_code.to_string(),
+                message: codex_error_message_from_code(mapped_code).to_string(),
+            });
+            session.result = None;
+            session.updated_at = now;
+            early_response = Some(codex_probe_session_response(session));
+            None
+        } else {
+            let code = callback
+                .code
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .ok_or_else(|| codex_oauth_invalid_request_error("missing oauth code"))?
+                .to_string();
+
+            session.status = CodexOAuthLoginSessionStatus::Exchanging;
+            session.error = None;
+            session.updated_at = now;
+            Some((
+                session_id,
+                code,
+                session.callback_url.clone(),
+                session.code_verifier.clone(),
+                session.base_url.clone(),
+            ))
+        }
+    };
+    if let Some(response) = early_response {
+        stop_codex_oauth_callback_listener_if_idle(state).await;
+        return Ok(response);
+    }
+    let (session_id, code, callback_url, code_verifier, base_url) =
+        prepared_session.ok_or_else(codex_oauth_not_found_error)?;
+
+    let oauth_client = crate::oauth::OpenAiOAuthClient::from_env();
+    let exchange = match oauth_client
+        .exchange_authorization_code(&code, &callback_url, &code_verifier)
+        .await
+    {
+        Ok(exchange) => exchange,
+        Err(err) => {
+            tracing::warn!(error = %err, "codex oauth probe code exchange failed");
+            let response = {
+                let mut sessions = state
+                    .oauth_probe_sessions
+                    .write()
+                    .expect("oauth probe session lock poisoned");
+                cleanup_codex_oauth_probe_sessions(&mut sessions);
+                let session = sessions
+                    .get_mut(&session_id)
+                    .ok_or_else(codex_oauth_not_found_error)?;
+                session.status = CodexOAuthLoginSessionStatus::Failed;
+                session.error = Some(codex_exchange_error_to_session_error(&err));
+                session.result = None;
+                session.updated_at = Utc::now();
+                codex_probe_session_response(session)
+            };
+            stop_codex_oauth_callback_listener_if_idle(state).await;
+            return Ok(response);
+        }
+    };
+
+    let email = exchange
+        .id_token_claims
+        .as_ref()
+        .and_then(|claims| claims.email.clone());
+    let plan_type = exchange
+        .id_token_claims
+        .as_ref()
+        .and_then(|claims| claims.chatgpt_plan_type.clone());
+    let chatgpt_account_id = exchange
+        .chatgpt_account_id
+        .clone()
+        .or_else(|| {
+            exchange
+                .id_token_claims
+                .as_ref()
+                .and_then(|claims| claims.chatgpt_account_id.clone())
+        });
+
+    let response = {
+        let mut sessions = state
+            .oauth_probe_sessions
+            .write()
+            .expect("oauth probe session lock poisoned");
+        cleanup_codex_oauth_probe_sessions(&mut sessions);
+        let session = sessions
+            .get_mut(&session_id)
+            .ok_or_else(codex_oauth_not_found_error)?;
+        session.status = CodexOAuthLoginSessionStatus::Completed;
+        session.error = None;
+        session.updated_at = Utc::now();
+        session.result = Some(CodexOAuthProbeSessionResult {
+            base_url,
+            access_token_present: !exchange.access_token.trim().is_empty(),
+            refresh_token_present: exchange
+                .refresh_token
+                .as_deref()
+                .map(str::trim)
+                .is_some_and(|value| !value.is_empty()),
+            id_token_present: exchange
+                .id_token_raw
+                .as_deref()
+                .map(str::trim)
+                .is_some_and(|value| !value.is_empty()),
+            access_token_preview: preview_oauth_secret(Some(&exchange.access_token)),
+            refresh_token_preview: preview_oauth_secret(exchange.refresh_token.as_deref()),
+            token_type: exchange.token_type.clone(),
+            scope: exchange.scope.clone(),
+            expires_at: exchange.expires_at,
+            email,
+            chatgpt_account_id,
+            chatgpt_plan_type: plan_type,
+            raw_exchange_payload: Some(exchange.raw_payload.clone()),
+            id_token_claims_raw: exchange
+                .id_token_claims
+                .as_ref()
+                .map(|claims| claims.raw_claims.clone()),
+        });
+        codex_probe_session_response(session)
+    };
+
     stop_codex_oauth_callback_listener_if_idle(state).await;
     Ok(response)
 }
@@ -897,6 +1261,63 @@ async fn create_codex_oauth_login_session(
     Ok(Json(codex_session_response(&record)))
 }
 
+async fn create_codex_oauth_probe_session(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(req): Json<CreateCodexOAuthProbeSessionRequest>,
+) -> Result<Json<CodexOAuthProbeSessionResponse>, (StatusCode, Json<ErrorEnvelope>)> {
+    let _principal = require_admin_principal(&state, &headers)?;
+
+    let callback_url = resolve_codex_oauth_probe_redirect_url()
+        .ok_or_else(codex_oauth_provider_not_configured_error)?;
+    let code_verifier = random_urlsafe_token();
+    let code_challenge = pkce_code_challenge(&code_verifier);
+    let session_id = Uuid::new_v4().to_string();
+    let state_token = random_urlsafe_token();
+    let base_url = normalize_codex_import_base_url(req.base_url);
+
+    let oauth_client = crate::oauth::OpenAiOAuthClient::from_env();
+    let authorize_url = oauth_client
+        .build_authorize_url(
+            &callback_url,
+            &state_token,
+            &code_challenge,
+            Some(DEFAULT_CODEX_OAUTH_SCOPE),
+        )
+        .map_err(|_| codex_oauth_provider_not_configured_error())?;
+    if let Err(err) = ensure_codex_oauth_callback_listener_started(&state).await {
+        tracing::warn!(
+            error = %err,
+            "failed to start codex oauth callback listener before creating probe session"
+        );
+        return Err(codex_oauth_callback_listener_unavailable_error());
+    }
+
+    let now = Utc::now();
+    let record = CodexOAuthProbeSessionRecord {
+        session_id: session_id.clone(),
+        state: state_token,
+        code_verifier,
+        authorize_url,
+        callback_url,
+        base_url,
+        status: CodexOAuthLoginSessionStatus::WaitingCallback,
+        error: None,
+        result: None,
+        created_at: now,
+        updated_at: now,
+        expires_at: now + chrono::Duration::seconds(OAUTH_LOGIN_SESSION_TTL_SEC),
+    };
+
+    let mut sessions = state
+        .oauth_probe_sessions
+        .write()
+        .expect("oauth probe session lock poisoned");
+    cleanup_codex_oauth_probe_sessions(&mut sessions);
+    sessions.insert(session_id, record.clone());
+    Ok(Json(codex_probe_session_response(&record)))
+}
+
 async fn get_codex_oauth_login_session(
     Path(session_id): Path<String>,
     State(state): State<AppState>,
@@ -915,6 +1336,24 @@ async fn get_codex_oauth_login_session(
     Ok(Json(codex_session_response(session)))
 }
 
+async fn get_codex_oauth_probe_session(
+    Path(session_id): Path<String>,
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<CodexOAuthProbeSessionResponse>, (StatusCode, Json<ErrorEnvelope>)> {
+    let _principal = require_admin_principal(&state, &headers)?;
+    let mut sessions = state
+        .oauth_probe_sessions
+        .write()
+        .expect("oauth probe session lock poisoned");
+    cleanup_codex_oauth_probe_sessions(&mut sessions);
+    let session = sessions
+        .get_mut(&session_id)
+        .ok_or_else(codex_oauth_not_found_error)?;
+    codex_mark_probe_expired_if_needed(session, Utc::now());
+    Ok(Json(codex_probe_session_response(session)))
+}
+
 async fn submit_codex_oauth_login_session_callback(
     Path(session_id): Path<String>,
     State(state): State<AppState>,
@@ -928,16 +1367,56 @@ async fn submit_codex_oauth_login_session_callback(
         .map(Json)
 }
 
+async fn submit_codex_oauth_probe_session_callback(
+    Path(session_id): Path<String>,
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(req): Json<SubmitCodexOAuthCallbackRequest>,
+) -> Result<Json<CodexOAuthProbeSessionResponse>, (StatusCode, Json<ErrorEnvelope>)> {
+    let _principal = require_admin_principal(&state, &headers)?;
+    let callback = parse_callback_query_from_redirect_url(&req.redirect_url)?;
+    process_codex_oauth_probe_callback_flow(&state, Some(session_id), callback)
+        .await
+        .map(Json)
+}
+
 async fn handle_codex_oauth_callback(
     State(state): State<AppState>,
     Query(query): Query<CodexOAuthCallbackQuery>,
 ) -> impl IntoResponse {
-    match process_codex_oauth_callback_flow(&state, None, query).await {
+    let callback_target = codex_callback_state(&query)
+        .and_then(|state_value| codex_find_callback_target_by_state(&state, state_value));
+
+    match callback_target {
+        Some(CodexOAuthCallbackTarget::Probe) => {
+            match process_codex_oauth_probe_callback_flow(&state, None, query).await {
+                Ok(response) => codex_oauth_callback_success_response(format!(
+                    "Probe session {} completed successfully.",
+                    response.session_id
+                )),
+                Err((_, Json(envelope))) => codex_oauth_callback_failure_response(envelope),
+            }
+        }
+        _ => match process_codex_oauth_callback_flow(&state, None, query).await {
+            Ok(response) => codex_oauth_callback_success_response(format!(
+                "Session {} imported successfully.",
+                response.session_id
+            )),
+            Err((_, Json(envelope))) => codex_oauth_callback_failure_response(envelope),
+        },
+    }
+}
+
+async fn handle_codex_oauth_probe_callback(
+    State(state): State<AppState>,
+    Query(query): Query<CodexOAuthCallbackQuery>,
+) -> impl IntoResponse {
+    match process_codex_oauth_probe_callback_flow(&state, None, query).await {
         Ok(response) => (
             StatusCode::OK,
             axum::response::Html(codex_oauth_callback_html(
                 true,
-                &format!("Session {} imported successfully.", response.session_id),
+                &format!("Probe session {} completed successfully.", response.session_id),
             )),
         )
             .into_response(),

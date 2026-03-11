@@ -1,5 +1,6 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use uuid::Uuid;
 
 use crate::model::{
@@ -89,7 +90,31 @@ pub struct OAuthAccountStatusResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub credential_kind: Option<SessionCredentialKind>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub email: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub oauth_subject: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub oauth_identity_provider: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub email_verified: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub chatgpt_plan_type: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub chatgpt_user_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub chatgpt_subscription_active_start: Option<DateTime<Utc>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub chatgpt_subscription_active_until: Option<DateTime<Utc>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub chatgpt_subscription_last_checked: Option<DateTime<Utc>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub chatgpt_account_user_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub chatgpt_compute_residency: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub organizations: Option<Vec<Value>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub groups: Option<Vec<Value>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source_type: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]

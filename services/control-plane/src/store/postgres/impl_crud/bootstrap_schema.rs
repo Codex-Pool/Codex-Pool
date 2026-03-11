@@ -970,7 +970,19 @@ impl PostgresStore {
                 account_id UUID PRIMARY KEY REFERENCES upstream_accounts(id) ON DELETE CASCADE,
                 credential_kind TEXT NOT NULL DEFAULT 'refresh_rotatable',
                 token_expires_at TIMESTAMPTZ NULL,
+                email TEXT NULL,
+                oauth_subject TEXT NULL,
+                oauth_identity_provider TEXT NULL,
+                email_verified BOOLEAN NULL,
                 chatgpt_plan_type TEXT NULL,
+                chatgpt_user_id TEXT NULL,
+                chatgpt_subscription_active_start TIMESTAMPTZ NULL,
+                chatgpt_subscription_active_until TIMESTAMPTZ NULL,
+                chatgpt_subscription_last_checked TIMESTAMPTZ NULL,
+                chatgpt_account_user_id TEXT NULL,
+                chatgpt_compute_residency TEXT NULL,
+                organizations_json JSONB NULL,
+                groups_json JSONB NULL,
                 source_type TEXT NULL,
                 updated_at TIMESTAMPTZ NOT NULL
             )
@@ -979,6 +991,140 @@ impl PostgresStore {
         .execute(tx.as_mut())
         .await
         .context("failed to create upstream_account_session_profiles table")?;
+
+        sqlx::query(
+            r#"
+            ALTER TABLE upstream_account_session_profiles
+            ADD COLUMN IF NOT EXISTS email TEXT NULL
+            "#,
+        )
+        .execute(tx.as_mut())
+        .await
+        .context("failed to add upstream_account_session_profiles.email column")?;
+
+        sqlx::query(
+            r#"
+            ALTER TABLE upstream_account_session_profiles
+            ADD COLUMN IF NOT EXISTS oauth_subject TEXT NULL
+            "#,
+        )
+        .execute(tx.as_mut())
+        .await
+        .context("failed to add upstream_account_session_profiles.oauth_subject column")?;
+
+        sqlx::query(
+            r#"
+            ALTER TABLE upstream_account_session_profiles
+            ADD COLUMN IF NOT EXISTS oauth_identity_provider TEXT NULL
+            "#,
+        )
+        .execute(tx.as_mut())
+        .await
+        .context(
+            "failed to add upstream_account_session_profiles.oauth_identity_provider column",
+        )?;
+
+        sqlx::query(
+            r#"
+            ALTER TABLE upstream_account_session_profiles
+            ADD COLUMN IF NOT EXISTS email_verified BOOLEAN NULL
+            "#,
+        )
+        .execute(tx.as_mut())
+        .await
+        .context("failed to add upstream_account_session_profiles.email_verified column")?;
+
+        sqlx::query(
+            r#"
+            ALTER TABLE upstream_account_session_profiles
+            ADD COLUMN IF NOT EXISTS chatgpt_user_id TEXT NULL
+            "#,
+        )
+        .execute(tx.as_mut())
+        .await
+        .context("failed to add upstream_account_session_profiles.chatgpt_user_id column")?;
+
+        sqlx::query(
+            r#"
+            ALTER TABLE upstream_account_session_profiles
+            ADD COLUMN IF NOT EXISTS chatgpt_subscription_active_start TIMESTAMPTZ NULL
+            "#,
+        )
+        .execute(tx.as_mut())
+        .await
+        .context(
+            "failed to add upstream_account_session_profiles.chatgpt_subscription_active_start column",
+        )?;
+
+        sqlx::query(
+            r#"
+            ALTER TABLE upstream_account_session_profiles
+            ADD COLUMN IF NOT EXISTS chatgpt_subscription_active_until TIMESTAMPTZ NULL
+            "#,
+        )
+        .execute(tx.as_mut())
+        .await
+        .context(
+            "failed to add upstream_account_session_profiles.chatgpt_subscription_active_until column",
+        )?;
+
+        sqlx::query(
+            r#"
+            ALTER TABLE upstream_account_session_profiles
+            ADD COLUMN IF NOT EXISTS chatgpt_subscription_last_checked TIMESTAMPTZ NULL
+            "#,
+        )
+        .execute(tx.as_mut())
+        .await
+        .context(
+            "failed to add upstream_account_session_profiles.chatgpt_subscription_last_checked column",
+        )?;
+
+        sqlx::query(
+            r#"
+            ALTER TABLE upstream_account_session_profiles
+            ADD COLUMN IF NOT EXISTS chatgpt_account_user_id TEXT NULL
+            "#,
+        )
+        .execute(tx.as_mut())
+        .await
+        .context(
+            "failed to add upstream_account_session_profiles.chatgpt_account_user_id column",
+        )?;
+
+        sqlx::query(
+            r#"
+            ALTER TABLE upstream_account_session_profiles
+            ADD COLUMN IF NOT EXISTS chatgpt_compute_residency TEXT NULL
+            "#,
+        )
+        .execute(tx.as_mut())
+        .await
+        .context(
+            "failed to add upstream_account_session_profiles.chatgpt_compute_residency column",
+        )?;
+
+        sqlx::query(
+            r#"
+            ALTER TABLE upstream_account_session_profiles
+            ADD COLUMN IF NOT EXISTS organizations_json JSONB NULL
+            "#,
+        )
+        .execute(tx.as_mut())
+        .await
+        .context(
+            "failed to add upstream_account_session_profiles.organizations_json column",
+        )?;
+
+        sqlx::query(
+            r#"
+            ALTER TABLE upstream_account_session_profiles
+            ADD COLUMN IF NOT EXISTS groups_json JSONB NULL
+            "#,
+        )
+        .execute(tx.as_mut())
+        .await
+        .context("failed to add upstream_account_session_profiles.groups_json column")?;
 
         sqlx::query(
             r#"

@@ -389,7 +389,25 @@ impl InMemoryStore {
             account_id: account.id,
             auth_provider: provider,
             credential_kind,
+            email: session_profile.and_then(|item| item.email.clone()),
+            oauth_subject: session_profile.and_then(|item| item.oauth_subject.clone()),
+            oauth_identity_provider: session_profile
+                .and_then(|item| item.oauth_identity_provider.clone()),
+            email_verified: session_profile.and_then(|item| item.email_verified),
             chatgpt_plan_type: session_profile.and_then(|item| item.chatgpt_plan_type.clone()),
+            chatgpt_user_id: session_profile.and_then(|item| item.chatgpt_user_id.clone()),
+            chatgpt_subscription_active_start: session_profile
+                .and_then(|item| item.chatgpt_subscription_active_start),
+            chatgpt_subscription_active_until: session_profile
+                .and_then(|item| item.chatgpt_subscription_active_until),
+            chatgpt_subscription_last_checked: session_profile
+                .and_then(|item| item.chatgpt_subscription_last_checked),
+            chatgpt_account_user_id: session_profile
+                .and_then(|item| item.chatgpt_account_user_id.clone()),
+            chatgpt_compute_residency: session_profile
+                .and_then(|item| item.chatgpt_compute_residency.clone()),
+            organizations: session_profile.and_then(|item| item.organizations.clone()),
+            groups: session_profile.and_then(|item| item.groups.clone()),
             source_type: session_profile.and_then(|item| item.source_type.clone()),
             token_family_id: credential.map(|item| item.token_family_id.clone()),
             token_version: credential.map(|item| item.token_version),

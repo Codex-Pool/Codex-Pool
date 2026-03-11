@@ -256,14 +256,13 @@ impl PostgresStore {
         .await
         .context("failed to backfill oauth account chatgpt_account_id")?;
 
-        self.upsert_session_profile_tx(
-            tx.as_mut(),
-            account_id,
+        let session_profile = SessionProfileRecord::from_oauth_token_info(
+            &token_info,
             SessionCredentialKind::RefreshRotatable,
-            Some(token_info.expires_at),
             token_info.chatgpt_plan_type.clone(),
             None,
-        )
+        );
+        self.upsert_session_profile_tx(tx.as_mut(), account_id, &session_profile)
         .await?;
 
         self.bump_revision_tx(&mut tx).await?;

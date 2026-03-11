@@ -21,7 +21,7 @@ use sqlx::{Row, Transaction};
 use sqlx_postgres::{PgPool, PgPoolOptions, Postgres};
 use uuid::Uuid;
 
-use super::UpsertOneTimeSessionAccountRequest;
+use super::{SessionProfileRecord, UpsertOneTimeSessionAccountRequest};
 use super::{ControlPlaneStore, OAuthUpsertResult, ValidatedPrincipal};
 use crate::crypto::CredentialCipher;
 use crate::oauth::{OAuthTokenClient, OAuthTokenInfo, OpenAiOAuthClient};

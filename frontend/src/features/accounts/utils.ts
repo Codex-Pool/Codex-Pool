@@ -218,6 +218,7 @@ export function matchesAccountSearch(
 ) {
   const status = oauthStatusMap.get(account.id)
   const values = [
+    status?.email,
     account.label,
     account.id,
     account.base_url,
@@ -289,6 +290,19 @@ export function getCredentialKindShortLabel(
   return t('accounts.oauth.kindShort.unknown', { defaultValue: 'Unknown' })
 }
 
+export function getCredentialKindLabel(
+  kind: OAuthAccountStatusResponse['credential_kind'] | undefined,
+  t: TFunction,
+) {
+  if (kind === 'refresh_rotatable') {
+    return t('accounts.oauth.kind.refreshRotatable', { defaultValue: 'Refresh-token account' })
+  }
+  if (kind === 'one_time_access_token') {
+    return t('accounts.oauth.kind.oneTime', { defaultValue: 'One-time access-token account' })
+  }
+  return t('accounts.oauth.kind.unknown', { defaultValue: 'Unknown credential type' })
+}
+
 export function getPlanLabel(plan: string | undefined, t: TFunction) {
   const value = normalizePlanValue(plan)
   if (value === PLAN_UNKNOWN_VALUE) {
@@ -304,4 +318,25 @@ export function getRefreshStatusLabel(
   if (status === 'ok') return t('accounts.oauth.status.ok')
   if (status === 'failed') return t('accounts.oauth.status.failed')
   return t('accounts.oauth.status.never')
+}
+
+export function getAuthProviderLabel(
+  provider: OAuthAccountStatusResponse['auth_provider'],
+  t: TFunction,
+) {
+  if (provider === 'oauth_refresh_token') {
+    return t('accounts.oauth.provider.refreshToken', { defaultValue: 'Refresh token' })
+  }
+  return t('accounts.oauth.provider.legacyBearer', { defaultValue: 'Legacy bearer token' })
+}
+
+export function getSourceTypeLabel(sourceType: string | undefined, t: TFunction) {
+  const normalized = sourceType?.trim().toLowerCase()
+  if (!normalized) {
+    return null
+  }
+  if (normalized === 'codex') {
+    return t('accounts.oauth.sourceType.codex', { defaultValue: 'Codex' })
+  }
+  return t('accounts.oauth.sourceType.unknown', { defaultValue: 'Unknown source' })
 }
