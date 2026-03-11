@@ -735,6 +735,12 @@ impl PostgresStore {
             account_id,
         )
         .await?;
+        self.append_data_plane_outbox_event_tx(
+            &mut tx,
+            DataPlaneSnapshotEventType::RoutingPlanRefresh,
+            Uuid::nil(),
+        )
+        .await?;
         self.bump_revision_tx(&mut tx).await?;
         tx.commit()
             .await
@@ -796,6 +802,12 @@ impl PostgresStore {
             &mut tx,
             DataPlaneSnapshotEventType::AccountUpsert,
             account_id,
+        )
+        .await?;
+        self.append_data_plane_outbox_event_tx(
+            &mut tx,
+            DataPlaneSnapshotEventType::RoutingPlanRefresh,
+            Uuid::nil(),
         )
         .await?;
         self.bump_revision_tx(&mut tx).await?;

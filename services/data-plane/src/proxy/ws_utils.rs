@@ -709,6 +709,7 @@ async fn proxy_websocket_streams(
                                 connect_failover_upstream_for_ws_session(
                                     &state,
                                     &ws_usage_context,
+                                    original_tracked.seed.model.as_deref(),
                                     &excluded_account_ids,
                                 )
                                 .await
@@ -851,6 +852,7 @@ async fn proxy_websocket_streams(
                         if let Some((next_account, next_socket)) = connect_failover_upstream_for_ws_session(
                             &state,
                             &ws_usage_context,
+                            None,
                             &excluded_account_ids,
                         )
                         .await
@@ -962,12 +964,14 @@ fn should_rotate_ws_session_on_error(error_context: &UpstreamErrorContext) -> bo
 async fn connect_failover_upstream_for_ws_session(
     state: &Arc<AppState>,
     ws_usage_context: &WsLogicalUsageConnectionContext,
+    model: Option<&str>,
     excluded_account_ids: &HashSet<Uuid>,
 ) -> Option<(UpstreamAccount, UpstreamWebSocket)> {
     let mut excluded_account_ids = excluded_account_ids.clone();
 
     loop {
-        let account = state.router.pick_with_policy(
+        let account = state.router.pick_for_model(
+            model,
             ws_usage_context.sticky_key.as_deref(),
             &excluded_account_ids,
             state.sticky_prefer_non_conflicting,
@@ -1111,7 +1115,9 @@ fn parse_ws_request_policy_context(
         request_id,
         estimated_input_tokens,
         continuation_key_hint: previous_response_id.clone(),
-        sticky_key_hint: header_or_metadata_session_key.clone(),
+        sticky_key_hint: previous_response_id
+            .clone()
+            .or(header_or_metadata_session_key.clone()),
         session_key_hint: previous_response_id.or(header_or_metadata_session_key),
     }
 }

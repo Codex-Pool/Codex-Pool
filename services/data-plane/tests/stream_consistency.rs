@@ -176,6 +176,15 @@ fn parse_ws_event_types(frames: &[String]) -> Vec<String> {
 }
 
 fn parse_sse_error_code(body: &str) -> Option<String> {
+    if let Ok(payload) = serde_json::from_str::<Value>(body) {
+        if let Some(code) = payload
+            .get("error")
+            .and_then(|value| value.get("code"))
+            .and_then(Value::as_str)
+        {
+            return Some(code.to_string());
+        }
+    }
     for line in body.lines() {
         if let Some(data) = line.strip_prefix("data: ") {
             if let Ok(payload) = serde_json::from_str::<Value>(data) {
@@ -240,7 +249,7 @@ async fn responses_sse_and_websocket_keep_same_event_order() {
             Request::builder()
                 .method("POST")
                 .uri("/v1/responses")
-                .body(Body::from("{}"))
+                .body(Body::from(r#"{"stream":true,"model":"gpt-5.4"}"#))
                 .unwrap(),
         )
         .await
@@ -293,7 +302,7 @@ async fn responses_sse_and_websocket_keep_same_error_event_code() {
 
     let sse_upstream = MockServer::start().await;
     let sse_body = format!(
-        "event: response.created\ndata: {{\"type\":\"response.created\"}}\n\nevent: error\ndata: {error_payload}\n\n"
+        "event: response.created\ndata: {{\"type\":\"response.created\"}}\n\nevent: response.output_item.added\ndata: {{\"type\":\"response.output_item.added\"}}\n\nevent: error\ndata: {error_payload}\n\n"
     );
     Mock::given(method("POST"))
         .and(path("/backend-api/codex/responses"))
@@ -311,17 +320,18 @@ async fn responses_sse_and_websocket_keep_same_error_event_code() {
             Request::builder()
                 .method("POST")
                 .uri("/v1/responses")
-                .body(Body::from("{}"))
+                .body(Body::from(r#"{"stream":true,"model":"gpt-5.4"}"#))
                 .unwrap(),
         )
         .await
         .unwrap();
-    assert_eq!(sse_response.status(), StatusCode::OK);
+    assert_eq!(sse_response.status(), StatusCode::SERVICE_UNAVAILABLE);
     let sse_bytes = sse_response.into_body().collect().await.unwrap().to_bytes();
     let sse_error_code = parse_sse_error_code(std::str::from_utf8(&sse_bytes).unwrap());
 
     let ws_upstream = spawn_scripted_ws_upstream(vec![
         serde_json::json!({"type":"response.created"}).to_string(),
+        serde_json::json!({"type":"response.output_item.added"}).to_string(),
         error_payload,
     ])
     .await;

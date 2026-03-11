@@ -105,6 +105,186 @@ impl ControlPlaneStore for InMemoryStore {
         Ok(self.upsert_stream_retry_policy_inner(req))
     }
 
+    async fn list_routing_profiles(&self) -> Result<Vec<RoutingProfile>> {
+        let mut profiles = self
+            .routing_profiles
+            .read()
+            .unwrap()
+            .values()
+            .cloned()
+            .collect::<Vec<_>>();
+        profiles.sort_by(|left, right| {
+            right
+                .priority
+                .cmp(&left.priority)
+                .then_with(|| left.created_at.cmp(&right.created_at))
+        });
+        Ok(profiles)
+    }
+
+    async fn upsert_routing_profile(
+        &self,
+        req: UpsertRoutingProfileRequest,
+    ) -> Result<RoutingProfile> {
+        let now = Utc::now();
+        let profile = RoutingProfile {
+            id: req.id.unwrap_or_else(Uuid::new_v4),
+            name: req.name,
+            description: req.description,
+            enabled: req.enabled,
+            priority: req.priority,
+            selector: req.selector,
+            created_at: now,
+            updated_at: now,
+        };
+        self.routing_profiles
+            .write()
+            .unwrap()
+            .entry(profile.id)
+            .and_modify(|existing| {
+                existing.name = profile.name.clone();
+                existing.description = profile.description.clone();
+                existing.enabled = profile.enabled;
+                existing.priority = profile.priority;
+                existing.selector = profile.selector.clone();
+                existing.updated_at = now;
+            })
+            .or_insert_with(|| profile.clone());
+        self.revision.fetch_add(1, Ordering::Relaxed);
+        self.routing_profiles
+            .read()
+            .unwrap()
+            .get(&profile.id)
+            .cloned()
+            .ok_or_else(|| anyhow!("routing profile not found after upsert"))
+    }
+
+    async fn delete_routing_profile(&self, profile_id: Uuid) -> Result<()> {
+        let removed = self.routing_profiles.write().unwrap().remove(&profile_id);
+        if removed.is_none() {
+            return Err(anyhow!("routing profile not found"));
+        }
+        self.revision.fetch_add(1, Ordering::Relaxed);
+        Ok(())
+    }
+
+    async fn list_model_routing_policies(&self) -> Result<Vec<ModelRoutingPolicy>> {
+        let mut policies = self
+            .model_routing_policies
+            .read()
+            .unwrap()
+            .values()
+            .cloned()
+            .collect::<Vec<_>>();
+        policies.sort_by(|left, right| {
+            right
+                .priority
+                .cmp(&left.priority)
+                .then_with(|| left.created_at.cmp(&right.created_at))
+        });
+        Ok(policies)
+    }
+
+    async fn upsert_model_routing_policy(
+        &self,
+        req: UpsertModelRoutingPolicyRequest,
+    ) -> Result<ModelRoutingPolicy> {
+        let now = Utc::now();
+        let policy = ModelRoutingPolicy {
+            id: req.id.unwrap_or_else(Uuid::new_v4),
+            name: req.name,
+            family: req.family,
+            exact_models: req.exact_models,
+            model_prefixes: req.model_prefixes,
+            fallback_profile_ids: req.fallback_profile_ids,
+            enabled: req.enabled,
+            priority: req.priority,
+            created_at: now,
+            updated_at: now,
+        };
+        self.model_routing_policies
+            .write()
+            .unwrap()
+            .entry(policy.id)
+            .and_modify(|existing| {
+                existing.name = policy.name.clone();
+                existing.family = policy.family.clone();
+                existing.exact_models = policy.exact_models.clone();
+                existing.model_prefixes = policy.model_prefixes.clone();
+                existing.fallback_profile_ids = policy.fallback_profile_ids.clone();
+                existing.enabled = policy.enabled;
+                existing.priority = policy.priority;
+                existing.updated_at = now;
+            })
+            .or_insert_with(|| policy.clone());
+        self.revision.fetch_add(1, Ordering::Relaxed);
+        self.model_routing_policies
+            .read()
+            .unwrap()
+            .get(&policy.id)
+            .cloned()
+            .ok_or_else(|| anyhow!("model routing policy not found after upsert"))
+    }
+
+    async fn delete_model_routing_policy(&self, policy_id: Uuid) -> Result<()> {
+        let removed = self.model_routing_policies.write().unwrap().remove(&policy_id);
+        if removed.is_none() {
+            return Err(anyhow!("model routing policy not found"));
+        }
+        self.revision.fetch_add(1, Ordering::Relaxed);
+        Ok(())
+    }
+
+    async fn ai_routing_settings(&self) -> Result<AiRoutingSettings> {
+        Ok(self.ai_routing_settings.read().unwrap().clone())
+    }
+
+    async fn update_ai_routing_settings(
+        &self,
+        req: UpdateAiRoutingSettingsRequest,
+    ) -> Result<AiRoutingSettings> {
+        let settings = AiRoutingSettings {
+            enabled: req.enabled,
+            auto_publish: req.auto_publish,
+            planner_model_chain: req.planner_model_chain,
+            trigger_mode: req.trigger_mode,
+            kill_switch: req.kill_switch,
+            updated_at: Utc::now(),
+        };
+        *self.ai_routing_settings.write().unwrap() = settings.clone();
+        self.revision.fetch_add(1, Ordering::Relaxed);
+        Ok(settings)
+    }
+
+    async fn list_routing_plan_versions(&self) -> Result<Vec<RoutingPlanVersion>> {
+        Ok(self.routing_plan_versions.read().unwrap().clone())
+    }
+
+    async fn record_account_model_support(
+        &self,
+        account_id: Uuid,
+        supported_models: Vec<String>,
+        checked_at: DateTime<Utc>,
+    ) -> Result<()> {
+        let mut normalized = supported_models
+            .into_iter()
+            .map(|item| item.trim().to_string())
+            .filter(|item| !item.is_empty())
+            .collect::<Vec<_>>();
+        normalized.sort();
+        normalized.dedup();
+
+        self.account_model_support.write().unwrap().insert(
+            account_id,
+            AccountModelSupportRecord {
+                supported_models: normalized,
+                checked_at: Some(checked_at),
+            },
+        );
+        self.revision.fetch_add(1, Ordering::Relaxed);
+        Ok(())
+    }
+
     async fn refresh_expiring_oauth_accounts(&self) -> Result<()> {
         self.refresh_expiring_oauth_accounts_inner().await;
         Ok(())
@@ -173,7 +353,7 @@ fn refresh_token_sha256(token: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{ControlPlaneStore, InMemoryStore};
+    use super::{ControlPlaneStore, InMemoryStore, UpsertOneTimeSessionAccountRequest};
     use crate::crypto::CredentialCipher;
     use crate::oauth::{OAuthTokenClient, OAuthTokenInfo};
     use async_trait::async_trait;
@@ -181,8 +361,9 @@ mod tests {
     use chrono::{DateTime, Duration, Utc};
     use codex_pool_core::api::{
         CreateApiKeyRequest, CreateTenantRequest, ImportOAuthRefreshTokenRequest,
+        UpsertModelRoutingPolicyRequest, UpsertRoutingProfileRequest,
     };
-    use codex_pool_core::model::UpstreamMode;
+    use codex_pool_core::model::{RoutingProfileSelector, UpstreamMode};
     use serde_json::json;
     use std::sync::Arc;
 
@@ -678,5 +859,133 @@ mod tests {
             .collect::<Vec<_>>();
 
         assert_eq!(shared_accounts.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn in_memory_snapshot_compiles_exact_model_routes_from_profiles_and_support_matrix() {
+        let store = InMemoryStore::default();
+
+        let free_account = store
+            .upsert_one_time_session_account(UpsertOneTimeSessionAccountRequest {
+                label: "free-codex".to_string(),
+                mode: UpstreamMode::CodexOauth,
+                base_url: "https://chatgpt.com/backend-api/codex".to_string(),
+                access_token: "free-token".to_string(),
+                chatgpt_account_id: Some("acct-free".to_string()),
+                enabled: Some(true),
+                priority: Some(100),
+                token_expires_at: Some(Utc::now() + Duration::hours(4)),
+                chatgpt_plan_type: Some("free".to_string()),
+                source_type: Some("codex".to_string()),
+            })
+            .await
+            .unwrap()
+            .account;
+        let paid_account = store
+            .upsert_one_time_session_account(UpsertOneTimeSessionAccountRequest {
+                label: "paid-codex".to_string(),
+                mode: UpstreamMode::CodexOauth,
+                base_url: "https://chatgpt.com/backend-api/codex".to_string(),
+                access_token: "paid-token".to_string(),
+                chatgpt_account_id: Some("acct-paid".to_string()),
+                enabled: Some(true),
+                priority: Some(90),
+                token_expires_at: Some(Utc::now() + Duration::hours(4)),
+                chatgpt_plan_type: Some("plus".to_string()),
+                source_type: Some("codex".to_string()),
+            })
+            .await
+            .unwrap()
+            .account;
+
+        let free_profile = store
+            .upsert_routing_profile(UpsertRoutingProfileRequest {
+                id: None,
+                name: "free-first".to_string(),
+                description: None,
+                enabled: true,
+                priority: 100,
+                selector: RoutingProfileSelector {
+                    plan_types: vec!["free".to_string()],
+                    ..Default::default()
+                },
+            })
+            .await
+            .unwrap();
+        let paid_profile = store
+            .upsert_routing_profile(UpsertRoutingProfileRequest {
+                id: None,
+                name: "paid-fallback".to_string(),
+                description: None,
+                enabled: true,
+                priority: 90,
+                selector: RoutingProfileSelector {
+                    plan_types: vec!["plus".to_string(), "team".to_string()],
+                    ..Default::default()
+                },
+            })
+            .await
+            .unwrap();
+
+        store
+            .upsert_model_routing_policy(UpsertModelRoutingPolicyRequest {
+                id: None,
+                name: "default".to_string(),
+                family: "default".to_string(),
+                exact_models: Vec::new(),
+                model_prefixes: Vec::new(),
+                fallback_profile_ids: vec![free_profile.id, paid_profile.id],
+                enabled: true,
+                priority: 100,
+            })
+            .await
+            .unwrap();
+        store
+            .upsert_model_routing_policy(UpsertModelRoutingPolicyRequest {
+                id: None,
+                name: "gpt5-family".to_string(),
+                family: "gpt-5".to_string(),
+                exact_models: vec!["gpt-5.4".to_string()],
+                model_prefixes: vec!["gpt-5".to_string()],
+                fallback_profile_ids: vec![free_profile.id, paid_profile.id],
+                enabled: true,
+                priority: 80,
+            })
+            .await
+            .unwrap();
+
+        store
+            .record_account_model_support(
+                free_account.id,
+                vec!["gpt-5.2-codex".to_string()],
+                Utc::now(),
+            )
+            .await
+            .unwrap();
+        store
+            .record_account_model_support(
+                paid_account.id,
+                vec!["gpt-5.4".to_string(), "gpt-5.2-codex".to_string()],
+                Utc::now(),
+            )
+            .await
+            .unwrap();
+
+        let snapshot = store.snapshot().await.unwrap();
+        let compiled = snapshot
+            .compiled_routing_plan
+            .expect("compiled routing plan should exist");
+
+        assert_eq!(compiled.default_route.len(), 2);
+        assert_eq!(compiled.default_route[0].account_ids, vec![free_account.id]);
+        assert_eq!(compiled.default_route[1].account_ids, vec![paid_account.id]);
+
+        let gpt54 = compiled
+            .policies
+            .iter()
+            .find(|policy| policy.exact_models == vec!["gpt-5.4".to_string()])
+            .expect("compiled exact route for gpt-5.4");
+        assert_eq!(gpt54.fallback_segments.len(), 1);
+        assert_eq!(gpt54.fallback_segments[0].account_ids, vec![paid_account.id]);
     }
 }

@@ -454,6 +454,61 @@ impl ControlPlaneStore for PostgresStore {
         self.upsert_stream_retry_policy_inner(req).await
     }
 
+    async fn list_routing_profiles(&self) -> Result<Vec<RoutingProfile>> {
+        self.list_routing_profiles_inner().await
+    }
+
+    async fn upsert_routing_profile(
+        &self,
+        req: UpsertRoutingProfileRequest,
+    ) -> Result<RoutingProfile> {
+        self.upsert_routing_profile_inner(req).await
+    }
+
+    async fn delete_routing_profile(&self, profile_id: Uuid) -> Result<()> {
+        self.delete_routing_profile_inner(profile_id).await
+    }
+
+    async fn list_model_routing_policies(&self) -> Result<Vec<ModelRoutingPolicy>> {
+        self.list_model_routing_policies_inner().await
+    }
+
+    async fn upsert_model_routing_policy(
+        &self,
+        req: UpsertModelRoutingPolicyRequest,
+    ) -> Result<ModelRoutingPolicy> {
+        self.upsert_model_routing_policy_inner(req).await
+    }
+
+    async fn delete_model_routing_policy(&self, policy_id: Uuid) -> Result<()> {
+        self.delete_model_routing_policy_inner(policy_id).await
+    }
+
+    async fn ai_routing_settings(&self) -> Result<AiRoutingSettings> {
+        self.load_ai_routing_settings_inner().await
+    }
+
+    async fn update_ai_routing_settings(
+        &self,
+        req: UpdateAiRoutingSettingsRequest,
+    ) -> Result<AiRoutingSettings> {
+        self.update_ai_routing_settings_inner(req).await
+    }
+
+    async fn list_routing_plan_versions(&self) -> Result<Vec<RoutingPlanVersion>> {
+        self.list_routing_plan_versions_inner().await
+    }
+
+    async fn record_account_model_support(
+        &self,
+        account_id: Uuid,
+        supported_models: Vec<String>,
+        checked_at: DateTime<Utc>,
+    ) -> Result<()> {
+        self.record_account_model_support_inner(account_id, supported_models, checked_at)
+            .await
+    }
+
     async fn refresh_expiring_oauth_accounts(&self) -> Result<()> {
         self.refresh_expiring_oauth_accounts_inner().await
     }

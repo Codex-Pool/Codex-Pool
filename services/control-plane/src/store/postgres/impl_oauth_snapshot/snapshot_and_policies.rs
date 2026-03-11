@@ -680,119 +680,25 @@ impl PostgresStore {
     async fn snapshot_inner(&self) -> Result<DataPlaneSnapshot> {
         let revision = self.current_revision().await?;
         let cursor = self.data_plane_outbox_cursor_inner().await?;
-        let rows = sqlx::query(
-            r#"
-            SELECT
-                a.id,
-                a.label,
-                a.mode,
-                a.base_url,
-                a.bearer_token,
-                a.chatgpt_account_id,
-                a.auth_provider,
-                a.enabled,
-                a.priority,
-                a.created_at,
-                c.access_token_enc,
-                c.token_expires_at,
-                c.last_refresh_status,
-                c.refresh_reused_detected,
-                c.last_refresh_error_code,
-                rl.expires_at AS rate_limits_expires_at,
-                rl.last_error_code AS rate_limits_last_error_code,
-                rl.last_error_message AS rate_limits_last_error
-            FROM upstream_accounts a
-            LEFT JOIN upstream_account_oauth_credentials c ON c.account_id = a.id
-            LEFT JOIN upstream_account_rate_limit_snapshots rl ON rl.account_id = a.id
-            WHERE a.pool_state = $1
-            ORDER BY a.created_at ASC
-            "#,
-        )
-        .bind(POOL_STATE_ACTIVE)
-        .fetch_all(&self.pool)
-        .await
-        .context("failed to load upstream accounts snapshot rows")?;
-        let mut accounts = Vec::with_capacity(rows.len());
-        for row in rows {
-            let now = Utc::now();
-            let auth_provider =
-                parse_upstream_auth_provider(row.try_get::<String, _>("auth_provider")?.as_str())?;
-            let mode = parse_upstream_mode(row.try_get::<String, _>("mode")?.as_str())?;
-            let token_expires_at = row.try_get::<Option<DateTime<Utc>>, _>("token_expires_at")?;
-            let last_refresh_status = parse_oauth_refresh_status(
-                row.try_get::<Option<String>, _>("last_refresh_status")?
-                    .unwrap_or_else(|| "never".to_string())
-                    .as_str(),
-            )?;
-            let refresh_reused_detected = row
-                .try_get::<Option<bool>, _>("refresh_reused_detected")?
-                .unwrap_or(false);
-            let last_refresh_error_code = row.try_get::<Option<String>, _>("last_refresh_error_code")?;
-            let rate_limits_expires_at =
-                row.try_get::<Option<DateTime<Utc>>, _>("rate_limits_expires_at")?;
-            let rate_limits_last_error_code =
-                row.try_get::<Option<String>, _>("rate_limits_last_error_code")?;
-            let rate_limits_last_error = row.try_get::<Option<String>, _>("rate_limits_last_error")?;
-            let credential_kind = match (auth_provider.clone(), mode.clone()) {
-                (UpstreamAuthProvider::OAuthRefreshToken, _) => {
-                    Some(SessionCredentialKind::RefreshRotatable)
-                }
-                (UpstreamAuthProvider::LegacyBearer, UpstreamMode::ChatGptSession)
-                | (UpstreamAuthProvider::LegacyBearer, UpstreamMode::CodexOauth) => {
-                    Some(SessionCredentialKind::OneTimeAccessToken)
-                }
-                _ => None,
-            };
-
-            let mut enabled = oauth_effective_enabled(
-                row.try_get::<bool, _>("enabled")?,
-                &auth_provider,
-                credential_kind.as_ref(),
-                token_expires_at,
-                &last_refresh_status,
-                refresh_reused_detected,
-                last_refresh_error_code.as_deref(),
-                rate_limits_expires_at,
-                rate_limits_last_error_code.as_deref(),
-                rate_limits_last_error.as_deref(),
-                now,
-            );
-            let mut bearer_token = row.try_get::<String, _>("bearer_token")?;
-
-            if auth_provider == UpstreamAuthProvider::OAuthRefreshToken {
-                let access_token_enc = row.try_get::<Option<String>, _>("access_token_enc")?;
-                if let (Some(cipher), Some(access_token_enc)) =
-                    (&self.credential_cipher, access_token_enc)
-                {
-                    match cipher.decrypt(&access_token_enc) {
-                        Ok(access_token) => bearer_token = access_token,
-                        Err(_) => {
-                            enabled = false;
-                            bearer_token.clear();
-                        }
-                    }
-                } else {
-                    enabled = false;
-                    bearer_token.clear();
-                }
-            }
-
-            accounts.push(UpstreamAccount {
-                id: row.try_get("id")?,
-                label: row.try_get("label")?,
-                mode,
-                base_url: row.try_get("base_url")?,
-                bearer_token,
-                chatgpt_account_id: row.try_get("chatgpt_account_id")?,
-                enabled,
-                priority: row.try_get("priority")?,
-                created_at: row.try_get::<DateTime<Utc>, _>("created_at")?,
-            });
-        }
+        let accounts = self.load_snapshot_accounts_inner().await?;
+        let account_traits_map = self.load_account_routing_traits_inner(&accounts).await?;
+        let compiled_routing_plan = self
+            .build_compiled_routing_plan_inner(
+                &accounts,
+                &account_traits_map,
+                Some("postgres_snapshot".to_string()),
+            )
+            .await?;
+        let account_traits = accounts
+            .iter()
+            .filter_map(|account| account_traits_map.get(&account.id).cloned())
+            .collect();
         Ok(DataPlaneSnapshot {
             revision,
             cursor,
             accounts,
+            account_traits,
+            compiled_routing_plan,
             issued_at: Utc::now(),
         })
     }

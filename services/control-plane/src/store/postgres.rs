@@ -7,18 +7,22 @@ use codex_pool_core::api::{
     DataPlaneSnapshotEventsResponse, ImportOAuthRefreshTokenRequest, OAuthAccountStatusResponse,
     OAuthFamilyActionResponse, OAuthRateLimitRefreshErrorSummary, OAuthRateLimitRefreshJobStatus,
     OAuthRateLimitRefreshJobSummary, OAuthRateLimitSnapshot, OAuthRefreshStatus,
-    SessionCredentialKind, UpsertRetryPolicyRequest, UpsertRoutingPolicyRequest,
-    UpsertStreamRetryPolicyRequest, ValidateOAuthRefreshTokenRequest,
+    SessionCredentialKind, UpsertModelRoutingPolicyRequest, UpsertRetryPolicyRequest,
+    UpsertRoutingPolicyRequest, UpsertRoutingProfileRequest, UpsertStreamRetryPolicyRequest,
+    UpdateAiRoutingSettingsRequest, ValidateOAuthRefreshTokenRequest,
     ValidateOAuthRefreshTokenResponse,
 };
 use codex_pool_core::model::{
-    ApiKey, RoutingPolicy, RoutingStrategy, Tenant, UpstreamAccount, UpstreamAuthProvider,
-    UpstreamMode,
+    AccountRoutingTraits, AiRoutingSettings, AiRoutingTriggerMode, ApiKey,
+    CompiledModelRoutingPolicy, CompiledRoutingPlan, CompiledRoutingProfile,
+    ModelRoutingPolicy, RoutingPlanVersion, RoutingPolicy, RoutingProfile, RoutingProfileSelector,
+    RoutingStrategy, Tenant, UpstreamAccount, UpstreamAuthProvider, UpstreamMode,
 };
 use futures_util::StreamExt;
 use sha2::{Digest, Sha256};
 use sqlx::{Row, Transaction};
 use sqlx_postgres::{PgPool, PgPoolOptions, Postgres};
+use std::collections::HashMap;
 use uuid::Uuid;
 
 use super::{SessionProfileRecord, UpsertOneTimeSessionAccountRequest};

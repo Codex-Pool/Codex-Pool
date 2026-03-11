@@ -72,6 +72,7 @@ impl SnapshotSource {
                     event_type: DataPlaneSnapshotEventType::AccountDelete,
                     account_id: old_account.id,
                     account: None,
+                    compiled_routing_plan: None,
                     created_at: chrono::Utc::now(),
                 });
             }
@@ -83,6 +84,7 @@ impl SnapshotSource {
                 event_type: DataPlaneSnapshotEventType::AccountUpsert,
                 account_id: account.id,
                 account: Some(account),
+                compiled_routing_plan: None,
                 created_at: chrono::Utc::now(),
             });
         }
@@ -105,6 +107,8 @@ impl SnapshotSource {
             revision: self.revision.load(Ordering::Relaxed),
             cursor: self.cursor.load(Ordering::Relaxed),
             accounts: self.accounts.read().unwrap().clone(),
+            account_traits: Vec::new(),
+            compiled_routing_plan: None,
             issued_at: chrono::Utc::now(),
         }
     }

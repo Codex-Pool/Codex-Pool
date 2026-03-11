@@ -773,6 +773,29 @@ async fn run_model_probe_cycle(
         anyhow::bail!("no enabled upstream account is available for probe");
     }
 
+    for (account, result) in &account_results {
+        if !is_successful_models_fetch(result) {
+            continue;
+        }
+        let supported_models = result
+            .models
+            .iter()
+            .map(|model| model.id.clone())
+            .collect::<Vec<_>>();
+        if let Err(err) = state
+            .store
+            .record_account_model_support(account.id, supported_models, result.checked_at)
+            .await
+        {
+            tracing::warn!(
+                error = %err,
+                account_id = %account.id,
+                account_label = %account.label,
+                "failed to persist probed upstream model support"
+            );
+        }
+    }
+
     let source_label = summarize_probe_source_label(&account_results);
     let mut entries = build_probe_entries_from_account_results(
         &official_catalog,

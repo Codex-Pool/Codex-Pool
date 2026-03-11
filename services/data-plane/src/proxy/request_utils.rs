@@ -586,6 +586,7 @@ fn should_retry_same_account_on_status(
 
 fn has_untried_cross_account_candidate(
     state: &AppState,
+    model: Option<&str>,
     sticky_key: Option<&str>,
     tried_account_ids: &HashSet<Uuid>,
     current_account_id: Uuid,
@@ -594,7 +595,8 @@ fn has_untried_cross_account_candidate(
     excluded_account_ids.insert(current_account_id);
     state
         .router
-        .pick_with_policy(
+        .pick_for_model(
+            model,
             sticky_key,
             &excluded_account_ids,
             state.sticky_prefer_non_conflicting,
@@ -604,6 +606,7 @@ fn has_untried_cross_account_candidate(
 
 fn should_cross_account_failover(
     state: &AppState,
+    model: Option<&str>,
     sticky_key: Option<&str>,
     failover_deadline: Instant,
     tried_account_ids: &HashSet<Uuid>,
@@ -616,7 +619,13 @@ fn should_cross_account_failover(
     if Instant::now() < failover_deadline {
         return true;
     }
-    has_untried_cross_account_candidate(state, sticky_key, tried_account_ids, current_account_id)
+    has_untried_cross_account_candidate(
+        state,
+        model,
+        sticky_key,
+        tried_account_ids,
+        current_account_id,
+    )
 }
 
 fn record_same_account_retry(state: &AppState) {

@@ -8,15 +8,18 @@ use chrono::{DateTime, Duration, Utc};
 use codex_pool_core::api::{
     CreateApiKeyRequest, CreateApiKeyResponse, CreateTenantRequest, CreateUpstreamAccountRequest,
     DataPlaneSnapshot, DataPlaneSnapshotEventsResponse, ImportOAuthRefreshTokenRequest,
-    OAuthAccountStatusResponse,
-    OAuthFamilyActionResponse, OAuthRateLimitRefreshJobSummary, OAuthRefreshStatus,
-    SessionCredentialKind, UpsertRetryPolicyRequest, UpsertRoutingPolicyRequest,
-    UpsertStreamRetryPolicyRequest, ValidateOAuthRefreshTokenRequest,
+    OAuthAccountStatusResponse, OAuthFamilyActionResponse, OAuthRateLimitRefreshJobSummary,
+    OAuthRefreshStatus, SessionCredentialKind, UpsertModelRoutingPolicyRequest,
+    UpsertRetryPolicyRequest, UpsertRoutingPolicyRequest, UpsertRoutingProfileRequest,
+    UpsertStreamRetryPolicyRequest, UpdateAiRoutingSettingsRequest,
+    ValidateOAuthRefreshTokenRequest,
     ValidateOAuthRefreshTokenResponse,
 };
 use codex_pool_core::model::{
-    ApiKey, RoutingPolicy, RoutingStrategy, Tenant, UpstreamAccount, UpstreamAuthProvider,
-    UpstreamMode,
+    AccountRoutingTraits, AiRoutingSettings, AiRoutingTriggerMode, ApiKey,
+    CompiledModelRoutingPolicy, CompiledRoutingPlan, CompiledRoutingProfile, ModelRoutingPolicy,
+    RoutingPlanVersion, RoutingPolicy, RoutingProfile, RoutingStrategy, Tenant, UpstreamAccount,
+    UpstreamAuthProvider, UpstreamMode,
 };
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
@@ -202,6 +205,50 @@ pub trait ControlPlaneStore: Send + Sync {
         _req: UpsertStreamRetryPolicyRequest,
     ) -> Result<RoutingPolicy> {
         Err(anyhow!("stream retry policy repository is not implemented"))
+    }
+    async fn list_routing_profiles(&self) -> Result<Vec<RoutingProfile>> {
+        Err(anyhow!("routing profile repository is not implemented"))
+    }
+    async fn upsert_routing_profile(
+        &self,
+        _req: UpsertRoutingProfileRequest,
+    ) -> Result<RoutingProfile> {
+        Err(anyhow!("routing profile repository is not implemented"))
+    }
+    async fn delete_routing_profile(&self, _profile_id: Uuid) -> Result<()> {
+        Err(anyhow!("routing profile repository is not implemented"))
+    }
+    async fn list_model_routing_policies(&self) -> Result<Vec<ModelRoutingPolicy>> {
+        Err(anyhow!("model routing policy repository is not implemented"))
+    }
+    async fn upsert_model_routing_policy(
+        &self,
+        _req: UpsertModelRoutingPolicyRequest,
+    ) -> Result<ModelRoutingPolicy> {
+        Err(anyhow!("model routing policy repository is not implemented"))
+    }
+    async fn delete_model_routing_policy(&self, _policy_id: Uuid) -> Result<()> {
+        Err(anyhow!("model routing policy repository is not implemented"))
+    }
+    async fn ai_routing_settings(&self) -> Result<AiRoutingSettings> {
+        Err(anyhow!("ai routing settings repository is not implemented"))
+    }
+    async fn update_ai_routing_settings(
+        &self,
+        _req: UpdateAiRoutingSettingsRequest,
+    ) -> Result<AiRoutingSettings> {
+        Err(anyhow!("ai routing settings repository is not implemented"))
+    }
+    async fn list_routing_plan_versions(&self) -> Result<Vec<RoutingPlanVersion>> {
+        Err(anyhow!("routing plan version repository is not implemented"))
+    }
+    async fn record_account_model_support(
+        &self,
+        _account_id: Uuid,
+        _supported_models: Vec<String>,
+        _checked_at: DateTime<Utc>,
+    ) -> Result<()> {
+        Ok(())
     }
     async fn refresh_expiring_oauth_accounts(&self) -> Result<()> {
         Ok(())
@@ -461,6 +508,12 @@ struct UpstreamAccountHealthStateRecord {
     seen_ok_at: Option<DateTime<Utc>>,
 }
 
+#[derive(Debug, Clone, Default)]
+struct AccountModelSupportRecord {
+    supported_models: Vec<String>,
+    checked_at: Option<DateTime<Utc>>,
+}
+
 pub struct InMemoryStore {
     tenants: Arc<RwLock<HashMap<Uuid, Tenant>>>,
     api_keys: Arc<RwLock<HashMap<Uuid, ApiKey>>>,
@@ -470,7 +523,12 @@ pub struct InMemoryStore {
     oauth_credentials: Arc<RwLock<HashMap<Uuid, OAuthCredentialRecord>>>,
     session_profiles: Arc<RwLock<HashMap<Uuid, SessionProfileRecord>>>,
     account_health_states: Arc<RwLock<HashMap<Uuid, UpstreamAccountHealthStateRecord>>>,
+    account_model_support: Arc<RwLock<HashMap<Uuid, AccountModelSupportRecord>>>,
     policies: Arc<RwLock<HashMap<Uuid, RoutingPolicy>>>,
+    routing_profiles: Arc<RwLock<HashMap<Uuid, RoutingProfile>>>,
+    model_routing_policies: Arc<RwLock<HashMap<Uuid, ModelRoutingPolicy>>>,
+    ai_routing_settings: Arc<RwLock<AiRoutingSettings>>,
+    routing_plan_versions: Arc<RwLock<Vec<RoutingPlanVersion>>>,
     revision: Arc<AtomicU64>,
     oauth_client: Arc<dyn OAuthTokenClient>,
     credential_cipher: Option<CredentialCipher>,
