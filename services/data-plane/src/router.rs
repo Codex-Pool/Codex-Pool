@@ -3,7 +3,7 @@ use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
 
-use codex_pool_core::model::{UpstreamAccount, UpstreamMode};
+use codex_pool_core::model::{CompiledRoutingPlan, UpstreamAccount, UpstreamMode};
 use uuid::Uuid;
 
 #[derive(Debug, Clone)]
@@ -31,6 +31,7 @@ struct StickySessionEntry {
 #[derive(Debug, Clone)]
 pub struct RoundRobinRouter {
     accounts: Arc<RwLock<Vec<UpstreamAccount>>>,
+    compiled_routing_plan: Arc<RwLock<Option<CompiledRoutingPlan>>>,
     cursor: Arc<AtomicUsize>,
     health: Arc<RwLock<HashMap<Uuid, Instant>>>,
     sticky_sessions: Arc<RwLock<HashMap<String, StickySessionEntry>>>,
@@ -67,6 +68,7 @@ impl RoundRobinRouter {
     ) -> Self {
         Self {
             accounts: Arc::new(RwLock::new(accounts)),
+            compiled_routing_plan: Arc::new(RwLock::new(None)),
             cursor: Arc::new(AtomicUsize::new(0)),
             health: Arc::new(RwLock::new(HashMap::new())),
             sticky_sessions: Arc::new(RwLock::new(HashMap::new())),
@@ -107,10 +109,54 @@ impl RoundRobinRouter {
 
     pub fn pick_with_sticky(&self, sticky_key: Option<&str>) -> Option<UpstreamAccount> {
         let excluded = HashSet::new();
-        self.pick_with_policy(sticky_key, &excluded, false)
+        self.pick_for_model(None, sticky_key, &excluded, false)
     }
 
     pub fn pick_with_policy(
+        &self,
+        sticky_key: Option<&str>,
+        excluded_account_ids: &HashSet<Uuid>,
+        prefer_non_conflicting: bool,
+    ) -> Option<UpstreamAccount> {
+        self.pick_for_model(
+            None,
+            sticky_key,
+            excluded_account_ids,
+            prefer_non_conflicting,
+        )
+    }
+
+    pub fn pick_for_model(
+        &self,
+        model: Option<&str>,
+        sticky_key: Option<&str>,
+        excluded_account_ids: &HashSet<Uuid>,
+        prefer_non_conflicting: bool,
+    ) -> Option<UpstreamAccount> {
+        if let Some(candidate_ids) = self.candidate_account_ids_for_model(model) {
+            return self.pick_from_ordered_candidates(
+                &candidate_ids,
+                sticky_key,
+                excluded_account_ids,
+                prefer_non_conflicting,
+            );
+        }
+        self.pick_with_round_robin_policy(
+            sticky_key,
+            excluded_account_ids,
+            prefer_non_conflicting,
+        )
+    }
+
+    pub fn replace_compiled_routing_plan(&self, compiled_routing_plan: Option<CompiledRoutingPlan>) {
+        *self.compiled_routing_plan.write().unwrap() = compiled_routing_plan;
+    }
+
+    pub fn compiled_routing_plan(&self) -> Option<CompiledRoutingPlan> {
+        self.compiled_routing_plan.read().unwrap().clone()
+    }
+
+    fn pick_with_round_robin_policy(
         &self,
         sticky_key: Option<&str>,
         excluded_account_ids: &HashSet<Uuid>,
@@ -203,6 +249,42 @@ impl RoundRobinRouter {
         if let Ok(mut sticky_sessions) = self.sticky_sessions.write() {
             sticky_sessions.retain(|_, entry| valid_ids.contains(&entry.account_id));
         }
+    }
+
+    fn candidate_account_ids_for_model(&self, model: Option<&str>) -> Option<Vec<Uuid>> {
+        let model = model?.trim();
+        if model.is_empty() {
+            return None;
+        }
+
+        let plan = self.compiled_routing_plan.read().unwrap();
+        let plan = plan.as_ref()?;
+
+        let exact_match = plan
+            .policies
+            .iter()
+            .find(|policy| policy.exact_models.iter().any(|item| item == model));
+        let prefix_match = plan.policies.iter().find(|policy| {
+            policy
+                .model_prefixes
+                .iter()
+                .any(|prefix| model.starts_with(prefix))
+        });
+
+        let segments = exact_match
+            .or(prefix_match)
+            .map(|policy| &policy.fallback_segments)
+            .unwrap_or(&plan.default_route);
+
+        if segments.is_empty() {
+            return None;
+        }
+
+        let mut account_ids = Vec::new();
+        for segment in segments {
+            account_ids.extend(segment.account_ids.iter().copied());
+        }
+        (!account_ids.is_empty()).then_some(account_ids)
     }
 
     pub fn upsert_account(&self, account: UpstreamAccount) {
@@ -355,6 +437,84 @@ impl RoundRobinRouter {
         Some(account.clone())
     }
 
+    fn pick_from_ordered_candidates(
+        &self,
+        candidate_ids: &[Uuid],
+        sticky_key: Option<&str>,
+        excluded_account_ids: &HashSet<Uuid>,
+        prefer_non_conflicting: bool,
+    ) -> Option<UpstreamAccount> {
+        let candidate_id_set = candidate_ids.iter().copied().collect::<HashSet<_>>();
+        let Some(sticky_key) = normalize_sticky_key(sticky_key) else {
+            return self.pick_candidate_account(candidate_ids, excluded_account_ids);
+        };
+        self.sticky_session_total.fetch_add(1, Ordering::Relaxed);
+
+        if let Some(sticky_account_id) = self.get_sticky_account_id(&sticky_key) {
+            if excluded_account_ids.contains(&sticky_account_id)
+                || !candidate_id_set.contains(&sticky_account_id)
+            {
+                self.remove_sticky_mapping(&sticky_key);
+            } else if let Some(account) = self.pick_specific(sticky_account_id) {
+                self.sticky_hit_count.fetch_add(1, Ordering::Relaxed);
+                return Some(account);
+            } else {
+                self.remove_sticky_mapping(&sticky_key);
+            }
+        }
+
+        self.sticky_miss_count.fetch_add(1, Ordering::Relaxed);
+        let account = if prefer_non_conflicting {
+            self.pick_candidate_account_avoiding_conflicts(
+                &sticky_key,
+                candidate_ids,
+                excluded_account_ids,
+            )
+            .or_else(|| self.pick_candidate_account(candidate_ids, excluded_account_ids))
+        } else {
+            self.pick_candidate_account(candidate_ids, excluded_account_ids)
+        }?;
+        let rebind = self.insert_sticky_mapping(sticky_key, account.id);
+        if rebind {
+            self.sticky_rebind_count.fetch_add(1, Ordering::Relaxed);
+        }
+        Some(account)
+    }
+
+    fn pick_candidate_account(
+        &self,
+        candidate_ids: &[Uuid],
+        excluded_account_ids: &HashSet<Uuid>,
+    ) -> Option<UpstreamAccount> {
+        for account_id in candidate_ids {
+            if excluded_account_ids.contains(account_id) {
+                continue;
+            }
+            if let Some(account) = self.pick_specific(*account_id) {
+                return Some(account);
+            }
+        }
+        None
+    }
+
+    fn pick_candidate_account_avoiding_conflicts(
+        &self,
+        sticky_key: &str,
+        candidate_ids: &[Uuid],
+        excluded_account_ids: &HashSet<Uuid>,
+    ) -> Option<UpstreamAccount> {
+        let conflict_ids = self.collect_conflict_account_ids(sticky_key);
+        for account_id in candidate_ids {
+            if excluded_account_ids.contains(account_id) || conflict_ids.contains(account_id) {
+                continue;
+            }
+            if let Some(account) = self.pick_specific(*account_id) {
+                return Some(account);
+            }
+        }
+        None
+    }
+
     fn pick_avoiding_sticky_conflicts(
         &self,
         sticky_key: &str,
@@ -488,7 +648,10 @@ fn normalize_sticky_key(raw: Option<&str>) -> Option<String> {
 mod tests {
     use super::RoundRobinRouter;
     use chrono::Utc;
-    use codex_pool_core::model::{UpstreamAccount, UpstreamMode};
+    use codex_pool_core::model::{
+        CompiledModelRoutingPolicy, CompiledRoutingPlan, CompiledRoutingProfile, UpstreamAccount,
+        UpstreamMode,
+    };
     use std::collections::HashSet;
     use std::time::Duration;
     use uuid::Uuid;
@@ -594,5 +757,77 @@ mod tests {
             .expect("must pick account");
 
         assert_eq!(picked.id, b.id);
+    }
+
+    fn compiled_route(
+        exact_models: &[&str],
+        fallback_segments: Vec<Vec<Uuid>>,
+    ) -> CompiledRoutingPlan {
+        CompiledRoutingPlan {
+            version_id: Uuid::new_v4(),
+            published_at: Utc::now(),
+            trigger_reason: Some("test".to_string()),
+            default_route: Vec::new(),
+            policies: vec![CompiledModelRoutingPolicy {
+                id: Uuid::new_v4(),
+                name: "test-policy".to_string(),
+                family: "test-family".to_string(),
+                exact_models: exact_models.iter().map(|item| (*item).to_string()).collect(),
+                model_prefixes: Vec::new(),
+                fallback_segments: fallback_segments
+                    .into_iter()
+                    .enumerate()
+                    .map(|(index, account_ids)| CompiledRoutingProfile {
+                        id: Uuid::new_v4(),
+                        name: format!("segment-{index}"),
+                        account_ids,
+                    })
+                    .collect(),
+            }],
+        }
+    }
+
+    #[test]
+    fn compiled_model_route_prefers_configured_fallback_chain_before_round_robin() {
+        let free = account("free");
+        let paid = account("paid");
+        let router = RoundRobinRouter::new(vec![free.clone(), paid.clone()]);
+        router.replace_compiled_routing_plan(Some(compiled_route(
+            &["gpt-5.4"],
+            vec![vec![paid.id], vec![free.id]],
+        )));
+
+        let picked = router
+            .pick_for_model(Some("gpt-5.4"), None, &HashSet::new(), false)
+            .expect("route should pick account");
+
+        assert_eq!(picked.id, paid.id);
+    }
+
+    #[test]
+    fn sticky_binding_rebinds_when_compiled_route_no_longer_allows_previous_account() {
+        let free = account("free");
+        let paid = account("paid");
+        let router = RoundRobinRouter::new(vec![free.clone(), paid.clone()]);
+        router.replace_compiled_routing_plan(Some(compiled_route(
+            &["gpt-5.2-codex"],
+            vec![vec![free.id], vec![paid.id]],
+        )));
+
+        let first = router
+            .pick_for_model(Some("gpt-5.2-codex"), Some("sticky-1"), &HashSet::new(), false)
+            .expect("initial route should pick account");
+        assert_eq!(first.id, free.id);
+
+        router.replace_compiled_routing_plan(Some(compiled_route(
+            &["gpt-5.2-codex"],
+            vec![vec![paid.id]],
+        )));
+
+        let rebound = router
+            .pick_for_model(Some("gpt-5.2-codex"), Some("sticky-1"), &HashSet::new(), false)
+            .expect("route should rebind after compiled route update");
+
+        assert_eq!(rebound.id, paid.id);
     }
 }

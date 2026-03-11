@@ -48,6 +48,13 @@ const routeSeoConfigs: RouteSeoConfig[] = [
         descriptionDefault: 'Manage API key groups, model allowlists, multipliers, and group-level absolute prices.',
     },
     {
+        pattern: /^\/ai-routing\/?$/,
+        titleKey: 'aiRoutingPage.title',
+        titleDefault: 'AI Routing',
+        descriptionKey: 'aiRoutingPage.subtitle',
+        descriptionDefault: 'Manage routing profiles, model-aware policies, and AI planning settings.',
+    },
+    {
         pattern: /^\/models\/?$/,
         titleKey: 'models.title',
         titleDefault: 'Models',

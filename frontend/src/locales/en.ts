@@ -1245,6 +1245,7 @@ export default {
     },
     nav: {
         accounts: "Accounts Pool",
+        aiRouting: "AI Routing",
         apiKeyGroups: "Group Management",
         apiKeys: "API Keys",
         billing: "Billing",
@@ -1825,6 +1826,130 @@ export default {
         },
         subtitle: "Manage API key groups, model allowlists, multipliers, and group-level absolute prices.",
         title: "Group Management"
+    },
+    aiRoutingPage: {
+        title: "AI Routing",
+        subtitle: "Configure routing profiles, model-aware fallback chains, and the planner model chain that powers AI-assisted dispatch decisions.",
+        actions: {
+            refresh: "Refresh",
+            createProfile: "Create profile",
+            createPolicy: "Create policy",
+            edit: "Edit",
+            delete: "Delete",
+            deleteProfile: "Delete profile",
+            deletePolicy: "Delete policy",
+            saveSettings: "Save settings",
+            saveProfile: "Save profile",
+            savePolicy: "Save policy"
+        },
+        settings: {
+            title: "Planner Settings",
+            description: "Control whether AI routing is enabled, how plans are published, and which small models can act as the planner chain.",
+            enabled: "Enable AI routing",
+            enabledHint: "If disabled, compiled routing plans remain manual-only.",
+            autoPublish: "Auto publish",
+            autoPublishHint: "Automatically publish refreshed plans after a recompute cycle completes.",
+            killSwitch: "Kill switch",
+            killSwitchHint: "Immediately stop AI-driven changes without removing saved policies.",
+            triggerMode: "Trigger mode",
+            plannerModelChain: "Planner model chain",
+            plannerModelChainPlaceholder: "gpt-5.2-codex, gpt-4.1-mini",
+            plannerModelChainHint: "Use commas or new lines to order planner fallbacks from highest to lowest priority.",
+            updatedAt: "Updated at {{value}}"
+        },
+        versions: {
+            title: "Published Versions",
+            description: "Latest compiled routing plans ready for data-plane consumption.",
+            empty: "No published plan versions yet.",
+            noReason: "No publish reason recorded.",
+            defaultSegments: "Default segments {{count}}",
+            policyCount: "Policies {{count}}"
+        },
+        profiles: {
+            title: "Routing Profiles",
+            description: "Reusable account selectors that describe which plans, modes, and auth types can serve a request.",
+            empty: "No routing profiles yet.",
+            summary: "Plans {{plans}} · modes {{modes}} · auth filters {{authProviders}} · include {{include}} · exclude {{exclude}}",
+            anyMode: "All account modes"
+        },
+        policies: {
+            title: "Model Policies",
+            description: "Match model families or exact model IDs to an explicit fallback chain of routing profiles.",
+            empty: "No model routing policies yet.",
+            summary: "Exact models {{exact}} · prefixes {{prefixes}} · fallback profiles {{fallbacks}}",
+            fallbackChain: "Fallback chain: {{value}}",
+            moreExactModels: "+{{count}} more"
+        },
+        dialogs: {
+            createProfile: "Create routing profile",
+            editProfile: "Edit routing profile",
+            profileDescription: "Compose a reusable selector for a class of upstream accounts.",
+            createPolicy: "Create model policy",
+            editPolicy: "Edit model policy",
+            policyDescription: "Define how a model family maps onto ordered routing profiles."
+        },
+        form: {
+            name: "Name",
+            description: "Description",
+            priority: "Priority",
+            enabled: "Enabled",
+            enabledHint: "Only enabled profiles can appear in compiled routing plans.",
+            policyEnabledHint: "Disabled policies stay saved but will not participate in routing.",
+            planTypes: "Plan types",
+            planTypesPlaceholder: "free, plus, team",
+            modes: "Account modes",
+            authProviders: "Auth providers",
+            includeAccounts: "Include account IDs",
+            includeAccountsPlaceholder: "uuid-1, uuid-2",
+            excludeAccounts: "Exclude account IDs",
+            excludeAccountsPlaceholder: "uuid-3, uuid-4",
+            family: "Model family",
+            familyPlaceholder: "gpt-5",
+            exactModels: "Exact models",
+            exactModelsPlaceholder: "gpt-5.4, gpt-5.2-codex",
+            modelPrefixes: "Model prefixes",
+            modelPrefixesPlaceholder: "gpt-5, o3",
+            fallbackProfiles: "Fallback profiles",
+            noProfilesAvailable: "Create a routing profile first so policies have somewhere to point."
+        },
+        messages: {
+            settingsSaved: "AI routing settings saved.",
+            settingsSaveFailed: "Failed to save AI routing settings.",
+            profileSaved: "Routing profile saved: {{name}}",
+            profileSaveFailed: "Failed to save routing profile.",
+            profileDeleted: "Routing profile deleted.",
+            profileDeleteFailed: "Failed to delete routing profile.",
+            policySaved: "Model routing policy saved: {{name}}",
+            policySaveFailed: "Failed to save model routing policy.",
+            policyDeleted: "Model routing policy deleted.",
+            policyDeleteFailed: "Failed to delete model routing policy."
+        },
+        status: {
+            enabled: "Enabled",
+            disabled: "Disabled",
+            killSwitchOn: "Kill switch on",
+            autoPublishOn: "Auto publish on",
+            autoPublishOff: "Auto publish off"
+        },
+        triggerModes: {
+            hybrid: "Hybrid",
+            scheduledOnly: "Scheduled only",
+            eventOnly: "Event only"
+        },
+        modes: {
+            apiKey: "API key",
+            chatGptSession: "ChatGPT session",
+            codexOauth: "Codex OAuth"
+        },
+        authProviders: {
+            legacyBearer: "Legacy bearer",
+            oauthRefreshToken: "OAuth refresh token"
+        },
+        common: {
+            none: "None",
+            deletedProfile: "Deleted profile",
+            priority: "Priority {{value}}"
+        }
     },
     tenantDashboard: {
         actions: {

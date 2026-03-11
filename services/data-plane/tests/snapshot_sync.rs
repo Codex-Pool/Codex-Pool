@@ -7,7 +7,10 @@ use codex_pool_core::api::{
     DataPlaneSnapshot, DataPlaneSnapshotEvent, DataPlaneSnapshotEventType,
     DataPlaneSnapshotEventsResponse,
 };
-use codex_pool_core::model::{RoutingStrategy, UpstreamAccount, UpstreamMode};
+use codex_pool_core::model::{
+    AccountRoutingTraits, CompiledModelRoutingPolicy, CompiledRoutingPlan, CompiledRoutingProfile,
+    RoutingStrategy, UpstreamAccount, UpstreamMode,
+};
 use data_plane::app::AppState;
 use data_plane::event::NoopEventSink;
 use data_plane::router::RoundRobinRouter;
@@ -47,6 +50,8 @@ fn snapshot_with_revision(revision: u64, accounts: Vec<UpstreamAccount>) -> Data
         revision,
         cursor: 0,
         accounts,
+        account_traits: Vec::<AccountRoutingTraits>::new(),
+        compiled_routing_plan: None,
         issued_at: chrono::Utc::now(),
     }
 }
@@ -57,6 +62,7 @@ fn upsert_event(account: UpstreamAccount, id: u64) -> DataPlaneSnapshotEvent {
         event_type: DataPlaneSnapshotEventType::AccountUpsert,
         account_id: account.id,
         account: Some(account),
+        compiled_routing_plan: None,
         created_at: chrono::Utc::now(),
     }
 }
@@ -67,6 +73,35 @@ fn delete_event(account_id: Uuid, id: u64) -> DataPlaneSnapshotEvent {
         event_type: DataPlaneSnapshotEventType::AccountDelete,
         account_id,
         account: None,
+        compiled_routing_plan: None,
+        created_at: chrono::Utc::now(),
+    }
+}
+
+fn routing_plan_refresh_event(model: &str, account_id: Uuid, id: u64) -> DataPlaneSnapshotEvent {
+    DataPlaneSnapshotEvent {
+        id,
+        event_type: DataPlaneSnapshotEventType::RoutingPlanRefresh,
+        account_id: Uuid::nil(),
+        account: None,
+        compiled_routing_plan: Some(CompiledRoutingPlan {
+            version_id: Uuid::new_v4(),
+            published_at: chrono::Utc::now(),
+            trigger_reason: Some("test".to_string()),
+            default_route: Vec::new(),
+            policies: vec![CompiledModelRoutingPolicy {
+                id: Uuid::new_v4(),
+                name: "test-policy".to_string(),
+                family: "test-family".to_string(),
+                exact_models: vec![model.to_string()],
+                model_prefixes: Vec::new(),
+                fallback_segments: vec![CompiledRoutingProfile {
+                    id: Uuid::new_v4(),
+                    name: "primary".to_string(),
+                    account_ids: vec![account_id],
+                }],
+            }],
+        }),
         created_at: chrono::Utc::now(),
     }
 }
@@ -204,4 +239,25 @@ async fn applies_incremental_snapshot_events() {
             .load(std::sync::atomic::Ordering::Relaxed),
         4
     );
+}
+
+#[tokio::test]
+async fn applies_routing_plan_refresh_event_without_replacing_accounts() {
+    let state = test_state();
+    let existing = state.router.pick().expect("seed account");
+
+    let cursor = state.apply_snapshot_events(DataPlaneSnapshotEventsResponse {
+        cursor: 7,
+        high_watermark: 7,
+        events: vec![routing_plan_refresh_event("gpt-5.4", existing.id, 7)],
+    });
+
+    assert_eq!(cursor, 7);
+    assert_eq!(state.router.total(), 1);
+    let plan = state
+        .router
+        .compiled_routing_plan()
+        .expect("compiled route plan should be stored");
+    assert_eq!(plan.policies.len(), 1);
+    assert_eq!(plan.policies[0].exact_models, vec!["gpt-5.4".to_string()]);
 }

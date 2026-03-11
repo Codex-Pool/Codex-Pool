@@ -17,18 +17,21 @@ use axum::{response::IntoResponse, Router};
 use chrono::{DateTime, Utc};
 use codex_pool_core::api::{
     AccountUsageLeaderboardResponse, AdminLoginRequest, AdminMeResponse,
-    ApiKeyUsageLeaderboardResponse, CreateApiKeyRequest, CreateTenantRequest,
-    CreateUpstreamAccountRequest, ErrorEnvelope, HourlyAccountUsagePoint,
-    HourlyTenantApiKeyUsagePoint, ImportOAuthRefreshTokenRequest, OAuthAccountStatusResponse,
-    OAuthFamilyActionResponse, OAuthImportItemStatus, OAuthImportJobActionResponse,
-    OAuthImportJobItemsResponse, OAuthImportJobSummary, OAuthRateLimitRefreshJobStatus,
-    OAuthRateLimitRefreshJobSummary, PolicyResponse, TenantUsageLeaderboardResponse,
-    UpsertRetryPolicyRequest, UpsertRoutingPolicyRequest, UpsertStreamRetryPolicyRequest,
+    AiRoutingSettingsResponse, ApiKeyUsageLeaderboardResponse, CreateApiKeyRequest,
+    CreateTenantRequest, CreateUpstreamAccountRequest, ErrorEnvelope, HourlyAccountUsagePoint,
+    HourlyTenantApiKeyUsagePoint, ImportOAuthRefreshTokenRequest,
+    ModelRoutingPoliciesResponse, OAuthAccountStatusResponse, OAuthFamilyActionResponse,
+    OAuthImportItemStatus, OAuthImportJobActionResponse, OAuthImportJobItemsResponse,
+    OAuthImportJobSummary, OAuthRateLimitRefreshJobStatus, OAuthRateLimitRefreshJobSummary,
+    PolicyResponse, RoutingPlanVersionsResponse, RoutingProfilesResponse,
+    TenantUsageLeaderboardResponse, UpdateAiRoutingSettingsRequest,
+    UpsertModelRoutingPolicyRequest, UpsertRetryPolicyRequest, UpsertRoutingPolicyRequest,
+    UpsertRoutingProfileRequest, UpsertStreamRetryPolicyRequest,
     UsageHourlyTenantTrendsResponse, UsageHourlyTrendsResponse, UsageLeaderboardOverviewResponse,
     UsageQueryResponse, UsageSummaryQueryResponse, ValidateApiKeyRequest, ValidateApiKeyResponse,
     ValidateOAuthRefreshTokenRequest, ValidateOAuthRefreshTokenResponse,
 };
-use codex_pool_core::model::{ApiKey, UpstreamAccount};
+use codex_pool_core::model::{ApiKey, ModelRoutingPolicy, RoutingProfile, UpstreamAccount};
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -1130,6 +1133,30 @@ pub fn build_app_with_store_ttl_usage_repo_import_store_and_admin_auth(
         .route(
             "/api/v1/admin/api-key-group-model-policies/{policy_id}",
             delete(delete_admin_api_key_group_model_policy),
+        )
+        .route(
+            "/api/v1/admin/ai-routing/profiles",
+            get(list_admin_routing_profiles).post(upsert_admin_routing_profile),
+        )
+        .route(
+            "/api/v1/admin/ai-routing/profiles/{profile_id}",
+            delete(delete_admin_routing_profile),
+        )
+        .route(
+            "/api/v1/admin/ai-routing/model-policies",
+            get(list_admin_model_routing_policies).post(upsert_admin_model_routing_policy),
+        )
+        .route(
+            "/api/v1/admin/ai-routing/model-policies/{policy_id}",
+            delete(delete_admin_model_routing_policy),
+        )
+        .route(
+            "/api/v1/admin/ai-routing/settings",
+            get(get_admin_ai_routing_settings).put(update_admin_ai_routing_settings),
+        )
+        .route(
+            "/api/v1/admin/ai-routing/versions",
+            get(list_admin_routing_plan_versions),
         )
         .route(
             "/api/v1/admin/impersonations",

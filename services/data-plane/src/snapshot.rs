@@ -34,12 +34,21 @@ impl AppState {
             return;
         }
 
-        self.router.replace_accounts(snapshot.accounts);
+        let DataPlaneSnapshot {
+            revision,
+            cursor,
+            accounts,
+            compiled_routing_plan,
+            ..
+        } = snapshot;
+
+        self.router.replace_accounts(accounts);
+        self.router.replace_compiled_routing_plan(compiled_routing_plan);
         self.snapshot_revision
-            .store(snapshot.revision, Ordering::Relaxed);
-        self.snapshot_cursor.store(snapshot.cursor, Ordering::Relaxed);
+            .store(revision, Ordering::Relaxed);
+        self.snapshot_cursor.store(cursor, Ordering::Relaxed);
         self.snapshot_remote_cursor
-            .store(snapshot.cursor, Ordering::Relaxed);
+            .store(cursor, Ordering::Relaxed);
         self.notify_route_updated();
     }
 
@@ -60,12 +69,28 @@ impl AppState {
                     } else if self.router.delete_account(event.account_id) {
                         routing_changed = true;
                     }
+                    if event.compiled_routing_plan.is_some() {
+                        self.router
+                            .replace_compiled_routing_plan(event.compiled_routing_plan);
+                        routing_changed = true;
+                    }
                     applied = applied.saturating_add(1);
                 }
                 DataPlaneSnapshotEventType::AccountDelete => {
                     if self.router.delete_account(event.account_id) {
                         routing_changed = true;
                     }
+                    if event.compiled_routing_plan.is_some() {
+                        self.router
+                            .replace_compiled_routing_plan(event.compiled_routing_plan);
+                        routing_changed = true;
+                    }
+                    applied = applied.saturating_add(1);
+                }
+                DataPlaneSnapshotEventType::RoutingPlanRefresh => {
+                    self.router
+                        .replace_compiled_routing_plan(event.compiled_routing_plan);
+                    routing_changed = true;
                     applied = applied.saturating_add(1);
                 }
             }

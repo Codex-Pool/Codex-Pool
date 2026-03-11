@@ -411,7 +411,8 @@ pub async fn proxy_handler(
             None
         };
         let account = match alive_ring_account.or_else(|| {
-            state.router.pick_with_policy(
+            state.router.pick_for_model(
+                parsed_policy_context.model.as_deref(),
                 sticky_key.as_deref(),
                 &tried_account_ids,
                 state.sticky_prefer_non_conflicting,
@@ -691,6 +692,7 @@ pub async fn proxy_handler(
                     );
                     if should_cross_account_failover(
                         &state,
+                        parsed_policy_context.model.as_deref(),
                         sticky_key.as_deref(),
                         failover_deadline,
                         &tried_account_ids,
@@ -1000,6 +1002,7 @@ pub async fn proxy_handler(
 
                 let should_failover_across_accounts = should_cross_account_failover(
                     &state,
+                    parsed_policy_context.model.as_deref(),
                     sticky_key.as_deref(),
                     failover_deadline,
                     &tried_account_ids,
@@ -1258,6 +1261,7 @@ pub async fn proxy_handler(
                         );
                         if should_cross_account_failover(
                             &state,
+                            parsed_policy_context.model.as_deref(),
                             sticky_key.as_deref(),
                             failover_deadline,
                             &tried_account_ids,
@@ -1579,6 +1583,7 @@ pub async fn proxy_handler(
 
             let should_failover_across_accounts = should_cross_account_failover(
                 &state,
+                parsed_policy_context.model.as_deref(),
                 sticky_key.as_deref(),
                 failover_deadline,
                 &tried_account_ids,
@@ -1877,7 +1882,8 @@ pub async fn proxy_websocket_handler(
             None
         };
         let account = match alive_ring_account.or_else(|| {
-            state.router.pick_with_policy(
+            state.router.pick_for_model(
+                None,
                 sticky_key.as_deref(),
                 &tried_account_ids,
                 state.sticky_prefer_non_conflicting,
@@ -1966,6 +1972,7 @@ pub async fn proxy_websocket_handler(
                     );
                     if should_cross_account_failover(
                         &state,
+                        None,
                         sticky_key.as_deref(),
                         failover_deadline,
                         &tried_account_ids,
@@ -2108,6 +2115,7 @@ pub async fn proxy_websocket_handler(
                     };
                     let should_failover_across_accounts = should_cross_account_failover(
                         &state,
+                        None,
                         sticky_key.as_deref(),
                         failover_deadline,
                         &tried_account_ids,

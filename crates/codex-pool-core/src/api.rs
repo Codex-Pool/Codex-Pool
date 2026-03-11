@@ -4,7 +4,10 @@ use serde_json::Value;
 use uuid::Uuid;
 
 use crate::model::{
-    ApiKey, RoutingPolicy, RoutingStrategy, UpstreamAccount, UpstreamAuthProvider, UpstreamMode,
+    AccountRoutingTraits, AiRoutingSettings, AiRoutingTriggerMode, ApiKey,
+    CompiledRoutingPlan, ModelRoutingPolicy, RoutingPlanVersion, RoutingPolicy, RoutingProfile,
+    RoutingProfileSelector, RoutingStrategy, UpstreamAccount, UpstreamAuthProvider,
+    UpstreamMode,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -189,6 +192,10 @@ pub struct DataPlaneSnapshot {
     #[serde(default)]
     pub cursor: u64,
     pub accounts: Vec<UpstreamAccount>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub account_traits: Vec<AccountRoutingTraits>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub compiled_routing_plan: Option<CompiledRoutingPlan>,
     pub issued_at: DateTime<Utc>,
 }
 
@@ -197,6 +204,7 @@ pub struct DataPlaneSnapshot {
 pub enum DataPlaneSnapshotEventType {
     AccountUpsert,
     AccountDelete,
+    RoutingPlanRefresh,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -206,6 +214,8 @@ pub struct DataPlaneSnapshotEvent {
     pub account_id: Uuid,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub account: Option<UpstreamAccount>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub compiled_routing_plan: Option<CompiledRoutingPlan>,
     pub created_at: DateTime<Utc>,
 }
 
@@ -281,6 +291,76 @@ pub struct UpsertRetryPolicyRequest {
 pub struct UpsertStreamRetryPolicyRequest {
     pub tenant_id: Uuid,
     pub stream_max_retries: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UpsertRoutingProfileRequest {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<Uuid>,
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    pub enabled: bool,
+    pub priority: i32,
+    #[serde(default)]
+    pub selector: RoutingProfileSelector,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UpsertModelRoutingPolicyRequest {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<Uuid>,
+    pub name: String,
+    pub family: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub exact_models: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub model_prefixes: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub fallback_profile_ids: Vec<Uuid>,
+    pub enabled: bool,
+    pub priority: i32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RecordAccountModelSupportRequest {
+    pub account_id: Uuid,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub supported_models: Vec<String>,
+    pub checked_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RoutingProfilesResponse {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub profiles: Vec<RoutingProfile>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ModelRoutingPoliciesResponse {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub policies: Vec<ModelRoutingPolicy>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AiRoutingSettingsResponse {
+    pub settings: AiRoutingSettings,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UpdateAiRoutingSettingsRequest {
+    pub enabled: bool,
+    pub auto_publish: bool,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub planner_model_chain: Vec<String>,
+    pub trigger_mode: AiRoutingTriggerMode,
+    pub kill_switch: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RoutingPlanVersionsResponse {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub versions: Vec<RoutingPlanVersion>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

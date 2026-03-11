@@ -6,6 +6,7 @@ import {
     HardDriveDownload,
     ShieldCheck,
     Layers3,
+    Route,
     Box,
     Activity,
     ReceiptText,
@@ -175,6 +176,7 @@ export function AppLayout({
             label: t('nav.groups.operations'),
             items: [
                 { path: '/groups', icon: Layers3, label: t('nav.apiKeyGroups') },
+                { path: '/ai-routing', icon: Route, label: t('nav.aiRouting') },
                 { path: '/oauth-import', icon: ShieldCheck, label: t('nav.oauthImport') },
                 { path: '/oauth-probe', icon: FlaskConical, label: t('nav.oauthProbe') },
                 { path: '/imports', icon: HardDriveDownload, label: t('nav.importJobs') },

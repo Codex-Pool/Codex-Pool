@@ -1390,6 +1390,139 @@ impl PostgresStore {
 
         sqlx::query(
             r#"
+            CREATE TABLE IF NOT EXISTS upstream_account_model_support (
+                account_id UUID PRIMARY KEY REFERENCES upstream_accounts(id) ON DELETE CASCADE,
+                supported_models_json JSONB NOT NULL DEFAULT '[]'::jsonb,
+                checked_at TIMESTAMPTZ NULL,
+                updated_at TIMESTAMPTZ NOT NULL
+            )
+            "#,
+        )
+        .execute(tx.as_mut())
+        .await
+        .context("failed to create upstream_account_model_support table")?;
+
+        sqlx::query(
+            r#"
+            CREATE TABLE IF NOT EXISTS routing_profiles (
+                id UUID PRIMARY KEY,
+                name TEXT NOT NULL,
+                description TEXT NULL,
+                enabled BOOLEAN NOT NULL DEFAULT true,
+                priority INT NOT NULL DEFAULT 0,
+                selector_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+                created_at TIMESTAMPTZ NOT NULL,
+                updated_at TIMESTAMPTZ NOT NULL
+            )
+            "#,
+        )
+        .execute(tx.as_mut())
+        .await
+        .context("failed to create routing_profiles table")?;
+
+        sqlx::query(
+            r#"
+            CREATE INDEX IF NOT EXISTS idx_routing_profiles_priority_created_at
+            ON routing_profiles (priority DESC, created_at ASC)
+            "#,
+        )
+        .execute(tx.as_mut())
+        .await
+        .context("failed to create routing_profiles priority index")?;
+
+        sqlx::query(
+            r#"
+            CREATE TABLE IF NOT EXISTS model_routing_policies (
+                id UUID PRIMARY KEY,
+                name TEXT NOT NULL,
+                family TEXT NOT NULL,
+                exact_models_json JSONB NOT NULL DEFAULT '[]'::jsonb,
+                model_prefixes_json JSONB NOT NULL DEFAULT '[]'::jsonb,
+                fallback_profile_ids_json JSONB NOT NULL DEFAULT '[]'::jsonb,
+                enabled BOOLEAN NOT NULL DEFAULT true,
+                priority INT NOT NULL DEFAULT 0,
+                created_at TIMESTAMPTZ NOT NULL,
+                updated_at TIMESTAMPTZ NOT NULL
+            )
+            "#,
+        )
+        .execute(tx.as_mut())
+        .await
+        .context("failed to create model_routing_policies table")?;
+
+        sqlx::query(
+            r#"
+            CREATE INDEX IF NOT EXISTS idx_model_routing_policies_priority_created_at
+            ON model_routing_policies (priority DESC, created_at ASC)
+            "#,
+        )
+        .execute(tx.as_mut())
+        .await
+        .context("failed to create model_routing_policies priority index")?;
+
+        sqlx::query(
+            r#"
+            CREATE TABLE IF NOT EXISTS ai_routing_settings (
+                singleton BOOLEAN PRIMARY KEY,
+                enabled BOOLEAN NOT NULL DEFAULT true,
+                auto_publish BOOLEAN NOT NULL DEFAULT true,
+                planner_model_chain_json JSONB NOT NULL DEFAULT '[]'::jsonb,
+                trigger_mode TEXT NOT NULL DEFAULT 'hybrid',
+                kill_switch BOOLEAN NOT NULL DEFAULT false,
+                updated_at TIMESTAMPTZ NOT NULL
+            )
+            "#,
+        )
+        .execute(tx.as_mut())
+        .await
+        .context("failed to create ai_routing_settings table")?;
+
+        sqlx::query(
+            r#"
+            INSERT INTO ai_routing_settings (
+                singleton,
+                enabled,
+                auto_publish,
+                planner_model_chain_json,
+                trigger_mode,
+                kill_switch,
+                updated_at
+            )
+            VALUES ($1, true, true, '[]'::jsonb, 'hybrid', false, now())
+            ON CONFLICT (singleton) DO NOTHING
+            "#,
+        )
+        .bind(SNAPSHOT_SINGLETON_ROW)
+        .execute(tx.as_mut())
+        .await
+        .context("failed to initialize ai_routing_settings row")?;
+
+        sqlx::query(
+            r#"
+            CREATE TABLE IF NOT EXISTS routing_plan_versions (
+                id UUID PRIMARY KEY,
+                reason TEXT NULL,
+                published_at TIMESTAMPTZ NOT NULL,
+                compiled_plan_json JSONB NOT NULL
+            )
+            "#,
+        )
+        .execute(tx.as_mut())
+        .await
+        .context("failed to create routing_plan_versions table")?;
+
+        sqlx::query(
+            r#"
+            CREATE INDEX IF NOT EXISTS idx_routing_plan_versions_published_at
+            ON routing_plan_versions (published_at DESC)
+            "#,
+        )
+        .execute(tx.as_mut())
+        .await
+        .context("failed to create routing_plan_versions published_at index")?;
+
+        sqlx::query(
+            r#"
             CREATE TABLE IF NOT EXISTS snapshot_state (
                 singleton BOOLEAN PRIMARY KEY,
                 revision BIGINT NOT NULL,

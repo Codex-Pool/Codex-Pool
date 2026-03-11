@@ -1245,6 +1245,7 @@ export default {
     },
     nav: {
         accounts: "账号池",
+        aiRouting: "AI 调度",
         apiKeyGroups: "分组管理",
         apiKeys: "API 密钥",
         billing: "计费",
@@ -1825,6 +1826,130 @@ export default {
         },
         subtitle: "管理 API Key 分组、模型白名单、倍率和分组级绝对定价。",
         title: "分组管理"
+    },
+    aiRoutingPage: {
+        title: "AI 调度",
+        subtitle: "配置路由画像、模型感知回退链，以及为 AI 智能调度提供能力的规划模型链。",
+        actions: {
+            refresh: "刷新",
+            createProfile: "新建画像",
+            createPolicy: "新建策略",
+            edit: "编辑",
+            delete: "删除",
+            deleteProfile: "删除画像",
+            deletePolicy: "删除策略",
+            saveSettings: "保存设置",
+            saveProfile: "保存画像",
+            savePolicy: "保存策略"
+        },
+        settings: {
+            title: "规划器设置",
+            description: "控制 AI 调度是否启用、计划如何发布，以及哪些小模型可以作为 AI 规划链。",
+            enabled: "启用 AI 调度",
+            enabledHint: "关闭后，编译路由计划只会保留人工配置路径。",
+            autoPublish: "自动发布",
+            autoPublishHint: "每次重算完成后自动发布最新路由计划。",
+            killSwitch: "全局熔断",
+            killSwitchHint: "立即停止 AI 驱动的变更，但保留已保存的配置。",
+            triggerMode: "触发模式",
+            plannerModelChain: "规划模型链",
+            plannerModelChainPlaceholder: "gpt-5.2-codex, gpt-4.1-mini",
+            plannerModelChainHint: "使用逗号或换行排列模型，顺序从高优先级到低优先级。",
+            updatedAt: "更新时间 {{value}}"
+        },
+        versions: {
+            title: "已发布版本",
+            description: "最近编译完成、可供 data-plane 消费的路由计划。",
+            empty: "暂未发布任何路由计划版本。",
+            noReason: "未记录发布原因。",
+            defaultSegments: "默认分段 {{count}}",
+            policyCount: "策略 {{count}} 条"
+        },
+        profiles: {
+            title: "路由画像",
+            description: "可复用的账号选择器，用来描述哪些 plan、模式和鉴权方式可以承接请求。",
+            empty: "暂无路由画像。",
+            summary: "计划 {{plans}} 项 · 模式 {{modes}} 项 · 鉴权 {{authProviders}} 项 · 强制包含 {{include}} 项 · 强制排除 {{exclude}} 项",
+            anyMode: "全部账号模式"
+        },
+        policies: {
+            title: "模型策略",
+            description: "将模型族或精确模型 ID 匹配到一条显式的画像回退链。",
+            empty: "暂无模型路由策略。",
+            summary: "精确模型 {{exact}} 个 · 前缀 {{prefixes}} 个 · 回退画像 {{fallbacks}} 个",
+            fallbackChain: "回退链：{{value}}",
+            moreExactModels: "还有 {{count}} 个"
+        },
+        dialogs: {
+            createProfile: "新建路由画像",
+            editProfile: "编辑路由画像",
+            profileDescription: "为一类上游账号组合可复用的筛选条件。",
+            createPolicy: "新建模型策略",
+            editPolicy: "编辑模型策略",
+            policyDescription: "定义模型族如何映射到有序的路由画像链路。"
+        },
+        form: {
+            name: "名称",
+            description: "描述",
+            priority: "优先级",
+            enabled: "启用",
+            enabledHint: "只有启用的画像才会进入编译后的路由计划。",
+            policyEnabledHint: "禁用后会保留策略，但不会参与实际调度。",
+            planTypes: "计划类型",
+            planTypesPlaceholder: "free, plus, team",
+            modes: "账号模式",
+            authProviders: "鉴权方式",
+            includeAccounts: "强制包含账号 ID",
+            includeAccountsPlaceholder: "uuid-1, uuid-2",
+            excludeAccounts: "强制排除账号 ID",
+            excludeAccountsPlaceholder: "uuid-3, uuid-4",
+            family: "模型族",
+            familyPlaceholder: "gpt-5",
+            exactModels: "精确模型",
+            exactModelsPlaceholder: "gpt-5.4, gpt-5.2-codex",
+            modelPrefixes: "模型前缀",
+            modelPrefixesPlaceholder: "gpt-5, o3",
+            fallbackProfiles: "回退画像",
+            noProfilesAvailable: "请先创建路由画像，再为策略配置回退链。"
+        },
+        messages: {
+            settingsSaved: "AI 调度设置已保存。",
+            settingsSaveFailed: "保存 AI 调度设置失败。",
+            profileSaved: "路由画像已保存：{{name}}",
+            profileSaveFailed: "保存路由画像失败。",
+            profileDeleted: "路由画像已删除。",
+            profileDeleteFailed: "删除路由画像失败。",
+            policySaved: "模型路由策略已保存：{{name}}",
+            policySaveFailed: "保存模型路由策略失败。",
+            policyDeleted: "模型路由策略已删除。",
+            policyDeleteFailed: "删除模型路由策略失败。"
+        },
+        status: {
+            enabled: "已启用",
+            disabled: "已禁用",
+            killSwitchOn: "熔断已开启",
+            autoPublishOn: "自动发布已开启",
+            autoPublishOff: "自动发布已关闭"
+        },
+        triggerModes: {
+            hybrid: "混合触发",
+            scheduledOnly: "仅定时",
+            eventOnly: "仅事件"
+        },
+        modes: {
+            apiKey: "API Key",
+            chatGptSession: "ChatGPT 会话",
+            codexOauth: "Codex OAuth"
+        },
+        authProviders: {
+            legacyBearer: "传统 Bearer",
+            oauthRefreshToken: "OAuth Refresh Token"
+        },
+        common: {
+            none: "无",
+            deletedProfile: "已删除画像",
+            priority: "优先级 {{value}}"
+        }
     },
     tenantDashboard: {
         actions: {

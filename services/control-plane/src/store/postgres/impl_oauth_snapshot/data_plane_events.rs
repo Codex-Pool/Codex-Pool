@@ -2,6 +2,7 @@ fn outbox_event_type_to_db(event_type: DataPlaneSnapshotEventType) -> &'static s
     match event_type {
         DataPlaneSnapshotEventType::AccountUpsert => OUTBOX_EVENT_ACCOUNT_UPSERT,
         DataPlaneSnapshotEventType::AccountDelete => OUTBOX_EVENT_ACCOUNT_DELETE,
+        DataPlaneSnapshotEventType::RoutingPlanRefresh => "routing_plan_refresh",
     }
 }
 
@@ -9,6 +10,7 @@ fn parse_outbox_event_type(raw: &str) -> Result<DataPlaneSnapshotEventType> {
     match raw {
         OUTBOX_EVENT_ACCOUNT_UPSERT => Ok(DataPlaneSnapshotEventType::AccountUpsert),
         OUTBOX_EVENT_ACCOUNT_DELETE => Ok(DataPlaneSnapshotEventType::AccountDelete),
+        "routing_plan_refresh" => Ok(DataPlaneSnapshotEventType::RoutingPlanRefresh),
         _ => Err(anyhow!("unsupported data-plane outbox event type: {raw}")),
     }
 }
@@ -245,11 +247,22 @@ impl PostgresStore {
             } else {
                 None
             };
+            let compiled_routing_plan = if matches!(
+                event_type,
+                DataPlaneSnapshotEventType::AccountUpsert
+                    | DataPlaneSnapshotEventType::AccountDelete
+                    | DataPlaneSnapshotEventType::RoutingPlanRefresh
+            ) {
+                self.load_compiled_routing_plan_inner().await?
+            } else {
+                None
+            };
             events.push(DataPlaneSnapshotEvent {
                 id,
                 event_type,
                 account_id,
                 account,
+                compiled_routing_plan,
                 created_at: row.try_get::<DateTime<Utc>, _>("created_at")?,
             });
         }
