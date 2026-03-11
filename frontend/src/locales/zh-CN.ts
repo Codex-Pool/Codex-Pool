@@ -1245,7 +1245,7 @@ export default {
     },
     nav: {
         accounts: "账号池",
-        aiRouting: "AI 调度",
+        modelRouting: "模型调度",
         apiKeyGroups: "分组管理",
         apiKeys: "API 密钥",
         billing: "计费",
@@ -1827,9 +1827,9 @@ export default {
         subtitle: "管理 API Key 分组、模型白名单、倍率和分组级绝对定价。",
         title: "分组管理"
     },
-    aiRoutingPage: {
-        title: "AI 调度",
-        subtitle: "配置路由画像、模型感知回退链，以及为 AI 智能调度提供能力的规划模型链。",
+    modelRoutingPage: {
+        title: "模型调度",
+        subtitle: "配置路由画像、模型感知回退链，以及用于模型调度规划的规划模型链。",
         actions: {
             refresh: "刷新",
             createProfile: "新建画像",
@@ -1843,14 +1843,14 @@ export default {
             savePolicy: "保存策略"
         },
         settings: {
-            title: "规划器设置",
-            description: "控制 AI 调度是否启用、计划如何发布，以及哪些小模型可以作为 AI 规划链。",
-            enabled: "启用 AI 调度",
+            title: "模型调度设置",
+            description: "控制模型调度的发布行为、安全开关，以及规划模型链配置。",
+            enabled: "启用模型调度",
             enabledHint: "关闭后，编译路由计划只会保留人工配置路径。",
             autoPublish: "自动发布",
             autoPublishHint: "每次重算完成后自动发布最新路由计划。",
             killSwitch: "全局熔断",
-            killSwitchHint: "立即停止 AI 驱动的变更，但保留已保存的配置。",
+            killSwitchHint: "立即停止规划器驱动的变更，但保留已保存的配置。",
             triggerMode: "触发模式",
             plannerModelChain: "规划模型链",
             plannerModelChainPlaceholder: "gpt-5.2-codex, gpt-4.1-mini",
@@ -1913,8 +1913,8 @@ export default {
             noProfilesAvailable: "请先创建路由画像，再为策略配置回退链。"
         },
         messages: {
-            settingsSaved: "AI 调度设置已保存。",
-            settingsSaveFailed: "保存 AI 调度设置失败。",
+            settingsSaved: "模型调度设置已保存。",
+            settingsSaveFailed: "保存模型调度设置失败。",
             profileSaved: "路由画像已保存：{{name}}",
             profileSaveFailed: "保存路由画像失败。",
             profileDeleted: "路由画像已删除。",

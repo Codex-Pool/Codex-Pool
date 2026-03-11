@@ -488,15 +488,15 @@ impl ControlPlaneStore for PostgresStore {
         self.delete_model_routing_policy_inner(policy_id).await
     }
 
-    async fn ai_routing_settings(&self) -> Result<AiRoutingSettings> {
-        self.load_ai_routing_settings_inner().await
+    async fn model_routing_settings(&self) -> Result<ModelRoutingSettings> {
+        self.load_model_routing_settings_inner().await
     }
 
-    async fn update_ai_routing_settings(
+    async fn update_model_routing_settings(
         &self,
-        req: UpdateAiRoutingSettingsRequest,
-    ) -> Result<AiRoutingSettings> {
-        self.update_ai_routing_settings_inner(req).await
+        req: UpdateModelRoutingSettingsRequest,
+    ) -> Result<ModelRoutingSettings> {
+        self.update_model_routing_settings_inner(req).await
     }
 
     async fn list_routing_plan_versions(&self) -> Result<Vec<RoutingPlanVersion>> {

@@ -16,11 +16,11 @@ impl InMemoryStore {
             policies: Arc::new(RwLock::new(HashMap::new())),
             routing_profiles: Arc::new(RwLock::new(HashMap::new())),
             model_routing_policies: Arc::new(RwLock::new(HashMap::new())),
-            ai_routing_settings: Arc::new(RwLock::new(AiRoutingSettings {
+            model_routing_settings: Arc::new(RwLock::new(ModelRoutingSettings {
                 enabled: true,
                 auto_publish: true,
                 planner_model_chain: Vec::new(),
-                trigger_mode: AiRoutingTriggerMode::Hybrid,
+                trigger_mode: ModelRoutingTriggerMode::Hybrid,
                 kill_switch: false,
                 updated_at: Utc::now(),
             })),

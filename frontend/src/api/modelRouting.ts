@@ -2,7 +2,7 @@ import { apiClient } from './client'
 
 export type UpstreamMode = 'open_ai_api_key' | 'chat_gpt_session' | 'codex_oauth'
 export type UpstreamAuthProvider = 'legacy_bearer' | 'oauth_refresh_token'
-export type AiRoutingTriggerMode = 'hybrid' | 'scheduled_only' | 'event_only'
+export type ModelRoutingTriggerMode = 'hybrid' | 'scheduled_only' | 'event_only'
 
 export interface RoutingProfileSelector {
   plan_types: string[]
@@ -59,11 +59,11 @@ export interface CompiledRoutingPlan {
   policies: CompiledModelRoutingPolicy[]
 }
 
-export interface AiRoutingSettings {
+export interface ModelRoutingSettings {
   enabled: boolean
   auto_publish: boolean
   planner_model_chain: string[]
-  trigger_mode: AiRoutingTriggerMode
+  trigger_mode: ModelRoutingTriggerMode
   kill_switch: boolean
   updated_at: string
 }
@@ -83,8 +83,8 @@ export interface ModelRoutingPoliciesResponse {
   policies?: ModelRoutingPolicy[]
 }
 
-export interface AiRoutingSettingsResponse {
-  settings: AiRoutingSettings
+export interface ModelRoutingSettingsResponse {
+  settings: ModelRoutingSettings
 }
 
 export interface RoutingPlanVersionsResponse {
@@ -111,11 +111,11 @@ export interface UpsertModelRoutingPolicyRequest {
   priority: number
 }
 
-export interface UpdateAiRoutingSettingsRequest {
+export interface UpdateModelRoutingSettingsRequest {
   enabled: boolean
   auto_publish: boolean
   planner_model_chain: string[]
-  trigger_mode: AiRoutingTriggerMode
+  trigger_mode: ModelRoutingTriggerMode
   kill_switch: boolean
 }
 
@@ -183,7 +183,7 @@ function normalizeCompiledPlan(plan: CompiledRoutingPlan): CompiledRoutingPlan {
   }
 }
 
-function normalizeSettings(settings: AiRoutingSettings): AiRoutingSettings {
+function normalizeSettings(settings: ModelRoutingSettings): ModelRoutingSettings {
   return {
     ...settings,
     planner_model_chain: normalizeStringArray(settings.planner_model_chain),
@@ -197,39 +197,43 @@ function normalizeVersion(version: RoutingPlanVersion): RoutingPlanVersion {
   }
 }
 
-export const aiRoutingApi = {
+export const modelRoutingApi = {
   listProfiles: async () => {
-    const response = await apiClient.get<RoutingProfilesResponse>('/admin/ai-routing/profiles')
+    const response = await apiClient.get<RoutingProfilesResponse>('/admin/model-routing/profiles')
     return {
       profiles: Array.isArray(response.profiles) ? response.profiles.map(normalizeProfile) : [],
     }
   },
   upsertProfile: (payload: UpsertRoutingProfileRequest) =>
-    apiClient.post<RoutingProfile>('/admin/ai-routing/profiles', payload),
+    apiClient.post<RoutingProfile>('/admin/model-routing/profiles', payload),
   deleteProfile: (profileId: string) =>
-    apiClient.delete<void>(`/admin/ai-routing/profiles/${profileId}`),
+    apiClient.delete<void>(`/admin/model-routing/profiles/${profileId}`),
   listPolicies: async () => {
     const response = await apiClient.get<ModelRoutingPoliciesResponse>(
-      '/admin/ai-routing/model-policies',
+      '/admin/model-routing/model-policies',
     )
     return {
       policies: Array.isArray(response.policies) ? response.policies.map(normalizePolicy) : [],
     }
   },
   upsertPolicy: (payload: UpsertModelRoutingPolicyRequest) =>
-    apiClient.post<ModelRoutingPolicy>('/admin/ai-routing/model-policies', payload),
+    apiClient.post<ModelRoutingPolicy>('/admin/model-routing/model-policies', payload),
   deletePolicy: (policyId: string) =>
-    apiClient.delete<void>(`/admin/ai-routing/model-policies/${policyId}`),
+    apiClient.delete<void>(`/admin/model-routing/model-policies/${policyId}`),
   getSettings: async () => {
-    const response = await apiClient.get<AiRoutingSettingsResponse>('/admin/ai-routing/settings')
+    const response = await apiClient.get<ModelRoutingSettingsResponse>(
+      '/admin/model-routing/settings',
+    )
     return {
       settings: normalizeSettings(response.settings),
     }
   },
-  updateSettings: (payload: UpdateAiRoutingSettingsRequest) =>
-    apiClient.put<AiRoutingSettingsResponse>('/admin/ai-routing/settings', payload),
+  updateSettings: (payload: UpdateModelRoutingSettingsRequest) =>
+    apiClient.put<ModelRoutingSettingsResponse>('/admin/model-routing/settings', payload),
   listVersions: async () => {
-    const response = await apiClient.get<RoutingPlanVersionsResponse>('/admin/ai-routing/versions')
+    const response = await apiClient.get<RoutingPlanVersionsResponse>(
+      '/admin/model-routing/versions',
+    )
     return {
       versions: Array.isArray(response.versions) ? response.versions.map(normalizeVersion) : [],
     }

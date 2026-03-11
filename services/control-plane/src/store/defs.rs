@@ -11,12 +11,12 @@ use codex_pool_core::api::{
     OAuthAccountStatusResponse, OAuthFamilyActionResponse, OAuthRateLimitRefreshJobSummary,
     OAuthRefreshStatus, SessionCredentialKind, UpsertModelRoutingPolicyRequest,
     UpsertRetryPolicyRequest, UpsertRoutingPolicyRequest, UpsertRoutingProfileRequest,
-    UpsertStreamRetryPolicyRequest, UpdateAiRoutingSettingsRequest,
+    UpsertStreamRetryPolicyRequest, UpdateModelRoutingSettingsRequest,
     ValidateOAuthRefreshTokenRequest,
     ValidateOAuthRefreshTokenResponse,
 };
 use codex_pool_core::model::{
-    AccountRoutingTraits, AiRoutingSettings, AiRoutingTriggerMode, ApiKey,
+    AccountRoutingTraits, ApiKey, ModelRoutingSettings, ModelRoutingTriggerMode,
     CompiledModelRoutingPolicy, CompiledRoutingPlan, CompiledRoutingProfile, ModelRoutingPolicy,
     RoutingPlanVersion, RoutingPolicy, RoutingProfile, RoutingStrategy, Tenant, UpstreamAccount,
     UpstreamAuthProvider, UpstreamMode,
@@ -230,14 +230,14 @@ pub trait ControlPlaneStore: Send + Sync {
     async fn delete_model_routing_policy(&self, _policy_id: Uuid) -> Result<()> {
         Err(anyhow!("model routing policy repository is not implemented"))
     }
-    async fn ai_routing_settings(&self) -> Result<AiRoutingSettings> {
-        Err(anyhow!("ai routing settings repository is not implemented"))
+    async fn model_routing_settings(&self) -> Result<ModelRoutingSettings> {
+        Err(anyhow!("model routing settings repository is not implemented"))
     }
-    async fn update_ai_routing_settings(
+    async fn update_model_routing_settings(
         &self,
-        _req: UpdateAiRoutingSettingsRequest,
-    ) -> Result<AiRoutingSettings> {
-        Err(anyhow!("ai routing settings repository is not implemented"))
+        _req: UpdateModelRoutingSettingsRequest,
+    ) -> Result<ModelRoutingSettings> {
+        Err(anyhow!("model routing settings repository is not implemented"))
     }
     async fn list_routing_plan_versions(&self) -> Result<Vec<RoutingPlanVersion>> {
         Err(anyhow!("routing plan version repository is not implemented"))
@@ -526,7 +526,7 @@ pub struct InMemoryStore {
     policies: Arc<RwLock<HashMap<Uuid, RoutingPolicy>>>,
     routing_profiles: Arc<RwLock<HashMap<Uuid, RoutingProfile>>>,
     model_routing_policies: Arc<RwLock<HashMap<Uuid, ModelRoutingPolicy>>>,
-    ai_routing_settings: Arc<RwLock<AiRoutingSettings>>,
+    model_routing_settings: Arc<RwLock<ModelRoutingSettings>>,
     routing_plan_versions: Arc<RwLock<Vec<RoutingPlanVersion>>>,
     revision: Arc<AtomicU64>,
     oauth_client: Arc<dyn OAuthTokenClient>,

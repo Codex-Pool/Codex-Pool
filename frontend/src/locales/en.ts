@@ -1245,7 +1245,7 @@ export default {
     },
     nav: {
         accounts: "Accounts Pool",
-        aiRouting: "AI Routing",
+        modelRouting: "Model Routing",
         apiKeyGroups: "Group Management",
         apiKeys: "API Keys",
         billing: "Billing",
@@ -1827,9 +1827,9 @@ export default {
         subtitle: "Manage API key groups, model allowlists, multipliers, and group-level absolute prices.",
         title: "Group Management"
     },
-    aiRoutingPage: {
-        title: "AI Routing",
-        subtitle: "Configure routing profiles, model-aware fallback chains, and the planner model chain that powers AI-assisted dispatch decisions.",
+    modelRoutingPage: {
+        title: "Model Routing",
+        subtitle: "Configure routing profiles, model-aware fallback chains, and planner model chain settings for model dispatching.",
         actions: {
             refresh: "Refresh",
             createProfile: "Create profile",
@@ -1843,14 +1843,14 @@ export default {
             savePolicy: "Save policy"
         },
         settings: {
-            title: "Planner Settings",
-            description: "Control whether AI routing is enabled, how plans are published, and which small models can act as the planner chain.",
-            enabled: "Enable AI routing",
+            title: "Model Routing Settings",
+            description: "Control model routing publish behavior, safety switches, and planner model chain settings.",
+            enabled: "Enable model routing",
             enabledHint: "If disabled, compiled routing plans remain manual-only.",
             autoPublish: "Auto publish",
             autoPublishHint: "Automatically publish refreshed plans after a recompute cycle completes.",
             killSwitch: "Kill switch",
-            killSwitchHint: "Immediately stop AI-driven changes without removing saved policies.",
+            killSwitchHint: "Immediately stop planner-driven changes without removing saved policies.",
             triggerMode: "Trigger mode",
             plannerModelChain: "Planner model chain",
             plannerModelChainPlaceholder: "gpt-5.2-codex, gpt-4.1-mini",
@@ -1913,8 +1913,8 @@ export default {
             noProfilesAvailable: "Create a routing profile first so policies have somewhere to point."
         },
         messages: {
-            settingsSaved: "AI routing settings saved.",
-            settingsSaveFailed: "Failed to save AI routing settings.",
+            settingsSaved: "Model routing settings saved.",
+            settingsSaveFailed: "Failed to save model routing settings.",
             profileSaved: "Routing profile saved: {{name}}",
             profileSaveFailed: "Failed to save routing profile.",
             profileDeleted: "Routing profile deleted.",

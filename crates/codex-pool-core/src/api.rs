@@ -4,7 +4,7 @@ use serde_json::Value;
 use uuid::Uuid;
 
 use crate::model::{
-    AccountRoutingTraits, AiRoutingSettings, AiRoutingTriggerMode, ApiKey,
+    AccountRoutingTraits, ApiKey, ModelRoutingSettings, ModelRoutingTriggerMode,
     CompiledRoutingPlan, ModelRoutingPolicy, RoutingPlanVersion, RoutingPolicy, RoutingProfile,
     RoutingProfileSelector, RoutingStrategy, UpstreamAccount, UpstreamAuthProvider,
     UpstreamMode,
@@ -343,17 +343,17 @@ pub struct ModelRoutingPoliciesResponse {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AiRoutingSettingsResponse {
-    pub settings: AiRoutingSettings,
+pub struct ModelRoutingSettingsResponse {
+    pub settings: ModelRoutingSettings,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct UpdateAiRoutingSettingsRequest {
+pub struct UpdateModelRoutingSettingsRequest {
     pub enabled: bool,
     pub auto_publish: bool,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub planner_model_chain: Vec<String>,
-    pub trigger_mode: AiRoutingTriggerMode,
+    pub trigger_mode: ModelRoutingTriggerMode,
     pub kill_switch: bool,
 }
 

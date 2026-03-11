@@ -17,14 +17,15 @@ use axum::{response::IntoResponse, Router};
 use chrono::{DateTime, Utc};
 use codex_pool_core::api::{
     AccountUsageLeaderboardResponse, AdminLoginRequest, AdminMeResponse,
-    AiRoutingSettingsResponse, ApiKeyUsageLeaderboardResponse, CreateApiKeyRequest,
+    ApiKeyUsageLeaderboardResponse, CreateApiKeyRequest,
     CreateTenantRequest, CreateUpstreamAccountRequest, ErrorEnvelope, HourlyAccountUsagePoint,
     HourlyTenantApiKeyUsagePoint, ImportOAuthRefreshTokenRequest,
+    ModelRoutingSettingsResponse,
     ModelRoutingPoliciesResponse, OAuthAccountStatusResponse, OAuthFamilyActionResponse,
     OAuthImportItemStatus, OAuthImportJobActionResponse, OAuthImportJobItemsResponse,
     OAuthImportJobSummary, OAuthRateLimitRefreshJobStatus, OAuthRateLimitRefreshJobSummary,
     PolicyResponse, RoutingPlanVersionsResponse, RoutingProfilesResponse,
-    TenantUsageLeaderboardResponse, UpdateAiRoutingSettingsRequest,
+    TenantUsageLeaderboardResponse, UpdateModelRoutingSettingsRequest,
     UpsertModelRoutingPolicyRequest, UpsertRetryPolicyRequest, UpsertRoutingPolicyRequest,
     UpsertRoutingProfileRequest, UpsertStreamRetryPolicyRequest,
     UsageHourlyTenantTrendsResponse, UsageHourlyTrendsResponse, UsageLeaderboardOverviewResponse,
@@ -1135,6 +1136,30 @@ pub fn build_app_with_store_ttl_usage_repo_import_store_and_admin_auth(
             delete(delete_admin_api_key_group_model_policy),
         )
         .route(
+            "/api/v1/admin/model-routing/profiles",
+            get(list_admin_routing_profiles).post(upsert_admin_routing_profile),
+        )
+        .route(
+            "/api/v1/admin/model-routing/profiles/{profile_id}",
+            delete(delete_admin_routing_profile),
+        )
+        .route(
+            "/api/v1/admin/model-routing/model-policies",
+            get(list_admin_model_routing_policies).post(upsert_admin_model_routing_policy),
+        )
+        .route(
+            "/api/v1/admin/model-routing/model-policies/{policy_id}",
+            delete(delete_admin_model_routing_policy),
+        )
+        .route(
+            "/api/v1/admin/model-routing/settings",
+            get(get_admin_model_routing_settings).put(update_admin_model_routing_settings),
+        )
+        .route(
+            "/api/v1/admin/model-routing/versions",
+            get(list_admin_routing_plan_versions),
+        )
+        .route(
             "/api/v1/admin/ai-routing/profiles",
             get(list_admin_routing_profiles).post(upsert_admin_routing_profile),
         )
@@ -1152,7 +1177,7 @@ pub fn build_app_with_store_ttl_usage_repo_import_store_and_admin_auth(
         )
         .route(
             "/api/v1/admin/ai-routing/settings",
-            get(get_admin_ai_routing_settings).put(update_admin_ai_routing_settings),
+            get(get_admin_model_routing_settings).put(update_admin_model_routing_settings),
         )
         .route(
             "/api/v1/admin/ai-routing/versions",

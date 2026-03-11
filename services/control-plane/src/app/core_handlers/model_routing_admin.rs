@@ -29,7 +29,7 @@ async fn upsert_admin_routing_profile(
             actor_type: "admin_user".to_string(),
             actor_id: Some(principal.user_id),
             tenant_id: None,
-            action: "admin.ai_routing.profile.upsert".to_string(),
+            action: "admin.model_routing.profile.upsert".to_string(),
             reason: None,
             request_ip: crate::tenant::extract_client_ip(&headers),
             user_agent: extract_user_agent(&headers),
@@ -64,7 +64,7 @@ async fn delete_admin_routing_profile(
             actor_type: "admin_user".to_string(),
             actor_id: Some(principal.user_id),
             tenant_id: None,
-            action: "admin.ai_routing.profile.delete".to_string(),
+            action: "admin.model_routing.profile.delete".to_string(),
             reason: None,
             request_ip: crate::tenant::extract_client_ip(&headers),
             user_agent: extract_user_agent(&headers),
@@ -110,7 +110,7 @@ async fn upsert_admin_model_routing_policy(
             actor_type: "admin_user".to_string(),
             actor_id: Some(principal.user_id),
             tenant_id: None,
-            action: "admin.ai_routing.model_policy.upsert".to_string(),
+            action: "admin.model_routing.model_policy.upsert".to_string(),
             reason: None,
             request_ip: crate::tenant::extract_client_ip(&headers),
             user_agent: extract_user_agent(&headers),
@@ -146,7 +146,7 @@ async fn delete_admin_model_routing_policy(
             actor_type: "admin_user".to_string(),
             actor_id: Some(principal.user_id),
             tenant_id: None,
-            action: "admin.ai_routing.model_policy.delete".to_string(),
+            action: "admin.model_routing.model_policy.delete".to_string(),
             reason: None,
             request_ip: crate::tenant::extract_client_ip(&headers),
             user_agent: extract_user_agent(&headers),
@@ -160,28 +160,28 @@ async fn delete_admin_model_routing_policy(
     Ok(StatusCode::NO_CONTENT)
 }
 
-async fn get_admin_ai_routing_settings(
+async fn get_admin_model_routing_settings(
     State(state): State<AppState>,
     headers: HeaderMap,
-) -> Result<Json<AiRoutingSettingsResponse>, (StatusCode, Json<ErrorEnvelope>)> {
+) -> Result<Json<ModelRoutingSettingsResponse>, (StatusCode, Json<ErrorEnvelope>)> {
     let _principal = require_admin_principal(&state, &headers)?;
     let settings = state
         .store
-        .ai_routing_settings()
+        .model_routing_settings()
         .await
         .map_err(map_tenant_error)?;
-    Ok(Json(AiRoutingSettingsResponse { settings }))
+    Ok(Json(ModelRoutingSettingsResponse { settings }))
 }
 
-async fn update_admin_ai_routing_settings(
+async fn update_admin_model_routing_settings(
     State(state): State<AppState>,
     headers: HeaderMap,
-    Json(req): Json<UpdateAiRoutingSettingsRequest>,
-) -> Result<Json<AiRoutingSettingsResponse>, (StatusCode, Json<ErrorEnvelope>)> {
+    Json(req): Json<UpdateModelRoutingSettingsRequest>,
+) -> Result<Json<ModelRoutingSettingsResponse>, (StatusCode, Json<ErrorEnvelope>)> {
     let principal = require_admin_principal(&state, &headers)?;
     let response = state
         .store
-        .update_ai_routing_settings(req)
+        .update_model_routing_settings(req)
         .await
         .map_err(map_tenant_error)?;
     write_audit_log_best_effort(
@@ -190,11 +190,11 @@ async fn update_admin_ai_routing_settings(
             actor_type: "admin_user".to_string(),
             actor_id: Some(principal.user_id),
             tenant_id: None,
-            action: "admin.ai_routing.settings.update".to_string(),
+            action: "admin.model_routing.settings.update".to_string(),
             reason: None,
             request_ip: crate::tenant::extract_client_ip(&headers),
             user_agent: extract_user_agent(&headers),
-            target_type: Some("ai_routing_settings".to_string()),
+            target_type: Some("model_routing_settings".to_string()),
             target_id: Some("singleton".to_string()),
             payload_json: json!({
                 "enabled": response.enabled,
@@ -207,7 +207,7 @@ async fn update_admin_ai_routing_settings(
         },
     )
     .await;
-    Ok(Json(AiRoutingSettingsResponse { settings: response }))
+    Ok(Json(ModelRoutingSettingsResponse { settings: response }))
 }
 
 async fn list_admin_routing_plan_versions(

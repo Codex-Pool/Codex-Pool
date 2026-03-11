@@ -235,15 +235,15 @@ impl ControlPlaneStore for InMemoryStore {
         Ok(())
     }
 
-    async fn ai_routing_settings(&self) -> Result<AiRoutingSettings> {
-        Ok(self.ai_routing_settings.read().unwrap().clone())
+    async fn model_routing_settings(&self) -> Result<ModelRoutingSettings> {
+        Ok(self.model_routing_settings.read().unwrap().clone())
     }
 
-    async fn update_ai_routing_settings(
+    async fn update_model_routing_settings(
         &self,
-        req: UpdateAiRoutingSettingsRequest,
-    ) -> Result<AiRoutingSettings> {
-        let settings = AiRoutingSettings {
+        req: UpdateModelRoutingSettingsRequest,
+    ) -> Result<ModelRoutingSettings> {
+        let settings = ModelRoutingSettings {
             enabled: req.enabled,
             auto_publish: req.auto_publish,
             planner_model_chain: req.planner_model_chain,
@@ -251,7 +251,7 @@ impl ControlPlaneStore for InMemoryStore {
             kill_switch: req.kill_switch,
             updated_at: Utc::now(),
         };
-        *self.ai_routing_settings.write().unwrap() = settings.clone();
+        *self.model_routing_settings.write().unwrap() = settings.clone();
         self.revision.fetch_add(1, Ordering::Relaxed);
         Ok(settings)
     }

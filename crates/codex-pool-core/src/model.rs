@@ -146,19 +146,19 @@ pub struct CompiledRoutingPlan {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
-pub enum AiRoutingTriggerMode {
+pub enum ModelRoutingTriggerMode {
     Hybrid,
     ScheduledOnly,
     EventOnly,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct AiRoutingSettings {
+pub struct ModelRoutingSettings {
     pub enabled: bool,
     pub auto_publish: bool,
     #[serde(default)]
     pub planner_model_chain: Vec<String>,
-    pub trigger_mode: AiRoutingTriggerMode,
+    pub trigger_mode: ModelRoutingTriggerMode,
     pub kill_switch: bool,
     pub updated_at: DateTime<Utc>,
 }

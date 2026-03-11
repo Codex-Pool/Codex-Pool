@@ -1245,7 +1245,7 @@ export default {
     },
     nav: {
         accounts: "アカウントプール",
-        aiRouting: "AI Routing",
+        modelRouting: "Model Routing",
         apiKeyGroups: "Group Management",
         apiKeys: "API キー",
         billing: "請求する",
@@ -1827,9 +1827,9 @@ export default {
         subtitle: "Manage API key groups, model allowlists, multipliers, and group-level absolute prices.",
         title: "Group Management"
     },
-    aiRoutingPage: {
-        title: "AI Routing",
-        subtitle: "Configure routing profiles, model-aware fallback chains, and the planner model chain used for AI-assisted dispatching.",
+    modelRoutingPage: {
+        title: "Model Routing",
+        subtitle: "Configure routing profiles, model-aware fallback chains, and planner model chain settings for model dispatching.",
         actions: {
             refresh: "Refresh",
             createProfile: "Create profile",
@@ -1843,14 +1843,14 @@ export default {
             savePolicy: "Save policy"
         },
         settings: {
-            title: "Planner Settings",
-            description: "Control AI routing enablement, publish behavior, and which small models can power the planner chain.",
-            enabled: "Enable AI routing",
+            title: "Model Routing Settings",
+            description: "Control model routing publish behavior, safety switches, and planner model chain settings.",
+            enabled: "Enable model routing",
             enabledHint: "When disabled, compiled routing plans stay manual only.",
             autoPublish: "Auto publish",
             autoPublishHint: "Publish the latest routing plan automatically after recompute.",
             killSwitch: "Kill switch",
-            killSwitchHint: "Stop AI-driven changes immediately without deleting saved rules.",
+            killSwitchHint: "Stop planner-driven changes immediately without deleting saved rules.",
             triggerMode: "Trigger mode",
             plannerModelChain: "Planner model chain",
             plannerModelChainPlaceholder: "gpt-5.2-codex, gpt-4.1-mini",
@@ -1913,8 +1913,8 @@ export default {
             noProfilesAvailable: "Create a routing profile first."
         },
         messages: {
-            settingsSaved: "AI routing settings saved.",
-            settingsSaveFailed: "Failed to save AI routing settings.",
+            settingsSaved: "Model routing settings saved.",
+            settingsSaveFailed: "Failed to save model routing settings.",
             profileSaved: "Routing profile saved: {{name}}",
             profileSaveFailed: "Failed to save routing profile.",
             profileDeleted: "Routing profile deleted.",

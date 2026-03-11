@@ -321,7 +321,7 @@ impl PostgresStore {
         Ok(())
     }
 
-    async fn load_ai_routing_settings_inner(&self) -> Result<AiRoutingSettings> {
+    async fn load_model_routing_settings_inner(&self) -> Result<ModelRoutingSettings> {
         let row = sqlx::query(
             r#"
             SELECT
@@ -338,19 +338,19 @@ impl PostgresStore {
         .bind(AI_ROUTING_SETTINGS_SINGLETON_ROW)
         .fetch_optional(&self.pool)
         .await
-        .context("failed to load ai routing settings")?;
+        .context("failed to load model routing settings")?;
 
         let Some(row) = row else {
-            return Ok(default_ai_routing_settings(Utc::now()));
+            return Ok(default_model_routing_settings(Utc::now()));
         };
 
-        Ok(AiRoutingSettings {
+        Ok(ModelRoutingSettings {
             enabled: row.try_get("enabled")?,
             auto_publish: row.try_get("auto_publish")?,
             planner_model_chain: parse_json_string_array(
                 row.try_get::<Option<String>, _>("planner_model_chain_json_text")?,
             ),
-            trigger_mode: parse_ai_routing_trigger_mode(
+            trigger_mode: parse_model_routing_trigger_mode(
                 row.try_get::<String, _>("trigger_mode")?.as_str(),
             )?,
             kill_switch: row.try_get("kill_switch")?,
@@ -358,15 +358,15 @@ impl PostgresStore {
         })
     }
 
-    async fn update_ai_routing_settings_inner(
+    async fn update_model_routing_settings_inner(
         &self,
-        req: UpdateAiRoutingSettingsRequest,
-    ) -> Result<AiRoutingSettings> {
+        req: UpdateModelRoutingSettingsRequest,
+    ) -> Result<ModelRoutingSettings> {
         let updated_at = Utc::now();
         let planner_model_chain_json = serde_json::to_string(&normalize_string_list(
             req.planner_model_chain.clone(),
         ))
-        .context("failed to encode ai routing planner model chain")?;
+        .context("failed to encode model routing planner model chain")?;
         sqlx::query(
             r#"
             INSERT INTO ai_routing_settings (
@@ -393,14 +393,14 @@ impl PostgresStore {
         .bind(req.enabled)
         .bind(req.auto_publish)
         .bind(planner_model_chain_json)
-        .bind(ai_routing_trigger_mode_to_db(&req.trigger_mode))
+        .bind(model_routing_trigger_mode_to_db(&req.trigger_mode))
         .bind(req.kill_switch)
         .bind(updated_at)
         .execute(&self.pool)
         .await
-        .context("failed to update ai routing settings")?;
+        .context("failed to update model routing settings")?;
 
-        Ok(AiRoutingSettings {
+        Ok(ModelRoutingSettings {
             enabled: req.enabled,
             auto_publish: req.auto_publish,
             planner_model_chain: normalize_string_list(req.planner_model_chain),
@@ -852,12 +852,12 @@ impl PostgresStore {
     }
 }
 
-fn default_ai_routing_settings(updated_at: DateTime<Utc>) -> AiRoutingSettings {
-    AiRoutingSettings {
+fn default_model_routing_settings(updated_at: DateTime<Utc>) -> ModelRoutingSettings {
+    ModelRoutingSettings {
         enabled: true,
         auto_publish: true,
         planner_model_chain: Vec::new(),
-        trigger_mode: AiRoutingTriggerMode::Hybrid,
+        trigger_mode: ModelRoutingTriggerMode::Hybrid,
         kill_switch: false,
         updated_at,
     }
@@ -890,20 +890,20 @@ fn parse_json_uuid_array(raw: Option<String>) -> Vec<Uuid> {
     values
 }
 
-fn parse_ai_routing_trigger_mode(raw: &str) -> Result<AiRoutingTriggerMode> {
+fn parse_model_routing_trigger_mode(raw: &str) -> Result<ModelRoutingTriggerMode> {
     match raw {
-        "hybrid" => Ok(AiRoutingTriggerMode::Hybrid),
-        "scheduled_only" => Ok(AiRoutingTriggerMode::ScheduledOnly),
-        "event_only" => Ok(AiRoutingTriggerMode::EventOnly),
-        _ => Err(anyhow!("unsupported ai routing trigger mode: {raw}")),
+        "hybrid" => Ok(ModelRoutingTriggerMode::Hybrid),
+        "scheduled_only" => Ok(ModelRoutingTriggerMode::ScheduledOnly),
+        "event_only" => Ok(ModelRoutingTriggerMode::EventOnly),
+        _ => Err(anyhow!("unsupported model routing trigger mode: {raw}")),
     }
 }
 
-fn ai_routing_trigger_mode_to_db(mode: &AiRoutingTriggerMode) -> &'static str {
+fn model_routing_trigger_mode_to_db(mode: &ModelRoutingTriggerMode) -> &'static str {
     match mode {
-        AiRoutingTriggerMode::Hybrid => "hybrid",
-        AiRoutingTriggerMode::ScheduledOnly => "scheduled_only",
-        AiRoutingTriggerMode::EventOnly => "event_only",
+        ModelRoutingTriggerMode::Hybrid => "hybrid",
+        ModelRoutingTriggerMode::ScheduledOnly => "scheduled_only",
+        ModelRoutingTriggerMode::EventOnly => "event_only",
     }
 }
 

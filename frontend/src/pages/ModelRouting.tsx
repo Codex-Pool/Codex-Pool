@@ -4,14 +4,14 @@ import { RotateCw, Save, SquarePen, Trash2 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
 import {
-  aiRoutingApi,
-  type AiRoutingSettings,
-  type AiRoutingTriggerMode,
+  modelRoutingApi,
+  type ModelRoutingSettings,
+  type ModelRoutingTriggerMode,
   type ModelRoutingPolicy,
   type RoutingProfile,
   type UpstreamAuthProvider,
   type UpstreamMode,
-} from '@/api/aiRouting'
+} from '@/api/modelRouting'
 import { localizeApiErrorDisplay } from '@/api/errorI18n'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -64,7 +64,7 @@ type SettingsFormState = {
   enabled: boolean
   autoPublish: boolean
   plannerModelChain: string
-  triggerMode: AiRoutingTriggerMode
+  triggerMode: ModelRoutingTriggerMode
   killSwitch: boolean
 }
 
@@ -111,7 +111,7 @@ function formatDateTime(value?: string | null) {
 }
 
 function selectorFilterSummary(profile: RoutingProfile, t: ReturnType<typeof useTranslation>['t']) {
-  return t('aiRoutingPage.profiles.summary', {
+  return t('modelRoutingPage.profiles.summary', {
     plans: profile.selector.plan_types.length,
     modes: profile.selector.modes.length,
     authProviders: profile.selector.auth_providers.length,
@@ -121,18 +121,18 @@ function selectorFilterSummary(profile: RoutingProfile, t: ReturnType<typeof use
 }
 
 function triggerModeLabel(
-  mode: AiRoutingTriggerMode,
+  mode: ModelRoutingTriggerMode,
   t: ReturnType<typeof useTranslation>['t'],
 ) {
-  if (mode === 'scheduled_only') return t('aiRoutingPage.triggerModes.scheduledOnly')
-  if (mode === 'event_only') return t('aiRoutingPage.triggerModes.eventOnly')
-  return t('aiRoutingPage.triggerModes.hybrid')
+  if (mode === 'scheduled_only') return t('modelRoutingPage.triggerModes.scheduledOnly')
+  if (mode === 'event_only') return t('modelRoutingPage.triggerModes.eventOnly')
+  return t('modelRoutingPage.triggerModes.hybrid')
 }
 
 function modeLabel(mode: UpstreamMode, t: ReturnType<typeof useTranslation>['t']) {
-  if (mode === 'open_ai_api_key') return t('aiRoutingPage.modes.apiKey')
-  if (mode === 'chat_gpt_session') return t('aiRoutingPage.modes.chatGptSession')
-  return t('aiRoutingPage.modes.codexOauth')
+  if (mode === 'open_ai_api_key') return t('modelRoutingPage.modes.apiKey')
+  if (mode === 'chat_gpt_session') return t('modelRoutingPage.modes.chatGptSession')
+  return t('modelRoutingPage.modes.codexOauth')
 }
 
 function authProviderLabel(
@@ -140,13 +140,13 @@ function authProviderLabel(
   t: ReturnType<typeof useTranslation>['t'],
 ) {
   if (provider === 'oauth_refresh_token') {
-    return t('aiRoutingPage.authProviders.oauthRefreshToken')
+    return t('modelRoutingPage.authProviders.oauthRefreshToken')
   }
-  return t('aiRoutingPage.authProviders.legacyBearer')
+  return t('modelRoutingPage.authProviders.legacyBearer')
 }
 
 function settingsStatusVariant(
-  settings: AiRoutingSettings | null,
+  settings: ModelRoutingSettings | null,
 ): 'success' | 'warning' | 'secondary' | 'destructive' {
   if (!settings) return 'secondary'
   if (settings.kill_switch) return 'destructive'
@@ -161,14 +161,14 @@ function fallbackProfileSummary(
   t: ReturnType<typeof useTranslation>['t'],
 ) {
   if (policy.fallback_profile_ids.length === 0) {
-    return t('aiRoutingPage.common.none')
+    return t('modelRoutingPage.common.none')
   }
   return policy.fallback_profile_ids
-    .map((profileId) => profileNames.get(profileId) ?? t('aiRoutingPage.common.deletedProfile'))
+    .map((profileId) => profileNames.get(profileId) ?? t('modelRoutingPage.common.deletedProfile'))
     .join(' -> ')
 }
 
-function createSettingsDraft(settings: AiRoutingSettings): SettingsFormState {
+function createSettingsDraft(settings: ModelRoutingSettings): SettingsFormState {
   return {
     enabled: settings.enabled,
     autoPublish: settings.auto_publish,
@@ -178,7 +178,7 @@ function createSettingsDraft(settings: AiRoutingSettings): SettingsFormState {
   }
 }
 
-export default function AiRouting() {
+export default function ModelRouting() {
   const { t } = useTranslation()
   const queryClient = useQueryClient()
   const [error, setError] = useState<string | null>(null)
@@ -195,14 +195,14 @@ export default function AiRouting() {
   )
 
   const { data, isLoading, isFetching } = useQuery({
-    queryKey: ['adminAiRouting'],
+    queryKey: ['adminModelRouting'],
     queryFn: async () => {
       const [profilesPayload, policiesPayload, settingsPayload, versionsPayload] =
         await Promise.all([
-          aiRoutingApi.listProfiles(),
-          aiRoutingApi.listPolicies(),
-          aiRoutingApi.getSettings(),
-          aiRoutingApi.listVersions(),
+          modelRoutingApi.listProfiles(),
+          modelRoutingApi.listPolicies(),
+          modelRoutingApi.getSettings(),
+          modelRoutingApi.listVersions(),
         ])
       return {
         profiles: profilesPayload.profiles ?? [],
@@ -243,7 +243,7 @@ export default function AiRouting() {
       if (!settingsDraft) {
         throw new Error('settings_missing')
       }
-      return aiRoutingApi.updateSettings({
+      return modelRoutingApi.updateSettings({
         enabled: settingsDraft.enabled,
         auto_publish: settingsDraft.autoPublish,
         planner_model_chain: parseCsvInput(settingsDraft.plannerModelChain),
@@ -253,18 +253,18 @@ export default function AiRouting() {
     },
     onSuccess: () => {
       setError(null)
-      setNotice(t('aiRoutingPage.messages.settingsSaved'))
+      setNotice(t('modelRoutingPage.messages.settingsSaved'))
       setSettingsDraftOverride(null)
-      queryClient.invalidateQueries({ queryKey: ['adminAiRouting'] })
+      queryClient.invalidateQueries({ queryKey: ['adminModelRouting'] })
     },
     onError: (err) => {
-      setError(resolveErrorLabel(err, t('aiRoutingPage.messages.settingsSaveFailed')))
+      setError(resolveErrorLabel(err, t('modelRoutingPage.messages.settingsSaveFailed')))
     },
   })
 
   const upsertProfileMutation = useMutation({
     mutationFn: () =>
-      aiRoutingApi.upsertProfile({
+      modelRoutingApi.upsertProfile({
         id: profileForm.id,
         name: profileForm.name.trim(),
         description: profileForm.description.trim() || undefined,
@@ -280,31 +280,31 @@ export default function AiRouting() {
       }),
     onSuccess: (profile) => {
       setError(null)
-      setNotice(t('aiRoutingPage.messages.profileSaved', { name: profile.name }))
+      setNotice(t('modelRoutingPage.messages.profileSaved', { name: profile.name }))
       setProfileDialogOpen(false)
-      queryClient.invalidateQueries({ queryKey: ['adminAiRouting'] })
+      queryClient.invalidateQueries({ queryKey: ['adminModelRouting'] })
     },
     onError: (err) => {
-      setError(resolveErrorLabel(err, t('aiRoutingPage.messages.profileSaveFailed')))
+      setError(resolveErrorLabel(err, t('modelRoutingPage.messages.profileSaveFailed')))
     },
   })
 
   const deleteProfileMutation = useMutation({
-    mutationFn: (profileId: string) => aiRoutingApi.deleteProfile(profileId),
+    mutationFn: (profileId: string) => modelRoutingApi.deleteProfile(profileId),
     onSuccess: () => {
       setError(null)
-      setNotice(t('aiRoutingPage.messages.profileDeleted'))
+      setNotice(t('modelRoutingPage.messages.profileDeleted'))
       setProfileDialogOpen(false)
-      queryClient.invalidateQueries({ queryKey: ['adminAiRouting'] })
+      queryClient.invalidateQueries({ queryKey: ['adminModelRouting'] })
     },
     onError: (err) => {
-      setError(resolveErrorLabel(err, t('aiRoutingPage.messages.profileDeleteFailed')))
+      setError(resolveErrorLabel(err, t('modelRoutingPage.messages.profileDeleteFailed')))
     },
   })
 
   const upsertPolicyMutation = useMutation({
     mutationFn: () =>
-      aiRoutingApi.upsertPolicy({
+      modelRoutingApi.upsertPolicy({
         id: policyForm.id,
         name: policyForm.name.trim(),
         family: policyForm.family.trim(),
@@ -316,25 +316,25 @@ export default function AiRouting() {
       }),
     onSuccess: (policy) => {
       setError(null)
-      setNotice(t('aiRoutingPage.messages.policySaved', { name: policy.name }))
+      setNotice(t('modelRoutingPage.messages.policySaved', { name: policy.name }))
       setPolicyDialogOpen(false)
-      queryClient.invalidateQueries({ queryKey: ['adminAiRouting'] })
+      queryClient.invalidateQueries({ queryKey: ['adminModelRouting'] })
     },
     onError: (err) => {
-      setError(resolveErrorLabel(err, t('aiRoutingPage.messages.policySaveFailed')))
+      setError(resolveErrorLabel(err, t('modelRoutingPage.messages.policySaveFailed')))
     },
   })
 
   const deletePolicyMutation = useMutation({
-    mutationFn: (policyId: string) => aiRoutingApi.deletePolicy(policyId),
+    mutationFn: (policyId: string) => modelRoutingApi.deletePolicy(policyId),
     onSuccess: () => {
       setError(null)
-      setNotice(t('aiRoutingPage.messages.policyDeleted'))
+      setNotice(t('modelRoutingPage.messages.policyDeleted'))
       setPolicyDialogOpen(false)
-      queryClient.invalidateQueries({ queryKey: ['adminAiRouting'] })
+      queryClient.invalidateQueries({ queryKey: ['adminModelRouting'] })
     },
     onError: (err) => {
-      setError(resolveErrorLabel(err, t('aiRoutingPage.messages.policyDeleteFailed')))
+      setError(resolveErrorLabel(err, t('modelRoutingPage.messages.policyDeleteFailed')))
     },
   })
 
@@ -380,7 +380,7 @@ export default function AiRouting() {
 
   const modeOptions: UpstreamMode[] = ['codex_oauth', 'chat_gpt_session', 'open_ai_api_key']
   const authProviderOptions: UpstreamAuthProvider[] = ['oauth_refresh_token', 'legacy_bearer']
-  const triggerModeOptions: AiRoutingTriggerMode[] = ['hybrid', 'scheduled_only', 'event_only']
+  const triggerModeOptions: ModelRoutingTriggerMode[] = ['hybrid', 'scheduled_only', 'event_only']
 
   return (
     <div className="flex-1 overflow-y-auto p-8">
@@ -388,25 +388,25 @@ export default function AiRouting() {
 
       <div className="mb-8 flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
         <div className="space-y-2">
-          <h2 className="text-3xl font-semibold tracking-tight">{t('aiRoutingPage.title')}</h2>
+          <h2 className="text-3xl font-semibold tracking-tight">{t('modelRoutingPage.title')}</h2>
           <p className="max-w-3xl text-sm text-muted-foreground">
-            {t('aiRoutingPage.subtitle')}
+            {t('modelRoutingPage.subtitle')}
           </p>
         </div>
         <div className="flex flex-wrap gap-3">
           <Button
             variant="outline"
-            onClick={() => queryClient.invalidateQueries({ queryKey: ['adminAiRouting'] })}
+            onClick={() => queryClient.invalidateQueries({ queryKey: ['adminModelRouting'] })}
             disabled={isFetching}
           >
             <RotateCw className={`mr-2 h-4 w-4 ${isFetching ? 'animate-spin' : ''}`} />
-            {t('aiRoutingPage.actions.refresh')}
+            {t('modelRoutingPage.actions.refresh')}
           </Button>
           <Button variant="outline" onClick={openCreateProfileDialog}>
-            {t('aiRoutingPage.actions.createProfile')}
+            {t('modelRoutingPage.actions.createProfile')}
           </Button>
           <Button onClick={openCreatePolicyDialog}>
-            {t('aiRoutingPage.actions.createPolicy')}
+            {t('modelRoutingPage.actions.createPolicy')}
           </Button>
         </div>
       </div>
@@ -425,25 +425,25 @@ export default function AiRouting() {
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1.3fr)_minmax(320px,0.7fr)]">
         <Card className="relative overflow-hidden border-border/60">
           <CardHeader>
-            <CardTitle>{t('aiRoutingPage.settings.title')}</CardTitle>
-            <CardDescription>{t('aiRoutingPage.settings.description')}</CardDescription>
+            <CardTitle>{t('modelRoutingPage.settings.title')}</CardTitle>
+            <CardDescription>{t('modelRoutingPage.settings.description')}</CardDescription>
           </CardHeader>
           <CardContent className="space-y-6">
             <div className="flex flex-wrap items-center gap-2">
               <Badge variant={settingsStatusVariant(settings)}>
                 {settings?.kill_switch
-                  ? t('aiRoutingPage.status.killSwitchOn')
+                  ? t('modelRoutingPage.status.killSwitchOn')
                   : settings?.enabled
-                    ? t('aiRoutingPage.status.enabled')
-                    : t('aiRoutingPage.status.disabled')}
+                    ? t('modelRoutingPage.status.enabled')
+                    : t('modelRoutingPage.status.disabled')}
               </Badge>
               <Badge variant={settings?.auto_publish ? 'info' : 'secondary'}>
                 {settings?.auto_publish
-                  ? t('aiRoutingPage.status.autoPublishOn')
-                  : t('aiRoutingPage.status.autoPublishOff')}
+                  ? t('modelRoutingPage.status.autoPublishOn')
+                  : t('modelRoutingPage.status.autoPublishOff')}
               </Badge>
               <Badge variant="outline">
-                {t('aiRoutingPage.settings.updatedAt', {
+                {t('modelRoutingPage.settings.updatedAt', {
                   value: formatDateTime(settings?.updated_at),
                 })}
               </Badge>
@@ -453,9 +453,9 @@ export default function AiRouting() {
               <label className={POOL_SECTION_CLASS_NAME}>
                 <div className="flex items-center justify-between gap-3">
                   <div>
-                    <div className="font-medium">{t('aiRoutingPage.settings.enabled')}</div>
+                    <div className="font-medium">{t('modelRoutingPage.settings.enabled')}</div>
                     <div className="text-sm text-muted-foreground">
-                      {t('aiRoutingPage.settings.enabledHint')}
+                      {t('modelRoutingPage.settings.enabledHint')}
                     </div>
                   </div>
                   <Checkbox
@@ -473,9 +473,9 @@ export default function AiRouting() {
               <label className={POOL_SECTION_CLASS_NAME}>
                 <div className="flex items-center justify-between gap-3">
                   <div>
-                    <div className="font-medium">{t('aiRoutingPage.settings.autoPublish')}</div>
+                    <div className="font-medium">{t('modelRoutingPage.settings.autoPublish')}</div>
                     <div className="text-sm text-muted-foreground">
-                      {t('aiRoutingPage.settings.autoPublishHint')}
+                      {t('modelRoutingPage.settings.autoPublishHint')}
                     </div>
                   </div>
                   <Checkbox
@@ -493,9 +493,9 @@ export default function AiRouting() {
               <label className={POOL_SECTION_CLASS_NAME}>
                 <div className="flex items-center justify-between gap-3">
                   <div>
-                    <div className="font-medium">{t('aiRoutingPage.settings.killSwitch')}</div>
+                    <div className="font-medium">{t('modelRoutingPage.settings.killSwitch')}</div>
                     <div className="text-sm text-muted-foreground">
-                      {t('aiRoutingPage.settings.killSwitchHint')}
+                      {t('modelRoutingPage.settings.killSwitchHint')}
                     </div>
                   </div>
                   <Checkbox
@@ -511,17 +511,17 @@ export default function AiRouting() {
               </label>
 
               <div className={POOL_SECTION_CLASS_NAME}>
-                <div className="mb-2 font-medium">{t('aiRoutingPage.settings.triggerMode')}</div>
+                <div className="mb-2 font-medium">{t('modelRoutingPage.settings.triggerMode')}</div>
                 <Select
                   value={settingsDraft?.triggerMode ?? 'hybrid'}
                   onValueChange={(value) =>
                     updateSettingsDraft((prev) => ({
                       ...prev,
-                      triggerMode: value as AiRoutingTriggerMode,
+                      triggerMode: value as ModelRoutingTriggerMode,
                     }))
                   }
                 >
-                  <SelectTrigger className="w-full" aria-label={t('aiRoutingPage.settings.triggerMode')}>
+                  <SelectTrigger className="w-full" aria-label={t('modelRoutingPage.settings.triggerMode')}>
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -537,7 +537,7 @@ export default function AiRouting() {
 
             <div className={POOL_SECTION_CLASS_NAME}>
               <label className="mb-2 block font-medium">
-                {t('aiRoutingPage.settings.plannerModelChain')}
+                {t('modelRoutingPage.settings.plannerModelChain')}
               </label>
               <Textarea
                 value={settingsDraft?.plannerModelChain ?? ''}
@@ -548,17 +548,17 @@ export default function AiRouting() {
                   }))
                 }
                 rows={4}
-                placeholder={t('aiRoutingPage.settings.plannerModelChainPlaceholder')}
+                placeholder={t('modelRoutingPage.settings.plannerModelChainPlaceholder')}
               />
               <p className="mt-2 text-xs text-muted-foreground">
-                {t('aiRoutingPage.settings.plannerModelChainHint')}
+                {t('modelRoutingPage.settings.plannerModelChainHint')}
               </p>
             </div>
 
             <div className="flex justify-end">
               <Button onClick={() => saveSettingsMutation.mutate()} disabled={saveSettingsMutation.isPending}>
                 <Save className="mr-2 h-4 w-4" />
-                {t('aiRoutingPage.actions.saveSettings')}
+                {t('modelRoutingPage.actions.saveSettings')}
               </Button>
             </div>
           </CardContent>
@@ -566,13 +566,13 @@ export default function AiRouting() {
 
         <Card className="border-border/60">
           <CardHeader>
-            <CardTitle>{t('aiRoutingPage.versions.title')}</CardTitle>
-            <CardDescription>{t('aiRoutingPage.versions.description')}</CardDescription>
+            <CardTitle>{t('modelRoutingPage.versions.title')}</CardTitle>
+            <CardDescription>{t('modelRoutingPage.versions.description')}</CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
             {versions.length === 0 ? (
               <div className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
-                {t('aiRoutingPage.versions.empty')}
+                {t('modelRoutingPage.versions.empty')}
               </div>
             ) : (
               versions.map((version) => {
@@ -584,16 +584,16 @@ export default function AiRouting() {
                       <Badge variant="outline">{version.id.slice(0, 8)}</Badge>
                     </div>
                     <div className="text-sm text-muted-foreground">
-                      {reason?.trim() || t('aiRoutingPage.versions.noReason')}
+                      {reason?.trim() || t('modelRoutingPage.versions.noReason')}
                     </div>
                     <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
                       <span>
-                        {t('aiRoutingPage.versions.defaultSegments', {
+                        {t('modelRoutingPage.versions.defaultSegments', {
                           count: version.compiled_plan.default_route.length,
                         })}
                       </span>
                       <span>
-                        {t('aiRoutingPage.versions.policyCount', {
+                        {t('modelRoutingPage.versions.policyCount', {
                           count: version.compiled_plan.policies.length,
                         })}
                       </span>
@@ -609,13 +609,13 @@ export default function AiRouting() {
       <div className="mt-6 grid gap-6 xl:grid-cols-2">
         <Card className="border-border/60">
           <CardHeader>
-            <CardTitle>{t('aiRoutingPage.profiles.title')}</CardTitle>
-            <CardDescription>{t('aiRoutingPage.profiles.description')}</CardDescription>
+            <CardTitle>{t('modelRoutingPage.profiles.title')}</CardTitle>
+            <CardDescription>{t('modelRoutingPage.profiles.description')}</CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
             {profiles.length === 0 ? (
               <div className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
-                {t('aiRoutingPage.profiles.empty')}
+                {t('modelRoutingPage.profiles.empty')}
               </div>
             ) : (
               profiles.map((profile) => (
@@ -626,11 +626,11 @@ export default function AiRouting() {
                         <div className="font-medium">{profile.name}</div>
                         <Badge variant={profile.enabled ? 'success' : 'secondary'}>
                           {profile.enabled
-                            ? t('aiRoutingPage.status.enabled')
-                            : t('aiRoutingPage.status.disabled')}
+                            ? t('modelRoutingPage.status.enabled')
+                            : t('modelRoutingPage.status.disabled')}
                         </Badge>
                         <Badge variant="outline">
-                          {t('aiRoutingPage.common.priority', { value: profile.priority })}
+                          {t('modelRoutingPage.common.priority', { value: profile.priority })}
                         </Badge>
                       </div>
                       {profile.description ? (
@@ -643,7 +643,7 @@ export default function AiRouting() {
                     <div className="flex gap-2">
                       <Button variant="outline" size="sm" onClick={() => openEditProfileDialog(profile)}>
                         <SquarePen className="mr-2 h-4 w-4" />
-                        {t('aiRoutingPage.actions.edit')}
+                        {t('modelRoutingPage.actions.edit')}
                       </Button>
                       <Button
                         variant="outline"
@@ -651,7 +651,7 @@ export default function AiRouting() {
                         onClick={() => deleteProfileMutation.mutate(profile.id)}
                       >
                         <Trash2 className="mr-2 h-4 w-4" />
-                        {t('aiRoutingPage.actions.delete')}
+                        {t('modelRoutingPage.actions.delete')}
                       </Button>
                     </div>
                   </div>
@@ -663,7 +663,7 @@ export default function AiRouting() {
                           .join(' / ')}
                       </span>
                     ) : (
-                      <span>{t('aiRoutingPage.profiles.anyMode')}</span>
+                      <span>{t('modelRoutingPage.profiles.anyMode')}</span>
                     )}
                     {profile.selector.auth_providers.length > 0 ? (
                       <span>
@@ -681,13 +681,13 @@ export default function AiRouting() {
 
         <Card className="border-border/60">
           <CardHeader>
-            <CardTitle>{t('aiRoutingPage.policies.title')}</CardTitle>
-            <CardDescription>{t('aiRoutingPage.policies.description')}</CardDescription>
+            <CardTitle>{t('modelRoutingPage.policies.title')}</CardTitle>
+            <CardDescription>{t('modelRoutingPage.policies.description')}</CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
             {policies.length === 0 ? (
               <div className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
-                {t('aiRoutingPage.policies.empty')}
+                {t('modelRoutingPage.policies.empty')}
               </div>
             ) : (
               policies.map((policy) => (
@@ -698,23 +698,23 @@ export default function AiRouting() {
                         <div className="font-medium">{policy.name}</div>
                         <Badge variant={policy.enabled ? 'success' : 'secondary'}>
                           {policy.enabled
-                            ? t('aiRoutingPage.status.enabled')
-                            : t('aiRoutingPage.status.disabled')}
+                            ? t('modelRoutingPage.status.enabled')
+                            : t('modelRoutingPage.status.disabled')}
                         </Badge>
                         <Badge variant="outline">
-                          {t('aiRoutingPage.common.priority', { value: policy.priority })}
+                          {t('modelRoutingPage.common.priority', { value: policy.priority })}
                         </Badge>
                         <Badge variant="info">{policy.family}</Badge>
                       </div>
                       <div className="text-sm text-muted-foreground">
-                        {t('aiRoutingPage.policies.summary', {
+                        {t('modelRoutingPage.policies.summary', {
                           exact: policy.exact_models.length,
                           prefixes: policy.model_prefixes.length,
                           fallbacks: policy.fallback_profile_ids.length,
                         })}
                       </div>
                       <div className="text-sm text-muted-foreground">
-                        {t('aiRoutingPage.policies.fallbackChain', {
+                        {t('modelRoutingPage.policies.fallbackChain', {
                           value: fallbackProfileSummary(policy, profileNames, t),
                         })}
                       </div>
@@ -722,7 +722,7 @@ export default function AiRouting() {
                     <div className="flex gap-2">
                       <Button variant="outline" size="sm" onClick={() => openEditPolicyDialog(policy)}>
                         <SquarePen className="mr-2 h-4 w-4" />
-                        {t('aiRoutingPage.actions.edit')}
+                        {t('modelRoutingPage.actions.edit')}
                       </Button>
                       <Button
                         variant="outline"
@@ -730,7 +730,7 @@ export default function AiRouting() {
                         onClick={() => deletePolicyMutation.mutate(policy.id)}
                       >
                         <Trash2 className="mr-2 h-4 w-4" />
-                        {t('aiRoutingPage.actions.delete')}
+                        {t('modelRoutingPage.actions.delete')}
                       </Button>
                     </div>
                   </div>
@@ -742,7 +742,7 @@ export default function AiRouting() {
                     ))}
                     {policy.exact_models.length > 4 ? (
                       <Badge variant="secondary">
-                        {t('aiRoutingPage.policies.moreExactModels', {
+                        {t('modelRoutingPage.policies.moreExactModels', {
                           count: policy.exact_models.length - 4,
                         })}
                       </Badge>
@@ -760,14 +760,14 @@ export default function AiRouting() {
           <DialogHeader>
             <DialogTitle>
               {profileForm.id
-                ? t('aiRoutingPage.dialogs.editProfile')
-                : t('aiRoutingPage.dialogs.createProfile')}
+                ? t('modelRoutingPage.dialogs.editProfile')
+                : t('modelRoutingPage.dialogs.createProfile')}
             </DialogTitle>
-            <DialogDescription>{t('aiRoutingPage.dialogs.profileDescription')}</DialogDescription>
+            <DialogDescription>{t('modelRoutingPage.dialogs.profileDescription')}</DialogDescription>
           </DialogHeader>
           <div className="grid gap-4 md:grid-cols-2">
             <div className="space-y-2 md:col-span-2">
-              <label className="text-sm font-medium">{t('aiRoutingPage.form.name')}</label>
+              <label className="text-sm font-medium">{t('modelRoutingPage.form.name')}</label>
               <Input
                 value={profileForm.name}
                 onChange={(event) =>
@@ -776,7 +776,7 @@ export default function AiRouting() {
               />
             </div>
             <div className="space-y-2 md:col-span-2">
-              <label className="text-sm font-medium">{t('aiRoutingPage.form.description')}</label>
+              <label className="text-sm font-medium">{t('modelRoutingPage.form.description')}</label>
               <Textarea
                 value={profileForm.description}
                 onChange={(event) =>
@@ -786,7 +786,7 @@ export default function AiRouting() {
               />
             </div>
             <div className="space-y-2">
-              <label className="text-sm font-medium">{t('aiRoutingPage.form.priority')}</label>
+              <label className="text-sm font-medium">{t('modelRoutingPage.form.priority')}</label>
               <Input
                 type="number"
                 value={profileForm.priority}
@@ -798,9 +798,9 @@ export default function AiRouting() {
             <label className={POOL_SECTION_CLASS_NAME}>
               <div className="flex items-center justify-between gap-3">
                 <div>
-                  <div className="font-medium">{t('aiRoutingPage.form.enabled')}</div>
+                  <div className="font-medium">{t('modelRoutingPage.form.enabled')}</div>
                   <div className="text-sm text-muted-foreground">
-                    {t('aiRoutingPage.form.enabledHint')}
+                    {t('modelRoutingPage.form.enabledHint')}
                   </div>
                 </div>
                 <Checkbox
@@ -812,17 +812,17 @@ export default function AiRouting() {
               </div>
             </label>
             <div className="space-y-2 md:col-span-2">
-              <label className="text-sm font-medium">{t('aiRoutingPage.form.planTypes')}</label>
+              <label className="text-sm font-medium">{t('modelRoutingPage.form.planTypes')}</label>
               <Input
                 value={profileForm.planTypes}
                 onChange={(event) =>
                   setProfileForm((prev) => ({ ...prev, planTypes: event.target.value }))
                 }
-                placeholder={t('aiRoutingPage.form.planTypesPlaceholder')}
+                placeholder={t('modelRoutingPage.form.planTypesPlaceholder')}
               />
             </div>
             <div className="space-y-2">
-              <div className="text-sm font-medium">{t('aiRoutingPage.form.modes')}</div>
+              <div className="text-sm font-medium">{t('modelRoutingPage.form.modes')}</div>
               <div className="space-y-2 rounded-lg border p-3">
                 {modeOptions.map((mode) => (
                   <label key={mode} className="flex items-center justify-between gap-3 text-sm">
@@ -841,7 +841,7 @@ export default function AiRouting() {
               </div>
             </div>
             <div className="space-y-2">
-              <div className="text-sm font-medium">{t('aiRoutingPage.form.authProviders')}</div>
+              <div className="text-sm font-medium">{t('modelRoutingPage.form.authProviders')}</div>
               <div className="space-y-2 rounded-lg border p-3">
                 {authProviderOptions.map((provider) => (
                   <label key={provider} className="flex items-center justify-between gap-3 text-sm">
@@ -860,7 +860,7 @@ export default function AiRouting() {
               </div>
             </div>
             <div className="space-y-2">
-              <label className="text-sm font-medium">{t('aiRoutingPage.form.includeAccounts')}</label>
+              <label className="text-sm font-medium">{t('modelRoutingPage.form.includeAccounts')}</label>
               <Textarea
                 value={profileForm.includeAccountIds}
                 onChange={(event) =>
@@ -870,11 +870,11 @@ export default function AiRouting() {
                   }))
                 }
                 rows={4}
-                placeholder={t('aiRoutingPage.form.includeAccountsPlaceholder')}
+                placeholder={t('modelRoutingPage.form.includeAccountsPlaceholder')}
               />
             </div>
             <div className="space-y-2">
-              <label className="text-sm font-medium">{t('aiRoutingPage.form.excludeAccounts')}</label>
+              <label className="text-sm font-medium">{t('modelRoutingPage.form.excludeAccounts')}</label>
               <Textarea
                 value={profileForm.excludeAccountIds}
                 onChange={(event) =>
@@ -884,7 +884,7 @@ export default function AiRouting() {
                   }))
                 }
                 rows={4}
-                placeholder={t('aiRoutingPage.form.excludeAccountsPlaceholder')}
+                placeholder={t('modelRoutingPage.form.excludeAccountsPlaceholder')}
               />
             </div>
           </div>
@@ -896,14 +896,14 @@ export default function AiRouting() {
                 disabled={deleteProfileMutation.isPending}
               >
                 <Trash2 className="mr-2 h-4 w-4" />
-                {t('aiRoutingPage.actions.deleteProfile')}
+                {t('modelRoutingPage.actions.deleteProfile')}
               </Button>
             ) : (
               <div />
             )}
             <Button onClick={() => upsertProfileMutation.mutate()} disabled={upsertProfileMutation.isPending}>
               <Save className="mr-2 h-4 w-4" />
-              {t('aiRoutingPage.actions.saveProfile')}
+              {t('modelRoutingPage.actions.saveProfile')}
             </Button>
           </div>
         </DialogContent>
@@ -914,14 +914,14 @@ export default function AiRouting() {
           <DialogHeader>
             <DialogTitle>
               {policyForm.id
-                ? t('aiRoutingPage.dialogs.editPolicy')
-                : t('aiRoutingPage.dialogs.createPolicy')}
+                ? t('modelRoutingPage.dialogs.editPolicy')
+                : t('modelRoutingPage.dialogs.createPolicy')}
             </DialogTitle>
-            <DialogDescription>{t('aiRoutingPage.dialogs.policyDescription')}</DialogDescription>
+            <DialogDescription>{t('modelRoutingPage.dialogs.policyDescription')}</DialogDescription>
           </DialogHeader>
           <div className="grid gap-4 md:grid-cols-2">
             <div className="space-y-2">
-              <label className="text-sm font-medium">{t('aiRoutingPage.form.name')}</label>
+              <label className="text-sm font-medium">{t('modelRoutingPage.form.name')}</label>
               <Input
                 value={policyForm.name}
                 onChange={(event) =>
@@ -930,17 +930,17 @@ export default function AiRouting() {
               />
             </div>
             <div className="space-y-2">
-              <label className="text-sm font-medium">{t('aiRoutingPage.form.family')}</label>
+              <label className="text-sm font-medium">{t('modelRoutingPage.form.family')}</label>
               <Input
                 value={policyForm.family}
                 onChange={(event) =>
                   setPolicyForm((prev) => ({ ...prev, family: event.target.value }))
                 }
-                placeholder={t('aiRoutingPage.form.familyPlaceholder')}
+                placeholder={t('modelRoutingPage.form.familyPlaceholder')}
               />
             </div>
             <div className="space-y-2">
-              <label className="text-sm font-medium">{t('aiRoutingPage.form.priority')}</label>
+              <label className="text-sm font-medium">{t('modelRoutingPage.form.priority')}</label>
               <Input
                 type="number"
                 value={policyForm.priority}
@@ -952,9 +952,9 @@ export default function AiRouting() {
             <label className={POOL_SECTION_CLASS_NAME}>
               <div className="flex items-center justify-between gap-3">
                 <div>
-                  <div className="font-medium">{t('aiRoutingPage.form.enabled')}</div>
+                  <div className="font-medium">{t('modelRoutingPage.form.enabled')}</div>
                   <div className="text-sm text-muted-foreground">
-                    {t('aiRoutingPage.form.policyEnabledHint')}
+                    {t('modelRoutingPage.form.policyEnabledHint')}
                   </div>
                 </div>
                 <Checkbox
@@ -966,33 +966,33 @@ export default function AiRouting() {
               </div>
             </label>
             <div className="space-y-2">
-              <label className="text-sm font-medium">{t('aiRoutingPage.form.exactModels')}</label>
+              <label className="text-sm font-medium">{t('modelRoutingPage.form.exactModels')}</label>
               <Textarea
                 value={policyForm.exactModels}
                 onChange={(event) =>
                   setPolicyForm((prev) => ({ ...prev, exactModels: event.target.value }))
                 }
                 rows={4}
-                placeholder={t('aiRoutingPage.form.exactModelsPlaceholder')}
+                placeholder={t('modelRoutingPage.form.exactModelsPlaceholder')}
               />
             </div>
             <div className="space-y-2">
-              <label className="text-sm font-medium">{t('aiRoutingPage.form.modelPrefixes')}</label>
+              <label className="text-sm font-medium">{t('modelRoutingPage.form.modelPrefixes')}</label>
               <Textarea
                 value={policyForm.modelPrefixes}
                 onChange={(event) =>
                   setPolicyForm((prev) => ({ ...prev, modelPrefixes: event.target.value }))
                 }
                 rows={4}
-                placeholder={t('aiRoutingPage.form.modelPrefixesPlaceholder')}
+                placeholder={t('modelRoutingPage.form.modelPrefixesPlaceholder')}
               />
             </div>
             <div className="space-y-2 md:col-span-2">
-              <div className="text-sm font-medium">{t('aiRoutingPage.form.fallbackProfiles')}</div>
+              <div className="text-sm font-medium">{t('modelRoutingPage.form.fallbackProfiles')}</div>
               <div className="space-y-2 rounded-lg border p-3">
                 {profiles.length === 0 ? (
                   <div className="text-sm text-muted-foreground">
-                    {t('aiRoutingPage.form.noProfilesAvailable')}
+                    {t('modelRoutingPage.form.noProfilesAvailable')}
                   </div>
                 ) : (
                   profiles.map((profile) => (
@@ -1021,14 +1021,14 @@ export default function AiRouting() {
                 disabled={deletePolicyMutation.isPending}
               >
                 <Trash2 className="mr-2 h-4 w-4" />
-                {t('aiRoutingPage.actions.deletePolicy')}
+                {t('modelRoutingPage.actions.deletePolicy')}
               </Button>
             ) : (
               <div />
             )}
             <Button onClick={() => upsertPolicyMutation.mutate()} disabled={upsertPolicyMutation.isPending}>
               <Save className="mr-2 h-4 w-4" />
-              {t('aiRoutingPage.actions.savePolicy')}
+              {t('modelRoutingPage.actions.savePolicy')}
             </Button>
           </div>
         </DialogContent>

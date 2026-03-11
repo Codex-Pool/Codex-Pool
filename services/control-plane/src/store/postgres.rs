@@ -9,11 +9,11 @@ use codex_pool_core::api::{
     OAuthRateLimitRefreshJobSummary, OAuthRateLimitSnapshot, OAuthRefreshStatus,
     SessionCredentialKind, UpsertModelRoutingPolicyRequest, UpsertRetryPolicyRequest,
     UpsertRoutingPolicyRequest, UpsertRoutingProfileRequest, UpsertStreamRetryPolicyRequest,
-    UpdateAiRoutingSettingsRequest, ValidateOAuthRefreshTokenRequest,
+    UpdateModelRoutingSettingsRequest, ValidateOAuthRefreshTokenRequest,
     ValidateOAuthRefreshTokenResponse,
 };
 use codex_pool_core::model::{
-    AccountRoutingTraits, AiRoutingSettings, AiRoutingTriggerMode, ApiKey,
+    AccountRoutingTraits, ApiKey, ModelRoutingSettings, ModelRoutingTriggerMode,
     CompiledModelRoutingPolicy, CompiledRoutingPlan, CompiledRoutingProfile,
     ModelRoutingPolicy, RoutingPlanVersion, RoutingPolicy, RoutingProfile, RoutingProfileSelector,
     RoutingStrategy, Tenant, UpstreamAccount, UpstreamAuthProvider, UpstreamMode,

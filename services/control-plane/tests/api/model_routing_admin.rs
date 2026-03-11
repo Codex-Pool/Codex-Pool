@@ -1,5 +1,5 @@
 #[tokio::test]
-async fn admin_ai_routing_management_endpoints_work() {
+async fn admin_model_routing_management_endpoints_work() {
     let app = build_app();
     let admin_token = login_admin_token(&app).await;
 
@@ -8,7 +8,7 @@ async fn admin_ai_routing_management_endpoints_work() {
         .oneshot(
             Request::builder()
                 .method("GET")
-                .uri("/api/v1/admin/ai-routing/settings")
+                .uri("/api/v1/admin/model-routing/settings")
                 .header("authorization", format!("Bearer {admin_token}"))
                 .body(Body::empty())
                 .unwrap(),
@@ -30,7 +30,7 @@ async fn admin_ai_routing_management_endpoints_work() {
         .oneshot(
             Request::builder()
                 .method("GET")
-                .uri("/api/v1/admin/ai-routing/profiles")
+                .uri("/api/v1/admin/model-routing/profiles")
                 .header("authorization", format!("Bearer {admin_token}"))
                 .body(Body::empty())
                 .unwrap(),
@@ -54,7 +54,7 @@ async fn admin_ai_routing_management_endpoints_work() {
         .oneshot(
             Request::builder()
                 .method("POST")
-                .uri("/api/v1/admin/ai-routing/profiles")
+                .uri("/api/v1/admin/model-routing/profiles")
                 .header("authorization", format!("Bearer {admin_token}"))
                 .header("content-type", "application/json")
                 .body(Body::from(
@@ -89,7 +89,7 @@ async fn admin_ai_routing_management_endpoints_work() {
         .oneshot(
             Request::builder()
                 .method("POST")
-                .uri("/api/v1/admin/ai-routing/model-policies")
+                .uri("/api/v1/admin/model-routing/model-policies")
                 .header("authorization", format!("Bearer {admin_token}"))
                 .header("content-type", "application/json")
                 .body(Body::from(
@@ -121,7 +121,7 @@ async fn admin_ai_routing_management_endpoints_work() {
         .oneshot(
             Request::builder()
                 .method("PUT")
-                .uri("/api/v1/admin/ai-routing/settings")
+                .uri("/api/v1/admin/model-routing/settings")
                 .header("authorization", format!("Bearer {admin_token}"))
                 .header("content-type", "application/json")
                 .body(Body::from(
@@ -153,7 +153,7 @@ async fn admin_ai_routing_management_endpoints_work() {
         .oneshot(
             Request::builder()
                 .method("GET")
-                .uri("/api/v1/admin/ai-routing/model-policies")
+                .uri("/api/v1/admin/model-routing/model-policies")
                 .header("authorization", format!("Bearer {admin_token}"))
                 .body(Body::empty())
                 .unwrap(),
@@ -172,7 +172,7 @@ async fn admin_ai_routing_management_endpoints_work() {
         .oneshot(
             Request::builder()
                 .method("GET")
-                .uri("/api/v1/admin/ai-routing/versions")
+                .uri("/api/v1/admin/model-routing/versions")
                 .header("authorization", format!("Bearer {admin_token}"))
                 .body(Body::empty())
                 .unwrap(),
@@ -197,7 +197,7 @@ async fn admin_ai_routing_management_endpoints_work() {
             Request::builder()
                 .method("DELETE")
                 .uri(format!(
-                    "/api/v1/admin/ai-routing/model-policies/{policy_id}"
+                    "/api/v1/admin/model-routing/model-policies/{policy_id}"
                 ))
                 .header("authorization", format!("Bearer {admin_token}"))
                 .body(Body::empty())
@@ -212,7 +212,7 @@ async fn admin_ai_routing_management_endpoints_work() {
             Request::builder()
                 .method("DELETE")
                 .uri(format!(
-                    "/api/v1/admin/ai-routing/profiles/{profile_id}"
+                    "/api/v1/admin/model-routing/profiles/{profile_id}"
                 ))
                 .header("authorization", format!("Bearer {admin_token}"))
                 .body(Body::empty())
