@@ -262,6 +262,12 @@ pub trait ControlPlaneStore: Send + Sync {
     ) -> Result<bool> {
         Ok(false)
     }
+    async fn maybe_refresh_oauth_rate_limit_cache_on_seen_ok(
+        &self,
+        _account_id: Uuid,
+    ) -> Result<()> {
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone)]

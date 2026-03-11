@@ -642,6 +642,97 @@ impl PostgresStore {
         })
     }
 
+    async fn maybe_refresh_oauth_rate_limit_cache_on_seen_ok_inner(
+        &self,
+        account_id: Uuid,
+    ) -> Result<()> {
+        let now = Utc::now();
+        let row = sqlx::query(
+            r#"
+            SELECT
+                a.id,
+                a.base_url,
+                a.chatgpt_account_id,
+                c.access_token_enc,
+                c.token_expires_at,
+                c.last_refresh_status,
+                c.refresh_reused_detected,
+                c.last_refresh_error_code,
+                rl.expires_at AS rate_limits_expires_at,
+                rl.last_error_code AS rate_limits_last_error_code,
+                rl.last_error_message AS rate_limits_last_error
+            FROM upstream_accounts a
+            INNER JOIN upstream_account_oauth_credentials c ON c.account_id = a.id
+            LEFT JOIN upstream_account_rate_limit_snapshots rl ON rl.account_id = a.id
+            WHERE
+                a.id = $1
+                AND a.auth_provider = $2
+                AND a.pool_state = $3
+                AND a.enabled = true
+            "#,
+        )
+        .bind(account_id)
+        .bind(AUTH_PROVIDER_OAUTH_REFRESH_TOKEN)
+        .bind(POOL_STATE_ACTIVE)
+        .fetch_optional(&self.pool)
+        .await
+        .context("failed to load seen_ok oauth rate-limit refresh target")?;
+
+        let Some(row) = row else {
+            return Ok(());
+        };
+
+        let token_expires_at = row.try_get::<Option<DateTime<Utc>>, _>("token_expires_at")?;
+        let refresh_reused_detected = row
+            .try_get::<Option<bool>, _>("refresh_reused_detected")?
+            .unwrap_or(false);
+        let last_refresh_status = parse_oauth_refresh_status(
+            row.try_get::<Option<String>, _>("last_refresh_status")?
+                .unwrap_or_else(|| "never".to_string())
+                .as_str(),
+        )?;
+        let last_refresh_error_code = row.try_get::<Option<String>, _>("last_refresh_error_code")?;
+        let rate_limits_expires_at =
+            row.try_get::<Option<DateTime<Utc>>, _>("rate_limits_expires_at")?;
+        let rate_limits_last_error_code =
+            row.try_get::<Option<String>, _>("rate_limits_last_error_code")?;
+        let rate_limits_last_error = row.try_get::<Option<String>, _>("rate_limits_last_error")?;
+        if !should_refresh_rate_limit_cache_on_seen_ok(
+            now,
+            token_expires_at,
+            &last_refresh_status,
+            refresh_reused_detected,
+            last_refresh_error_code.as_deref(),
+            rate_limits_expires_at,
+            rate_limits_last_error_code.as_deref(),
+            rate_limits_last_error.as_deref(),
+        ) {
+            return Ok(());
+        }
+
+        let target = RateLimitRefreshTarget {
+            account_id,
+            base_url: row.try_get::<String, _>("base_url")?,
+            chatgpt_account_id: row.try_get::<Option<String>, _>("chatgpt_account_id")?,
+            access_token_enc: row.try_get::<Option<String>, _>("access_token_enc")?,
+        };
+
+        let stats = self
+            .refresh_rate_limit_targets_batch(vec![target], 1)
+            .await;
+        if stats.failed > 0 {
+            tracing::warn!(
+                account_id = %account_id,
+                success = stats.success,
+                failed = stats.failed,
+                error_counts = ?stats.error_counts,
+                "seen_ok-triggered oauth rate-limit refresh completed with failures"
+            );
+        }
+
+        Ok(())
+    }
+
     async fn try_refresh_oauth_account_after_rate_limit_failure(&self, account_id: Uuid) -> bool {
         match self.refresh_oauth_account_inner(account_id, true).await {
             Ok(status) => matches!(status.last_refresh_status, OAuthRefreshStatus::Ok),

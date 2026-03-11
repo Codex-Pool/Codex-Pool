@@ -200,6 +200,44 @@ fn should_trigger_refresh_after_rate_limit_failure(error_code: &str, error_messa
         )
 }
 
+fn should_refresh_rate_limit_cache_on_seen_ok(
+    now: DateTime<Utc>,
+    token_expires_at: Option<DateTime<Utc>>,
+    last_refresh_status: &OAuthRefreshStatus,
+    refresh_reused_detected: bool,
+    last_refresh_error_code: Option<&str>,
+    rate_limits_expires_at: Option<DateTime<Utc>>,
+    rate_limits_last_error_code: Option<&str>,
+    rate_limits_last_error: Option<&str>,
+) -> bool {
+    if !token_expires_at.is_some_and(|expires_at| {
+        expires_at > now + Duration::seconds(OAUTH_MIN_VALID_SEC)
+    }) {
+        return false;
+    }
+    if refresh_reused_detected {
+        return false;
+    }
+    if matches!(last_refresh_status, OAuthRefreshStatus::Failed)
+        && is_fatal_refresh_error_code(last_refresh_error_code)
+    {
+        return false;
+    }
+
+    if has_active_rate_limit_block(
+        now,
+        rate_limits_expires_at,
+        rate_limits_last_error_code,
+        rate_limits_last_error,
+    ) {
+        return true;
+    }
+
+    // Fresh cache should not suppress `seen_ok`-triggered refresh: a live successful request is a
+    // stronger signal than cache age, so in-use accounts get a best-effort wham refresh.
+    true
+}
+
 #[allow(clippy::too_many_arguments)]
 fn oauth_effective_enabled(
     enabled: bool,
@@ -482,5 +520,52 @@ impl ControlPlaneStore for PostgresStore {
     ) -> Result<bool> {
         self.mark_account_seen_ok_inner(account_id, seen_ok_at, min_write_interval_sec)
             .await
+    }
+
+    async fn maybe_refresh_oauth_rate_limit_cache_on_seen_ok(
+        &self,
+        account_id: Uuid,
+    ) -> Result<()> {
+        self.maybe_refresh_oauth_rate_limit_cache_on_seen_ok_inner(account_id)
+            .await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::should_refresh_rate_limit_cache_on_seen_ok;
+    use chrono::{Duration, Utc};
+    use codex_pool_core::api::OAuthRefreshStatus;
+
+    #[test]
+    fn seen_ok_refresh_policy_does_not_skip_fresh_cache() {
+        let now = Utc::now();
+        let should_refresh = should_refresh_rate_limit_cache_on_seen_ok(
+            now,
+            Some(now + Duration::minutes(30)),
+            &OAuthRefreshStatus::Ok,
+            false,
+            None,
+            Some(now + Duration::minutes(3)),
+            None,
+            None,
+        );
+        assert!(should_refresh);
+    }
+
+    #[test]
+    fn seen_ok_refresh_policy_still_blocks_fatal_refresh_failures() {
+        let now = Utc::now();
+        let should_refresh = should_refresh_rate_limit_cache_on_seen_ok(
+            now,
+            Some(now + Duration::minutes(30)),
+            &OAuthRefreshStatus::Failed,
+            false,
+            Some("refresh_token_revoked"),
+            Some(now + Duration::minutes(3)),
+            None,
+            None,
+        );
+        assert!(!should_refresh);
     }
 }

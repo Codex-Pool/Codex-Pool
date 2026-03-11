@@ -5,6 +5,9 @@ const DEFAULT_UPSTREAM_HEALTH_ALIVE_RING_SIZE: usize = 5_000;
 const UPSTREAM_SEEN_OK_MIN_WRITE_INTERVAL_SEC_ENV: &str =
     "CONTROL_PLANE_UPSTREAM_SEEN_OK_MIN_WRITE_INTERVAL_SEC";
 const DEFAULT_UPSTREAM_SEEN_OK_MIN_WRITE_INTERVAL_SEC: i64 = 10;
+const UPSTREAM_SEEN_OK_RATE_LIMIT_REFRESH_ENABLED_ENV: &str =
+    "CONTROL_PLANE_UPSTREAM_SEEN_OK_RATE_LIMIT_REFRESH_ENABLED";
+const DEFAULT_UPSTREAM_SEEN_OK_RATE_LIMIT_REFRESH_ENABLED: bool = true;
 
 #[derive(Clone)]
 struct UpstreamAliveRingClient {
@@ -79,6 +82,16 @@ fn upstream_seen_ok_min_write_interval_sec_from_env() -> i64 {
         .clamp(0, 3600)
 }
 
+// `seen_ok` 触发的是“账号刚刚成功服务过流量”的被动刷新，只补当前 in-use 账号；
+// 它和全池定时 sweep 是两个独立概念，所以必须有单独开关，避免误以为关掉 sweep
+// 就等于不需要 in-use 自动刷新。
+fn upstream_seen_ok_rate_limit_refresh_enabled_from_env() -> bool {
+    std::env::var(UPSTREAM_SEEN_OK_RATE_LIMIT_REFRESH_ENABLED_ENV)
+        .ok()
+        .and_then(|raw| parse_bool_flag(&raw))
+        .unwrap_or(DEFAULT_UPSTREAM_SEEN_OK_RATE_LIMIT_REFRESH_ENABLED)
+}
+
 #[derive(Debug, Deserialize)]
 struct InternalModelSeenOkRequest {
     model: String,
@@ -130,6 +143,21 @@ async fn internal_mark_upstream_account_seen_ok(
                     "failed to push seen_ok account into alive ring"
                 );
             }
+        }
+        if upstream_seen_ok_rate_limit_refresh_enabled_from_env() {
+            let store = state.store.clone();
+            tokio::spawn(async move {
+                if let Err(err) = store
+                    .maybe_refresh_oauth_rate_limit_cache_on_seen_ok(account_id)
+                    .await
+                {
+                    tracing::warn!(
+                        error = %err,
+                        account_id = %account_id,
+                        "failed to refresh oauth rate-limit cache after seen_ok"
+                    );
+                }
+            });
         }
     }
 

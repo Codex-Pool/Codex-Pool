@@ -74,6 +74,7 @@ struct RateLimitApiTestStore {
     statuses: Arc<Mutex<HashMap<Uuid, OAuthAccountStatusResponse>>>,
     jobs: Arc<Mutex<HashMap<Uuid, OAuthRateLimitRefreshJobSummary>>>,
     run_calls: Arc<AtomicUsize>,
+    seen_ok_refresh_calls: Arc<AtomicUsize>,
 }
 
 impl Default for RateLimitApiTestStore {
@@ -83,6 +84,7 @@ impl Default for RateLimitApiTestStore {
             statuses: Arc::new(Mutex::new(HashMap::new())),
             jobs: Arc::new(Mutex::new(HashMap::new())),
             run_calls: Arc::new(AtomicUsize::new(0)),
+            seen_ok_refresh_calls: Arc::new(AtomicUsize::new(0)),
         }
     }
 }
@@ -96,11 +98,16 @@ impl RateLimitApiTestStore {
             statuses: Arc::new(Mutex::new(statuses)),
             jobs: Arc::new(Mutex::new(HashMap::new())),
             run_calls: Arc::new(AtomicUsize::new(0)),
+            seen_ok_refresh_calls: Arc::new(AtomicUsize::new(0)),
         }
     }
 
     fn run_call_count(&self) -> usize {
         self.run_calls.load(Ordering::Relaxed)
+    }
+
+    fn seen_ok_refresh_call_count(&self) -> usize {
+        self.seen_ok_refresh_calls.load(Ordering::Relaxed)
     }
 }
 
@@ -226,6 +233,25 @@ impl ControlPlaneStore for RateLimitApiTestStore {
             summary.throughput_per_min = Some(60.0);
         }
         Ok(())
+    }
+
+    async fn maybe_refresh_oauth_rate_limit_cache_on_seen_ok(
+        &self,
+        _account_id: Uuid,
+    ) -> anyhow::Result<()> {
+        self.seen_ok_refresh_calls.fetch_add(1, Ordering::Relaxed);
+        Ok(())
+    }
+
+    async fn mark_account_seen_ok(
+        &self,
+        account_id: Uuid,
+        seen_ok_at: chrono::DateTime<chrono::Utc>,
+        min_write_interval_sec: i64,
+    ) -> anyhow::Result<bool> {
+        self.inner
+            .mark_account_seen_ok(account_id, seen_ok_at, min_write_interval_sec)
+            .await
     }
 
     async fn snapshot(&self) -> anyhow::Result<DataPlaneSnapshot> {

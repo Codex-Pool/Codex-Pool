@@ -467,8 +467,8 @@ async fn oauth_family_disable_and_enable_routes_work() {
 
 #[tokio::test]
 async fn internal_seen_ok_route_requires_internal_token_and_is_idempotent() {
-    let store = InMemoryStore::default();
-    let app = build_app_with_store(Arc::new(store));
+    let store = Arc::new(RateLimitApiTestStore::default());
+    let app = build_app_with_store(store.clone());
     let admin_token = login_admin_token(&app).await;
 
     let create_response = app
@@ -538,6 +538,8 @@ async fn internal_seen_ok_route_requires_internal_token_and_is_idempotent() {
     let first_json: Value = serde_json::from_slice(&first_body).unwrap();
     assert_eq!(first_json["ok"], true);
     assert_eq!(first_json["accepted"], true);
+    sleep(Duration::from_millis(50)).await;
+    assert_eq!(store.seen_ok_refresh_call_count(), 1);
 
     let second = app
         .oneshot(
@@ -560,6 +562,8 @@ async fn internal_seen_ok_route_requires_internal_token_and_is_idempotent() {
     let second_json: Value = serde_json::from_slice(&second_body).unwrap();
     assert_eq!(second_json["ok"], true);
     assert_eq!(second_json["accepted"], false);
+    sleep(Duration::from_millis(50)).await;
+    assert_eq!(store.seen_ok_refresh_call_count(), 1);
 }
 
 #[tokio::test]

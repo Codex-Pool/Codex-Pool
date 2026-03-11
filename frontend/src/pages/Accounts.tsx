@@ -120,6 +120,7 @@ export default function Accounts() {
     queryFn: accountsApi.listAccounts,
     staleTime: 180000,
     refetchInterval: 180000,
+    refetchOnWindowFocus: 'always',
   })
 
   const oauthAccountIds = useMemo(
@@ -138,6 +139,7 @@ export default function Accounts() {
     enabled: oauthAccountIds.length > 0,
     staleTime: 180000,
     refetchInterval: 180000,
+    refetchOnWindowFocus: 'always',
     retry: false,
   })
 
