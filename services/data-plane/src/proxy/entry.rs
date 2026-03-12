@@ -970,18 +970,7 @@ pub async fn proxy_handler(
                         Some(started.elapsed().as_millis() as u64),
                     )
                     .await;
-                    if let Some(seen_ok_reporter) = state.seen_ok_reporter.clone() {
-                        let account_id = account.id;
-                        let model_id = parsed_policy_context.model.clone();
-                        tokio::spawn(async move {
-                            seen_ok_reporter.report_seen_ok(account_id).await;
-                            if let Some(model_id) = model_id.as_deref() {
-                                seen_ok_reporter
-                                    .report_model_seen_ok(account_id, model_id)
-                                    .await;
-                            }
-                        });
-                    }
+                    spawn_seen_ok_reports(&state, account.id, parsed_policy_context.model.clone());
                     record_failover_success_if_needed(&state, did_cross_account_failover);
                     return response;
                 }
@@ -1186,6 +1175,11 @@ pub async fn proxy_handler(
                                 .stream_protocol_header_missing_total
                                 .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                         }
+                        spawn_seen_ok_reports(
+                            &state,
+                            account.id,
+                            parsed_policy_context.model.clone(),
+                        );
                         record_failover_success_if_needed(&state, did_cross_account_failover);
                         return response;
                     }
@@ -1575,18 +1569,7 @@ pub async fn proxy_handler(
                     (!is_stream).then_some(started.elapsed().as_millis() as u64),
                 )
                 .await;
-                if let Some(seen_ok_reporter) = state.seen_ok_reporter.clone() {
-                    let account_id = account.id;
-                    let model_id = parsed_policy_context.model.clone();
-                    tokio::spawn(async move {
-                        seen_ok_reporter.report_seen_ok(account_id).await;
-                        if let Some(model_id) = model_id.as_deref() {
-                            seen_ok_reporter
-                                .report_model_seen_ok(account_id, model_id)
-                                .await;
-                        }
-                    });
-                }
+                spawn_seen_ok_reports(&state, account.id, parsed_policy_context.model.clone());
                 record_failover_success_if_needed(&state, did_cross_account_failover);
                 return response;
             }
@@ -2289,12 +2272,7 @@ pub async fn proxy_websocket_handler(
                 requested_subprotocol: requested_subprotocol.clone(),
                 sticky_key: sticky_key.clone(),
             };
-            if let Some(seen_ok_reporter) = state.seen_ok_reporter.clone() {
-                let account_id = account.id;
-                tokio::spawn(async move {
-                    seen_ok_reporter.report_seen_ok(account_id).await;
-                });
-            }
+            spawn_seen_ok_reports(&state, account.id, None);
             record_failover_success_if_needed(&state, did_cross_account_failover);
             return ws_upgrade.on_upgrade(move |downstream_socket| async move {
                 if let Err(err) = proxy_websocket_streams(
@@ -2324,6 +2302,19 @@ pub async fn proxy_websocket_handler(
                 }
             });
         }
+    }
+}
+
+fn spawn_seen_ok_reports(state: &Arc<AppState>, account_id: Uuid, model_id: Option<String>) {
+    if let Some(seen_ok_reporter) = state.seen_ok_reporter.clone() {
+        tokio::spawn(async move {
+            seen_ok_reporter.report_seen_ok(account_id).await;
+            if let Some(model_id) = model_id.as_deref() {
+                seen_ok_reporter
+                    .report_model_seen_ok(account_id, model_id)
+                    .await;
+            }
+        });
     }
 }
 

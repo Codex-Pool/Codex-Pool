@@ -1004,6 +1004,147 @@ async fn stream_request_with_plain_json_line_still_captures_billing_usage() {
 }
 
 #[tokio::test]
+async fn stream_success_reports_seen_ok_to_control_plane() {
+    let upstream = MockServer::start().await;
+    let sse_payload = concat!(
+        "event: response.output_text.delta\n",
+        "data: {\"type\":\"response.output_text.delta\",\"delta\":\"OK\"}\n\n",
+        "event: response.completed\n",
+        "data: {\"type\":\"response.completed\",\"response\":{\"usage\":{\"input_tokens\":9,\"cached_input_tokens\":0,\"output_tokens\":2,\"reasoning_tokens\":0}}}\n\n",
+    );
+
+    Mock::given(method("POST"))
+        .and(path("/v1/responses"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(sse_payload, "text/event-stream"))
+        .mount(&upstream)
+        .await;
+
+    let control_plane = MockServer::start().await;
+    let account = test_account(upstream.uri(), "upstream-token");
+    let seen_ok_path = format!(
+        "/internal/v1/upstream-accounts/{}/health/seen-ok",
+        account.id
+    );
+    let model_seen_ok_path = format!(
+        "/internal/v1/upstream-accounts/{}/models/seen-ok",
+        account.id
+    );
+
+    Mock::given(method("POST"))
+        .and(path("/internal/v1/auth/validate"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "tenant_id": Uuid::new_v4(),
+            "api_key_id": Uuid::new_v4(),
+            "enabled": true,
+            "tenant_status": "active",
+            "balance_microcredits": 1_000_000,
+            "cache_ttl_sec": 30
+        })))
+        .mount(&control_plane)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/internal/v1/billing/authorize"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "authorization_id": Uuid::new_v4(),
+            "status": "authorized",
+            "reserved_microcredits": 2_000_000
+        })))
+        .mount(&control_plane)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/internal/v1/billing/capture"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "status": "captured"
+        })))
+        .mount(&control_plane)
+        .await;
+    Mock::given(method("POST"))
+        .and(path(seen_ok_path.clone()))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "ok": true,
+            "accepted": true,
+            "account_id": account.id,
+            "seen_ok_at": chrono::Utc::now(),
+        })))
+        .mount(&control_plane)
+        .await;
+    Mock::given(method("POST"))
+        .and(path(model_seen_ok_path.clone()))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "ok": true,
+            "accepted": true,
+            "account_id": account.id,
+            "model": "gpt-5.4",
+            "seen_ok_at": chrono::Utc::now(),
+        })))
+        .mount(&control_plane)
+        .await;
+
+    let app = test_app_with_failover_wait_and_control_plane(
+        vec![account.clone()],
+        2_000,
+        Some(control_plane.uri()),
+    )
+    .await;
+
+    let request_body = json!({
+        "model": "gpt-5.4",
+        "stream": true,
+        "instructions": "You are helpful",
+        "input": [{
+            "role": "user",
+            "content": [{
+                "type": "input_text",
+                "text": "ping"
+            }]
+        }]
+    });
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/responses")
+                .header("authorization", "Bearer cp_identity")
+                .header("content-type", "application/json")
+                .body(Body::from(request_body.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let bytes = response.into_body().collect().await.unwrap().to_bytes();
+    assert_eq!(bytes.as_ref(), sse_payload.as_bytes());
+
+    let mut seen_ok_count = 0;
+    let mut model_seen_ok_count = 0;
+    let mut last_paths = Vec::new();
+    for _ in 0..100 {
+        let requests = control_plane.received_requests().await.unwrap();
+        last_paths = requests
+            .iter()
+            .map(|request| request.url.path().to_string())
+            .collect();
+        seen_ok_count = requests
+            .iter()
+            .filter(|request| request.url.path() == seen_ok_path)
+            .count();
+        model_seen_ok_count = requests
+            .iter()
+            .filter(|request| request.url.path() == model_seen_ok_path)
+            .count();
+        if seen_ok_count >= 1 && model_seen_ok_count >= 1 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+
+    assert_eq!(seen_ok_count, 1, "paths={last_paths:?}");
+    assert_eq!(model_seen_ok_count, 1, "paths={last_paths:?}");
+}
+
+#[tokio::test]
 async fn stream_request_without_usage_estimates_tokens_for_billing_capture() {
     let upstream = MockServer::start().await;
     let sse_payload = concat!(
