@@ -175,7 +175,9 @@ async fn validate_api_key(
         },
         tenant_status: principal.tenant_status,
         tenant_expires_at: principal.tenant_expires_at,
-        balance_microcredits: principal.balance_microcredits,
+        balance_microcredits: state
+            .system_capabilities
+            .visible_balance_microcredits(principal.balance_microcredits),
         cache_ttl_sec: state.auth_validate_cache_ttl_sec,
     }))
 }

@@ -2,6 +2,7 @@ use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 
 use chrono::Utc;
+use codex_pool_core::api::ProductEdition;
 use codex_pool_core::model::{RoutingStrategy, UpstreamAccount};
 use serde::Deserialize;
 use uuid::Uuid;
@@ -89,6 +90,7 @@ const MIN_BILLING_CAPTURE_RETRY_BACKOFF_MS: u64 = 10;
 const MAX_BILLING_CAPTURE_RETRY_BACKOFF_MS: u64 = 5_000;
 const DEFAULT_AUTH_VALIDATE_CACHE_TTL_SEC: u64 = 30;
 const DEFAULT_AUTH_VALIDATE_NEGATIVE_CACHE_TTL_SEC: u64 = 5;
+const CODEX_POOL_EDITION_ENV: &str = "CODEX_POOL_EDITION";
 
 const ALLOWED_API_KEYS_ENV: &str = "DATA_PLANE_ALLOWED_API_KEYS";
 
@@ -97,6 +99,7 @@ impl DataPlaneConfig {
         let config_path = resolve_config_path();
         let file_config = load_file_config(&config_path)?;
         apply_process_env_defaults(&file_config);
+        let edition = ProductEdition::from_env_var(CODEX_POOL_EDITION_ENV);
 
         let listen_addr = parse_listen_addr(
             std::env::var("DATA_PLANE_LISTEN")
@@ -115,7 +118,7 @@ impl DataPlaneConfig {
             .billing_preauth_fallback_microcredits
             .or(file_config.stream_billing_reserve_microcredits);
 
-        Ok(Self {
+        let mut config = Self {
             listen_addr,
             routing_strategy: parse_routing_strategy(
                 std::env::var("ROUTING_STRATEGY")
@@ -233,13 +236,27 @@ impl DataPlaneConfig {
             enable_internal_debug_routes: env_flag_override("ENABLE_INTERNAL_DEBUG_ROUTES")
                 .or(file_config.enable_internal_debug_routes)
                 .unwrap_or(false),
-        })
+        };
+
+        apply_edition_overrides(&mut config, edition);
+
+        Ok(config)
     }
 
     pub fn request_log_stream(&self) -> String {
         std::env::var("REQUEST_LOG_STREAM")
             .unwrap_or_else(|_| DEFAULT_REQUEST_LOG_STREAM.to_string())
     }
+}
+
+fn apply_edition_overrides(config: &mut DataPlaneConfig, edition: ProductEdition) {
+    if matches!(edition, ProductEdition::Business) {
+        return;
+    }
+
+    config.enable_metered_stream_billing = false;
+    config.billing_authorize_required_for_stream = false;
+    config.billing_dynamic_preauth_enabled = false;
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -878,5 +895,65 @@ listen = "127.0.0.1:18080"
         std::env::remove_var("STREAM_BILLING_DRAIN_TIMEOUT_MS");
         std::env::remove_var("BILLING_CAPTURE_RETRY_MAX");
         std::env::remove_var("BILLING_CAPTURE_RETRY_BACKOFF_MS");
+    }
+
+    #[test]
+    fn non_business_editions_disable_credit_billing_defaults() {
+        let _guard = ENV_LOCK.lock().expect("lock env");
+        let path = unique_temp_path("data-plane-config-team-edition");
+        std::fs::write(
+            &path,
+            r#"
+[data_plane]
+listen = "127.0.0.1:18080"
+"#,
+        )
+        .expect("write toml");
+
+        std::env::set_var("DATA_PLANE_CONFIG_FILE", path.display().to_string());
+        std::env::set_var("CODEX_POOL_EDITION", "team");
+
+        let cfg = DataPlaneConfig::from_env().expect("load config");
+
+        std::env::remove_var("DATA_PLANE_CONFIG_FILE");
+        std::env::remove_var("CODEX_POOL_EDITION");
+        std::fs::remove_file(path).expect("cleanup toml");
+
+        assert!(!cfg.enable_metered_stream_billing);
+        assert!(!cfg.billing_authorize_required_for_stream);
+        assert!(!cfg.billing_dynamic_preauth_enabled);
+    }
+
+    #[test]
+    fn non_business_editions_ignore_credit_billing_env_overrides() {
+        let _guard = ENV_LOCK.lock().expect("lock env");
+        let path = unique_temp_path("data-plane-config-personal-edition");
+        std::fs::write(
+            &path,
+            r#"
+[data_plane]
+listen = "127.0.0.1:18080"
+"#,
+        )
+        .expect("write toml");
+
+        std::env::set_var("DATA_PLANE_CONFIG_FILE", path.display().to_string());
+        std::env::set_var("CODEX_POOL_EDITION", "personal");
+        std::env::set_var("ENABLE_METERED_STREAM_BILLING", "true");
+        std::env::set_var("BILLING_AUTHORIZE_REQUIRED_FOR_STREAM", "true");
+        std::env::set_var("BILLING_DYNAMIC_PREAUTH_ENABLED", "true");
+
+        let cfg = DataPlaneConfig::from_env().expect("load config");
+
+        std::env::remove_var("DATA_PLANE_CONFIG_FILE");
+        std::env::remove_var("CODEX_POOL_EDITION");
+        std::env::remove_var("ENABLE_METERED_STREAM_BILLING");
+        std::env::remove_var("BILLING_AUTHORIZE_REQUIRED_FOR_STREAM");
+        std::env::remove_var("BILLING_DYNAMIC_PREAUTH_ENABLED");
+        std::fs::remove_file(path).expect("cleanup toml");
+
+        assert!(!cfg.enable_metered_stream_billing);
+        assert!(!cfg.billing_authorize_required_for_stream);
+        assert!(!cfg.billing_dynamic_preauth_enabled);
     }
 }

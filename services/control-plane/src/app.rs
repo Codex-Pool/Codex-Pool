@@ -17,21 +17,20 @@ use axum::{response::IntoResponse, Router};
 use chrono::{DateTime, Utc};
 use codex_pool_core::api::{
     AccountUsageLeaderboardResponse, AdminLoginRequest, AdminMeResponse,
-    AiErrorLearningSettingsResponse, ApiKeyUsageLeaderboardResponse, BillingMode,
-    BuiltinErrorTemplateResponse, BuiltinErrorTemplatesResponse, CreateApiKeyRequest,
-    CreateTenantRequest, CreateUpstreamAccountRequest, EditionFeatures, ErrorEnvelope,
-    HourlyAccountUsagePoint, HourlyTenantApiKeyUsagePoint, ImportOAuthRefreshTokenRequest,
-    ModelRoutingPoliciesResponse, ModelRoutingSettingsResponse, OAuthAccountStatusResponse,
-    OAuthFamilyActionResponse, OAuthImportItemStatus, OAuthImportJobActionResponse,
-    OAuthImportJobItemsResponse, OAuthImportJobSummary, OAuthRateLimitRefreshJobStatus,
-    OAuthRateLimitRefreshJobSummary, PolicyResponse, ProductEdition,
-    ResolveUpstreamErrorTemplateRequest, ResolveUpstreamErrorTemplateResponse,
-    RoutingPlanVersionsResponse, RoutingProfilesResponse, SystemCapabilitiesResponse,
-    TenantUsageLeaderboardResponse, UpdateAiErrorLearningSettingsRequest,
-    UpdateBuiltinErrorTemplateRequest, UpdateModelRoutingSettingsRequest,
-    UpdateUpstreamErrorTemplateRequest, UpsertModelRoutingPolicyRequest,
-    UpsertRetryPolicyRequest, UpsertRoutingPolicyRequest, UpsertRoutingProfileRequest,
-    UpsertStreamRetryPolicyRequest, UpstreamErrorTemplateResponse,
+    AiErrorLearningSettingsResponse, ApiKeyUsageLeaderboardResponse, BuiltinErrorTemplateResponse,
+    BuiltinErrorTemplatesResponse, CreateApiKeyRequest, CreateTenantRequest,
+    CreateUpstreamAccountRequest, ErrorEnvelope, HourlyAccountUsagePoint,
+    HourlyTenantApiKeyUsagePoint, ImportOAuthRefreshTokenRequest, ModelRoutingPoliciesResponse,
+    ModelRoutingSettingsResponse, OAuthAccountStatusResponse, OAuthFamilyActionResponse,
+    OAuthImportItemStatus, OAuthImportJobActionResponse, OAuthImportJobItemsResponse,
+    OAuthImportJobSummary, OAuthRateLimitRefreshJobStatus, OAuthRateLimitRefreshJobSummary,
+    PolicyResponse, ProductEdition, ResolveUpstreamErrorTemplateRequest,
+    ResolveUpstreamErrorTemplateResponse, RoutingPlanVersionsResponse, RoutingProfilesResponse,
+    SystemCapabilitiesResponse, TenantUsageLeaderboardResponse,
+    UpdateAiErrorLearningSettingsRequest, UpdateBuiltinErrorTemplateRequest,
+    UpdateModelRoutingSettingsRequest, UpdateUpstreamErrorTemplateRequest,
+    UpsertModelRoutingPolicyRequest, UpsertRetryPolicyRequest, UpsertRoutingPolicyRequest,
+    UpsertRoutingProfileRequest, UpsertStreamRetryPolicyRequest, UpstreamErrorTemplateResponse,
     UpstreamErrorTemplatesResponse, UsageHourlyTenantTrendsResponse, UsageHourlyTrendsResponse,
     UsageLeaderboardOverviewResponse, UsageQueryResponse, UsageSummaryQueryResponse,
     ValidateApiKeyRequest, ValidateApiKeyResponse, ValidateOAuthRefreshTokenRequest,
@@ -666,57 +665,11 @@ fn build_runtime_config_from_env(auth_validate_cache_ttl_sec: u64) -> RuntimeCon
 }
 
 fn product_edition_from_env() -> ProductEdition {
-    std::env::var(CODEX_POOL_EDITION_ENV)
-        .ok()
-        .map(|raw| raw.trim().to_ascii_lowercase())
-        .and_then(|normalized| match normalized.as_str() {
-            "personal" => Some(ProductEdition::Personal),
-            "team" => Some(ProductEdition::Team),
-            "business" => Some(ProductEdition::Business),
-            _ => None,
-        })
-        .unwrap_or(ProductEdition::Business)
+    ProductEdition::from_env_var(CODEX_POOL_EDITION_ENV)
 }
 
 fn system_capabilities_from_env() -> SystemCapabilitiesResponse {
-    match product_edition_from_env() {
-        ProductEdition::Personal => SystemCapabilitiesResponse {
-            edition: ProductEdition::Personal,
-            billing_mode: BillingMode::CostReportOnly,
-            features: EditionFeatures {
-                multi_tenant: false,
-                tenant_portal: false,
-                tenant_self_service: false,
-                tenant_recharge: false,
-                credit_billing: false,
-                cost_reports: true,
-            },
-        },
-        ProductEdition::Team => SystemCapabilitiesResponse {
-            edition: ProductEdition::Team,
-            billing_mode: BillingMode::CostReportOnly,
-            features: EditionFeatures {
-                multi_tenant: true,
-                tenant_portal: true,
-                tenant_self_service: false,
-                tenant_recharge: false,
-                credit_billing: false,
-                cost_reports: true,
-            },
-        },
-        ProductEdition::Business => SystemCapabilitiesResponse {
-            edition: ProductEdition::Business,
-            billing_mode: BillingMode::CreditEnforced,
-            features: EditionFeatures {
-                multi_tenant: true,
-                tenant_portal: true,
-                tenant_self_service: true,
-                tenant_recharge: true,
-                credit_billing: true,
-                cost_reports: true,
-            },
-        },
-    }
+    SystemCapabilitiesResponse::for_edition(product_edition_from_env())
 }
 
 fn build_admin_proxies_from_env(runtime_config: &RuntimeConfigSnapshot) -> Vec<AdminProxyItem> {
@@ -917,6 +870,7 @@ mod capabilities_tests {
     use serde_json::Value;
     use std::sync::Arc;
     use tower::ServiceExt;
+    use uuid::Uuid;
 
     const TEST_ADMIN_USERNAME: &str = "admin";
     const TEST_ADMIN_PASSWORD: &str = "admin123456";
@@ -928,15 +882,41 @@ mod capabilities_tests {
         build_app_with_store(store)
     }
 
+    fn configure_test_env(edition: Option<&str>) -> [Option<String>; 5] {
+        [
+            set_env("ADMIN_USERNAME", Some(TEST_ADMIN_USERNAME)),
+            set_env("ADMIN_PASSWORD", Some(TEST_ADMIN_PASSWORD)),
+            set_env("ADMIN_JWT_SECRET", Some(TEST_ADMIN_JWT_SECRET)),
+            set_env(
+                "CONTROL_PLANE_INTERNAL_AUTH_TOKEN",
+                Some(TEST_INTERNAL_AUTH_TOKEN),
+            ),
+            set_env("CODEX_POOL_EDITION", edition),
+        ]
+    }
+
+    fn restore_test_env(old_values: [Option<String>; 5]) {
+        let [old_username, old_password, old_secret, old_internal, old_edition] = old_values;
+        set_env("ADMIN_USERNAME", old_username.as_deref());
+        set_env("ADMIN_PASSWORD", old_password.as_deref());
+        set_env("ADMIN_JWT_SECRET", old_secret.as_deref());
+        set_env("CONTROL_PLANE_INTERNAL_AUTH_TOKEN", old_internal.as_deref());
+        set_env("CODEX_POOL_EDITION", old_edition.as_deref());
+    }
+
+    fn json_request(method: &str, uri: &str, body: &str) -> Request<Body> {
+        Request::builder()
+            .method(method)
+            .uri(uri)
+            .header("content-type", "application/json")
+            .body(Body::from(body.to_owned()))
+            .unwrap()
+    }
+
     #[tokio::test]
     async fn system_capabilities_endpoint_defaults_to_business() {
         let _guard = ENV_LOCK.lock().expect("lock env");
-        let old_username = set_env("ADMIN_USERNAME", Some(TEST_ADMIN_USERNAME));
-        let old_password = set_env("ADMIN_PASSWORD", Some(TEST_ADMIN_PASSWORD));
-        let old_secret = set_env("ADMIN_JWT_SECRET", Some(TEST_ADMIN_JWT_SECRET));
-        let old_internal =
-            set_env("CONTROL_PLANE_INTERNAL_AUTH_TOKEN", Some(TEST_INTERNAL_AUTH_TOKEN));
-        let old_edition = set_env("CODEX_POOL_EDITION", None);
+        let old_values = configure_test_env(None);
 
         let response = build_test_app()
             .oneshot(
@@ -949,14 +929,7 @@ mod capabilities_tests {
             .await
             .unwrap();
 
-        set_env("ADMIN_USERNAME", old_username.as_deref());
-        set_env("ADMIN_PASSWORD", old_password.as_deref());
-        set_env("ADMIN_JWT_SECRET", old_secret.as_deref());
-        set_env(
-            "CONTROL_PLANE_INTERNAL_AUTH_TOKEN",
-            old_internal.as_deref(),
-        );
-        set_env("CODEX_POOL_EDITION", old_edition.as_deref());
+        restore_test_env(old_values);
 
         assert_eq!(response.status(), StatusCode::OK);
         let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
@@ -973,12 +946,7 @@ mod capabilities_tests {
     #[tokio::test]
     async fn system_capabilities_endpoint_reflects_personal_edition() {
         let _guard = ENV_LOCK.lock().expect("lock env");
-        let old_username = set_env("ADMIN_USERNAME", Some(TEST_ADMIN_USERNAME));
-        let old_password = set_env("ADMIN_PASSWORD", Some(TEST_ADMIN_PASSWORD));
-        let old_secret = set_env("ADMIN_JWT_SECRET", Some(TEST_ADMIN_JWT_SECRET));
-        let old_internal =
-            set_env("CONTROL_PLANE_INTERNAL_AUTH_TOKEN", Some(TEST_INTERNAL_AUTH_TOKEN));
-        let old_edition = set_env("CODEX_POOL_EDITION", Some("personal"));
+        let old_values = configure_test_env(Some("personal"));
 
         let response = build_test_app()
             .oneshot(
@@ -991,14 +959,7 @@ mod capabilities_tests {
             .await
             .unwrap();
 
-        set_env("ADMIN_USERNAME", old_username.as_deref());
-        set_env("ADMIN_PASSWORD", old_password.as_deref());
-        set_env("ADMIN_JWT_SECRET", old_secret.as_deref());
-        set_env(
-            "CONTROL_PLANE_INTERNAL_AUTH_TOKEN",
-            old_internal.as_deref(),
-        );
-        set_env("CODEX_POOL_EDITION", old_edition.as_deref());
+        restore_test_env(old_values);
 
         assert_eq!(response.status(), StatusCode::OK);
         let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
@@ -1016,12 +977,7 @@ mod capabilities_tests {
     #[tokio::test]
     async fn system_capabilities_endpoint_reflects_team_edition() {
         let _guard = ENV_LOCK.lock().expect("lock env");
-        let old_username = set_env("ADMIN_USERNAME", Some(TEST_ADMIN_USERNAME));
-        let old_password = set_env("ADMIN_PASSWORD", Some(TEST_ADMIN_PASSWORD));
-        let old_secret = set_env("ADMIN_JWT_SECRET", Some(TEST_ADMIN_JWT_SECRET));
-        let old_internal =
-            set_env("CONTROL_PLANE_INTERNAL_AUTH_TOKEN", Some(TEST_INTERNAL_AUTH_TOKEN));
-        let old_edition = set_env("CODEX_POOL_EDITION", Some("team"));
+        let old_values = configure_test_env(Some("team"));
 
         let response = build_test_app()
             .oneshot(
@@ -1034,14 +990,7 @@ mod capabilities_tests {
             .await
             .unwrap();
 
-        set_env("ADMIN_USERNAME", old_username.as_deref());
-        set_env("ADMIN_PASSWORD", old_password.as_deref());
-        set_env("ADMIN_JWT_SECRET", old_secret.as_deref());
-        set_env(
-            "CONTROL_PLANE_INTERNAL_AUTH_TOKEN",
-            old_internal.as_deref(),
-        );
-        set_env("CODEX_POOL_EDITION", old_edition.as_deref());
+        restore_test_env(old_values);
 
         assert_eq!(response.status(), StatusCode::OK);
         let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
@@ -1054,6 +1003,292 @@ mod capabilities_tests {
         assert_eq!(payload["features"]["tenant_recharge"], false);
         assert_eq!(payload["features"]["credit_billing"], false);
         assert_eq!(payload["features"]["cost_reports"], true);
+    }
+
+    #[tokio::test]
+    async fn personal_edition_hides_tenant_and_credit_routes() {
+        let _guard = ENV_LOCK.lock().expect("lock env");
+        let old_values = configure_test_env(Some("personal"));
+        let tenant_id = Uuid::new_v4();
+
+        let login_response = build_test_app()
+            .oneshot(json_request("POST", "/api/v1/tenant/auth/login", "{}"))
+            .await
+            .unwrap();
+        let recharge_response = build_test_app()
+            .oneshot(json_request(
+                "POST",
+                &format!("/api/v1/admin/tenants/{tenant_id}/credits/recharge"),
+                "{}",
+            ))
+            .await
+            .unwrap();
+        let authorize_response = build_test_app()
+            .oneshot(json_request("POST", "/internal/v1/billing/authorize", "{}"))
+            .await
+            .unwrap();
+
+        restore_test_env(old_values);
+
+        assert_eq!(login_response.status(), StatusCode::NOT_FOUND);
+        assert_eq!(recharge_response.status(), StatusCode::NOT_FOUND);
+        assert_eq!(authorize_response.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn team_edition_keeps_login_but_hides_self_service_and_credit_routes() {
+        let _guard = ENV_LOCK.lock().expect("lock env");
+        let old_values = configure_test_env(Some("team"));
+        let tenant_id = Uuid::new_v4();
+
+        let login_response = build_test_app()
+            .oneshot(json_request("POST", "/api/v1/tenant/auth/login", "{}"))
+            .await
+            .unwrap();
+        let register_response = build_test_app()
+            .oneshot(json_request("POST", "/api/v1/tenant/auth/register", "{}"))
+            .await
+            .unwrap();
+        let forgot_response = build_test_app()
+            .oneshot(json_request(
+                "POST",
+                "/api/v1/tenant/auth/password/forgot",
+                "{}",
+            ))
+            .await
+            .unwrap();
+        let tenant_credit_response = build_test_app()
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/api/v1/tenant/credits/balance")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let admin_recharge_response = build_test_app()
+            .oneshot(json_request(
+                "POST",
+                &format!("/api/v1/admin/tenants/{tenant_id}/credits/recharge"),
+                "{}",
+            ))
+            .await
+            .unwrap();
+        let authorize_response = build_test_app()
+            .oneshot(json_request("POST", "/internal/v1/billing/authorize", "{}"))
+            .await
+            .unwrap();
+
+        restore_test_env(old_values);
+
+        assert_ne!(login_response.status(), StatusCode::NOT_FOUND);
+        assert_eq!(register_response.status(), StatusCode::NOT_FOUND);
+        assert_eq!(forgot_response.status(), StatusCode::NOT_FOUND);
+        assert_eq!(tenant_credit_response.status(), StatusCode::NOT_FOUND);
+        assert_eq!(admin_recharge_response.status(), StatusCode::NOT_FOUND);
+        assert_eq!(authorize_response.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn business_edition_keeps_internal_billing_routes_registered() {
+        let _guard = ENV_LOCK.lock().expect("lock env");
+        let old_values = configure_test_env(Some("business"));
+
+        let authorize_response = build_test_app()
+            .oneshot(json_request("POST", "/internal/v1/billing/authorize", "{}"))
+            .await
+            .unwrap();
+
+        restore_test_env(old_values);
+
+        assert_ne!(authorize_response.status(), StatusCode::NOT_FOUND);
+    }
+}
+
+fn add_multi_tenant_routes(
+    router: Router<AppState>,
+    capabilities: &SystemCapabilitiesResponse,
+) -> Router<AppState> {
+    let router = if capabilities.allows_multi_tenant() {
+        router
+            .route("/api/v1/tenants", post(create_tenant).get(list_tenants))
+            .route(
+                "/api/v1/admin/tenants",
+                get(list_admin_tenants).post(create_admin_tenant),
+            )
+            .route(
+                "/api/v1/admin/tenants/ensure-default",
+                post(ensure_default_admin_tenant),
+            )
+            .route(
+                "/api/v1/admin/tenants/{tenant_id}",
+                patch(patch_admin_tenant),
+            )
+    } else {
+        router
+    };
+
+    if capabilities.allows_tenant_portal() {
+        router
+            .route(
+                "/api/v1/admin/impersonations",
+                post(create_admin_impersonation),
+            )
+            .route(
+                "/api/v1/admin/impersonations/{session_id}",
+                delete(delete_admin_impersonation),
+            )
+    } else {
+        router
+    }
+}
+
+fn add_admin_tenant_credit_routes(
+    router: Router<AppState>,
+    capabilities: &SystemCapabilitiesResponse,
+) -> Router<AppState> {
+    if capabilities.allows_tenant_recharge() {
+        router
+            .route(
+                "/api/v1/admin/tenants/{tenant_id}/credits/recharge",
+                post(recharge_admin_tenant_credits),
+            )
+            .route(
+                "/api/v1/admin/tenants/{tenant_id}/credits/balance",
+                get(get_admin_tenant_credit_balance),
+            )
+            .route(
+                "/api/v1/admin/tenants/{tenant_id}/credits/summary",
+                get(get_admin_tenant_credit_summary),
+            )
+            .route(
+                "/api/v1/admin/tenants/{tenant_id}/credits/ledger",
+                get(list_admin_tenant_credit_ledger),
+            )
+    } else {
+        router
+    }
+}
+
+fn add_tenant_portal_routes(
+    router: Router<AppState>,
+    capabilities: &SystemCapabilitiesResponse,
+) -> Router<AppState> {
+    if !capabilities.allows_tenant_portal() {
+        return router;
+    }
+
+    let router = router
+        .route("/api/v1/tenant/auth/login", post(tenant_login))
+        .route("/api/v1/tenant/auth/logout", post(tenant_logout))
+        .route("/api/v1/tenant/auth/me", get(tenant_me))
+        .route(
+            "/api/v1/tenant/keys",
+            get(list_tenant_api_keys).post(create_tenant_api_key),
+        )
+        .route(
+            "/api/v1/tenant/api-key-groups",
+            get(list_tenant_api_key_groups),
+        )
+        .route(
+            "/api/v1/tenant/keys/{key_id}",
+            patch(patch_tenant_api_key).delete(delete_tenant_api_key),
+        )
+        .route(
+            "/api/v1/tenant/usage/summary",
+            get(get_tenant_usage_summary),
+        )
+        .route(
+            "/api/v1/tenant/usage/trends/hourly",
+            get(get_tenant_usage_hourly_trends),
+        )
+        .route(
+            "/api/v1/tenant/usage/leaderboard/tenants",
+            get(get_tenant_scope_tenant_usage_leaderboard),
+        )
+        .route(
+            "/api/v1/tenant/usage/leaderboard/accounts",
+            get(get_tenant_scope_account_usage_leaderboard),
+        )
+        .route(
+            "/api/v1/tenant/usage/leaderboard/api-keys",
+            get(get_tenant_scope_api_key_usage_leaderboard),
+        )
+        .route("/api/v1/tenant/request-logs", get(list_tenant_request_logs))
+        .route("/api/v1/tenant/audit-logs", get(list_tenant_audit_logs));
+
+    let router = if capabilities.allows_tenant_self_service() {
+        router
+            .route("/api/v1/tenant/auth/register", post(tenant_register))
+            .route(
+                "/api/v1/tenant/auth/verify-email",
+                post(tenant_verify_email),
+            )
+            .route(
+                "/api/v1/tenant/auth/password/forgot",
+                post(tenant_forgot_password),
+            )
+            .route(
+                "/api/v1/tenant/auth/password/reset",
+                post(tenant_reset_password),
+            )
+    } else {
+        router
+    };
+
+    if capabilities.allows_tenant_recharge() {
+        router
+            .route(
+                "/api/v1/tenant/credits/balance",
+                get(get_tenant_credit_balance),
+            )
+            .route(
+                "/api/v1/tenant/credits/summary",
+                get(get_tenant_credit_summary),
+            )
+            .route(
+                "/api/v1/tenant/credits/ledger",
+                get(list_tenant_credit_ledger),
+            )
+            .route(
+                "/api/v1/tenant/credits/checkin",
+                post(claim_tenant_daily_checkin),
+            )
+    } else {
+        router
+    }
+}
+
+fn add_internal_billing_routes(
+    router: Router<AppState>,
+    capabilities: &SystemCapabilitiesResponse,
+) -> Router<AppState> {
+    let router = router.route(
+        "/internal/v1/billing/pricing",
+        post(internal_billing_pricing),
+    );
+
+    if capabilities.allows_credit_billing() {
+        router
+            .route(
+                "/internal/v1/billing/precheck/{tenant_id}",
+                get(internal_billing_precheck),
+            )
+            .route(
+                "/internal/v1/billing/authorize",
+                post(internal_billing_authorize),
+            )
+            .route(
+                "/internal/v1/billing/capture",
+                post(internal_billing_capture),
+            )
+            .route(
+                "/internal/v1/billing/release",
+                post(internal_billing_release),
+            )
+    } else {
+        router
     }
 }
 
@@ -1135,12 +1370,13 @@ pub fn build_app_with_store_ttl_usage_repo_import_store_and_admin_auth(
         )
     });
 
+    let edition_capabilities = system_capabilities_from_env();
     let state = AppState {
         store,
         usage_repo,
         tenant_auth_service,
         auth_validate_cache_ttl_sec,
-        system_capabilities: system_capabilities_from_env(),
+        system_capabilities: edition_capabilities.clone(),
         admin_auth,
         internal_auth_token: resolve_internal_auth_token()
             .expect("CONTROL_PLANE_INTERNAL_AUTH_TOKEN must be set"),
@@ -1167,12 +1403,11 @@ pub fn build_app_with_store_ttl_usage_repo_import_store_and_admin_auth(
     #[cfg(not(test))]
     spawn_model_probe_loop(state.clone());
 
-    Router::new()
+    let app = Router::new()
         .route("/health", get(health))
         .route("/livez", get(livez))
         .route("/readyz", get(readyz))
         .route("/api/v1/system/capabilities", get(system_capabilities))
-        .route("/api/v1/tenants", post(create_tenant).get(list_tenants))
         .route("/api/v1/api-keys", post(create_api_key).get(list_api_keys))
         .route(
             "/api/v1/upstream-accounts",
@@ -1304,34 +1539,6 @@ pub fn build_app_with_store_ttl_usage_repo_import_store_and_admin_auth(
         )
         .route("/api/v1/admin/audit-logs", get(list_admin_audit_logs))
         .route(
-            "/api/v1/admin/tenants",
-            get(list_admin_tenants).post(create_admin_tenant),
-        )
-        .route(
-            "/api/v1/admin/tenants/ensure-default",
-            post(ensure_default_admin_tenant),
-        )
-        .route(
-            "/api/v1/admin/tenants/{tenant_id}",
-            patch(patch_admin_tenant),
-        )
-        .route(
-            "/api/v1/admin/tenants/{tenant_id}/credits/recharge",
-            post(recharge_admin_tenant_credits),
-        )
-        .route(
-            "/api/v1/admin/tenants/{tenant_id}/credits/balance",
-            get(get_admin_tenant_credit_balance),
-        )
-        .route(
-            "/api/v1/admin/tenants/{tenant_id}/credits/summary",
-            get(get_admin_tenant_credit_summary),
-        )
-        .route(
-            "/api/v1/admin/tenants/{tenant_id}/credits/ledger",
-            get(list_admin_tenant_credit_ledger),
-        )
-        .route(
             "/api/v1/admin/model-pricing",
             get(list_admin_model_pricing).post(upsert_admin_model_pricing),
         )
@@ -1421,80 +1628,6 @@ pub fn build_app_with_store_ttl_usage_repo_import_store_and_admin_auth(
             get(list_admin_routing_plan_versions),
         )
         .route(
-            "/api/v1/admin/impersonations",
-            post(create_admin_impersonation),
-        )
-        .route(
-            "/api/v1/admin/impersonations/{session_id}",
-            delete(delete_admin_impersonation),
-        )
-        .route("/api/v1/tenant/auth/register", post(tenant_register))
-        .route(
-            "/api/v1/tenant/auth/verify-email",
-            post(tenant_verify_email),
-        )
-        .route("/api/v1/tenant/auth/login", post(tenant_login))
-        .route("/api/v1/tenant/auth/logout", post(tenant_logout))
-        .route("/api/v1/tenant/auth/me", get(tenant_me))
-        .route(
-            "/api/v1/tenant/auth/password/forgot",
-            post(tenant_forgot_password),
-        )
-        .route(
-            "/api/v1/tenant/auth/password/reset",
-            post(tenant_reset_password),
-        )
-        .route(
-            "/api/v1/tenant/keys",
-            get(list_tenant_api_keys).post(create_tenant_api_key),
-        )
-        .route(
-            "/api/v1/tenant/api-key-groups",
-            get(list_tenant_api_key_groups),
-        )
-        .route(
-            "/api/v1/tenant/keys/{key_id}",
-            patch(patch_tenant_api_key).delete(delete_tenant_api_key),
-        )
-        .route(
-            "/api/v1/tenant/credits/balance",
-            get(get_tenant_credit_balance),
-        )
-        .route(
-            "/api/v1/tenant/credits/summary",
-            get(get_tenant_credit_summary),
-        )
-        .route(
-            "/api/v1/tenant/credits/ledger",
-            get(list_tenant_credit_ledger),
-        )
-        .route(
-            "/api/v1/tenant/credits/checkin",
-            post(claim_tenant_daily_checkin),
-        )
-        .route(
-            "/api/v1/tenant/usage/summary",
-            get(get_tenant_usage_summary),
-        )
-        .route(
-            "/api/v1/tenant/usage/trends/hourly",
-            get(get_tenant_usage_hourly_trends),
-        )
-        .route(
-            "/api/v1/tenant/usage/leaderboard/tenants",
-            get(get_tenant_scope_tenant_usage_leaderboard),
-        )
-        .route(
-            "/api/v1/tenant/usage/leaderboard/accounts",
-            get(get_tenant_scope_account_usage_leaderboard),
-        )
-        .route(
-            "/api/v1/tenant/usage/leaderboard/api-keys",
-            get(get_tenant_scope_api_key_usage_leaderboard),
-        )
-        .route("/api/v1/tenant/request-logs", get(list_tenant_request_logs))
-        .route("/api/v1/tenant/audit-logs", get(list_tenant_audit_logs))
-        .route(
             "/api/v1/upstream-accounts/oauth/import-jobs",
             post(create_oauth_import_job).layer(DefaultBodyLimit::max(oauth_import_max_body_bytes)),
         )
@@ -1549,26 +1682,6 @@ pub fn build_app_with_store_ttl_usage_repo_import_store_and_admin_auth(
             post(internal_resolve_upstream_error_template),
         )
         .route("/internal/v1/auth/validate", post(validate_api_key))
-        .route(
-            "/internal/v1/billing/precheck/{tenant_id}",
-            get(internal_billing_precheck),
-        )
-        .route(
-            "/internal/v1/billing/authorize",
-            post(internal_billing_authorize),
-        )
-        .route(
-            "/internal/v1/billing/capture",
-            post(internal_billing_capture),
-        )
-        .route(
-            "/internal/v1/billing/pricing",
-            post(internal_billing_pricing),
-        )
-        .route(
-            "/internal/v1/billing/release",
-            post(internal_billing_release),
-        )
         .route("/api/v1/data-plane/snapshot", get(data_plane_snapshot))
         .route(
             "/api/v1/data-plane/snapshot/events",
@@ -1603,8 +1716,13 @@ pub fn build_app_with_store_ttl_usage_repo_import_store_and_admin_auth(
         .route(
             "/api/v1/usage/leaderboard/overview",
             get(get_usage_leaderboard_overview),
-        )
-        .layer(middleware::from_fn(request_id_middleware))
+        );
+    let app = add_multi_tenant_routes(app, &edition_capabilities);
+    let app = add_admin_tenant_credit_routes(app, &edition_capabilities);
+    let app = add_tenant_portal_routes(app, &edition_capabilities);
+    let app = add_internal_billing_routes(app, &edition_capabilities);
+
+    app.layer(middleware::from_fn(request_id_middleware))
         .with_state(state)
 }
 

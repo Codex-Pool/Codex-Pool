@@ -646,6 +646,26 @@ pub enum ProductEdition {
     Business,
 }
 
+impl ProductEdition {
+    pub fn from_env_value(value: Option<&str>) -> Self {
+        value
+            .map(str::trim)
+            .map(str::to_ascii_lowercase)
+            .and_then(|normalized| match normalized.as_str() {
+                "personal" => Some(Self::Personal),
+                "team" => Some(Self::Team),
+                "business" => Some(Self::Business),
+                _ => None,
+            })
+            .unwrap_or(Self::Business)
+    }
+
+    pub fn from_env_var(env_var: &str) -> Self {
+        let value = std::env::var(env_var).ok();
+        Self::from_env_value(value.as_deref())
+    }
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum BillingMode {
@@ -668,6 +688,77 @@ pub struct SystemCapabilitiesResponse {
     pub edition: ProductEdition,
     pub billing_mode: BillingMode,
     pub features: EditionFeatures,
+}
+
+impl SystemCapabilitiesResponse {
+    pub fn for_edition(edition: ProductEdition) -> Self {
+        match edition {
+            ProductEdition::Personal => Self {
+                edition,
+                billing_mode: BillingMode::CostReportOnly,
+                features: EditionFeatures {
+                    multi_tenant: false,
+                    tenant_portal: false,
+                    tenant_self_service: false,
+                    tenant_recharge: false,
+                    credit_billing: false,
+                    cost_reports: true,
+                },
+            },
+            ProductEdition::Team => Self {
+                edition,
+                billing_mode: BillingMode::CostReportOnly,
+                features: EditionFeatures {
+                    multi_tenant: true,
+                    tenant_portal: true,
+                    tenant_self_service: false,
+                    tenant_recharge: false,
+                    credit_billing: false,
+                    cost_reports: true,
+                },
+            },
+            ProductEdition::Business => Self {
+                edition,
+                billing_mode: BillingMode::CreditEnforced,
+                features: EditionFeatures {
+                    multi_tenant: true,
+                    tenant_portal: true,
+                    tenant_self_service: true,
+                    tenant_recharge: true,
+                    credit_billing: true,
+                    cost_reports: true,
+                },
+            },
+        }
+    }
+
+    pub fn allows_multi_tenant(&self) -> bool {
+        self.features.multi_tenant
+    }
+
+    pub fn allows_tenant_portal(&self) -> bool {
+        self.features.tenant_portal
+    }
+
+    pub fn allows_tenant_self_service(&self) -> bool {
+        self.features.tenant_self_service
+    }
+
+    pub fn allows_tenant_recharge(&self) -> bool {
+        self.features.tenant_recharge
+    }
+
+    pub fn allows_credit_billing(&self) -> bool {
+        self.features.credit_billing
+    }
+
+    pub fn visible_balance_microcredits(&self, balance_microcredits: Option<i64>) -> Option<i64> {
+        if self.allows_credit_billing() {
+            balance_microcredits
+        } else {
+            None
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -809,5 +900,65 @@ impl ErrorEnvelope {
                 r#type: None,
             },
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{ProductEdition, SystemCapabilitiesResponse};
+
+    #[test]
+    fn system_capabilities_follow_product_edition_defaults() {
+        let personal = SystemCapabilitiesResponse::for_edition(ProductEdition::Personal);
+        assert_eq!(personal.edition, ProductEdition::Personal);
+        assert!(!personal.features.multi_tenant);
+        assert!(!personal.features.credit_billing);
+
+        let team = SystemCapabilitiesResponse::for_edition(ProductEdition::Team);
+        assert_eq!(team.edition, ProductEdition::Team);
+        assert!(team.features.multi_tenant);
+        assert!(!team.features.tenant_self_service);
+        assert!(!team.features.credit_billing);
+
+        let business = SystemCapabilitiesResponse::for_edition(ProductEdition::Business);
+        assert_eq!(business.edition, ProductEdition::Business);
+        assert!(business.features.multi_tenant);
+        assert!(business.features.credit_billing);
+    }
+
+    #[test]
+    fn non_business_editions_hide_credit_balances() {
+        let personal = SystemCapabilitiesResponse::for_edition(ProductEdition::Personal);
+        assert_eq!(personal.visible_balance_microcredits(Some(42)), None);
+
+        let team = SystemCapabilitiesResponse::for_edition(ProductEdition::Team);
+        assert_eq!(team.visible_balance_microcredits(Some(42)), None);
+
+        let business = SystemCapabilitiesResponse::for_edition(ProductEdition::Business);
+        assert_eq!(business.visible_balance_microcredits(Some(42)), Some(42));
+    }
+
+    #[test]
+    fn product_edition_parses_known_values_and_defaults_to_business() {
+        assert_eq!(
+            ProductEdition::from_env_value(Some("personal")),
+            ProductEdition::Personal
+        );
+        assert_eq!(
+            ProductEdition::from_env_value(Some("TEAM")),
+            ProductEdition::Team
+        );
+        assert_eq!(
+            ProductEdition::from_env_value(Some("business")),
+            ProductEdition::Business
+        );
+        assert_eq!(
+            ProductEdition::from_env_value(Some("unknown")),
+            ProductEdition::Business
+        );
+        assert_eq!(
+            ProductEdition::from_env_value(None),
+            ProductEdition::Business
+        );
     }
 }

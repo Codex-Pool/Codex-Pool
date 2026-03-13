@@ -80,6 +80,11 @@
 - [x] 前端接入 capabilities 查询与缓存
 - [x] 第一批基于 capability 的导航裁剪落地
 - [x] 受影响范围验证通过，并回填本计划状态
+- [x] 后端按 edition 收口 tenant portal / recharge / internal billing 路由暴露面
+- [x] `auth validate` 在非 `business` 版本隐藏 `balance_microcredits`
+- [x] `data-plane` 在非 `business` 版本强制关闭 credit billing 默认开关
+- [x] `control-plane` 在非 `business` 版本禁用 billing reconcile 后台循环
+- [x] 第二阶段运行时 edition 收口验证通过，并准备进入下一阶段
 
 ## Progress Notes
 
@@ -88,3 +93,10 @@
 - `personal` 下已隐藏租户入口并停止默认租户 warmup；租户路径在 capability 关闭时不会再进入 tenant portal。
 - `team` 下租户端已关闭注册、找回密码等自助入口，仅保留登录与已有页面导航。
 - 当前仍属于第一阶段骨架实现，尚未开始 SQLite store、team Postgres-only pipeline、business/full 分布式拆分等后续工作。
+- 第二阶段已把 capability 从“展示层”推进到“运行时边界”：
+  - `personal` 不再注册 tenant portal、admin tenant credits、internal credit billing 等 business/team-only 路由
+  - `team` 保留 tenant login/key/usage/logs，但关闭 self-service 注册找回与 recharge/credit 路由
+  - `business` 保持完整 credit billing 路由面
+- `/internal/v1/auth/validate` 现在会按 edition 裁剪 `balance_microcredits`，让 `personal/team` 自动退出 data-plane 的 credit enforcement 主链路。
+- `data-plane` 配置已按 edition 强制关闭 metered stream billing / authorize for stream / dynamic preauth，避免非 `business` 版本被环境变量误开启 credit billing。
+- `control-plane` 的 billing reconcile 后台循环已限制为仅 `business` 版本可启动。

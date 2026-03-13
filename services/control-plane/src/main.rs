@@ -2,6 +2,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
+use codex_pool_core::api::ProductEdition;
 use control_plane::admin_auth::AdminAuthService;
 use control_plane::app::{
     build_app_with_store_ttl_usage_repo_import_store_and_admin_auth,
@@ -56,6 +57,7 @@ const BILLING_RECONCILE_STALE_SEC_ENV: &str = "CONTROL_PLANE_BILLING_RECONCILE_S
 const BILLING_RECONCILE_LOOKBACK_SEC_ENV: &str = "CONTROL_PLANE_BILLING_RECONCILE_LOOKBACK_SEC";
 const BILLING_RECONCILE_FULL_SWEEP_INTERVAL_SEC_ENV: &str =
     "CONTROL_PLANE_BILLING_RECONCILE_FULL_SWEEP_INTERVAL_SEC";
+const CODEX_POOL_EDITION_ENV: &str = "CODEX_POOL_EDITION";
 const CODEX_OAUTH_CALLBACK_LISTEN_ENV: &str = "CODEX_OAUTH_CALLBACK_LISTEN";
 const DEFAULT_CODEX_OAUTH_CALLBACK_LISTEN_ADDR: &str = "127.0.0.1:1455";
 const DEFAULT_BILLING_RECONCILE_ENABLED: bool = true;
@@ -181,6 +183,27 @@ fn billing_reconcile_enabled_from_env() -> bool {
             }
         })
         .unwrap_or(DEFAULT_BILLING_RECONCILE_ENABLED)
+}
+
+fn billing_reconcile_allowed_for_edition(edition: ProductEdition) -> bool {
+    matches!(edition, ProductEdition::Business)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::billing_reconcile_allowed_for_edition;
+    use codex_pool_core::api::ProductEdition;
+
+    #[test]
+    fn billing_reconcile_runs_only_for_business_edition() {
+        assert!(!billing_reconcile_allowed_for_edition(
+            ProductEdition::Personal
+        ));
+        assert!(!billing_reconcile_allowed_for_edition(ProductEdition::Team));
+        assert!(billing_reconcile_allowed_for_edition(
+            ProductEdition::Business
+        ));
+    }
 }
 
 fn billing_reconcile_interval_sec_from_env() -> u64 {
@@ -428,7 +451,8 @@ async fn main() -> anyhow::Result<()> {
         "data-plane outbox cleanup loop started"
     );
 
-    if billing_reconcile_enabled_from_env() {
+    let edition = ProductEdition::from_env_var(CODEX_POOL_EDITION_ENV);
+    if billing_reconcile_allowed_for_edition(edition) && billing_reconcile_enabled_from_env() {
         if let Some(pool) = store.postgres_pool() {
             let interval_sec = billing_reconcile_interval_sec_from_env();
             let batch = billing_reconcile_batch_from_env();
@@ -634,6 +658,11 @@ async fn main() -> anyhow::Result<()> {
         } else {
             tracing::info!("billing reconcile loop skipped: postgres store unavailable");
         }
+    } else if !billing_reconcile_allowed_for_edition(edition) {
+        tracing::info!(
+            edition = ?edition,
+            "billing reconcile loop disabled outside business edition"
+        );
     } else {
         tracing::info!("billing reconcile loop disabled by config");
     }
