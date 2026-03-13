@@ -116,6 +116,9 @@
 - [x] 支持 `team -> personal` 单 tenant 受限降级导入
 - [x] 支持 `business -> team` 的 archive-backed 受限降级 preflight
 - [x] 第九阶段 archive-backed downgrade foundation 验证通过，并准备进入下一阶段
+- [x] 放宽 `business -> personal` 的单 tenant archive-backed 受限降级
+- [x] 补齐 `business -> personal` 的 SQLite 导入回归
+- [x] 第十阶段 single-tenant business downgrade 验证通过，并准备进入下一阶段
 
 ## Progress Notes
 
@@ -209,4 +212,11 @@
 - 第九阶段验证已覆盖：
   - `cargo test -p control-plane edition_migration::tests -- --nocapture`
   - `cargo test -p control-plane --bin edition-migrate -- --nocapture`
+  - `cargo test -p control-plane --lib --bins`
+- 第十阶段已把 `business -> personal` 从“必须 staged migration”放宽到“单 tenant 可直接 archive-backed 导入”：
+  - `preflight` 现在会在 `business` 迁移包只有一个 tenant 时允许直接导入 `personal`
+  - 多 tenant 的 `business -> personal` 仍保持 blocker，避免无提示地把多个 workspace 挤进单 workspace 运行态
+  - 新增 `business -> personal` SQLite 导入回归，确保 archive warning 不会阻塞核心 control-plane state 落地
+- 第十阶段验证已覆盖：
+  - `cargo test -p control-plane edition_migration::tests -- --nocapture`
   - `cargo test -p control-plane --lib --bins`

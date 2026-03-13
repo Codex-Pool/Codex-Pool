@@ -247,11 +247,13 @@ pub fn preflight_package(
                 );
             }
 
-            if package.source_edition == ProductEdition::Business {
+            if package.source_edition == ProductEdition::Business
+                && package.control_plane.tenants.len() > 1
+            {
                 push_blocker(
                     &mut blockers,
                     "business_to_personal_requires_staged_migration",
-                    "business -> personal 只支持分阶段迁移；请先降到 team 语义并归档 business 专属数据。",
+                    "business -> personal 在多 tenant 场景下只支持分阶段迁移；请先收缩到单 tenant 并归档 business 专属数据。",
                 );
             }
         }
@@ -752,6 +754,101 @@ mod tests {
             .warnings
             .iter()
             .any(|item| item.code == "archive_item_present"));
+    }
+
+    #[test]
+    fn preflight_allows_single_tenant_business_to_personal_with_archive_warning() {
+        let tenant_id = Uuid::new_v4();
+        let package = super::EditionMigrationPackage {
+            schema_version: super::EDITION_MIGRATION_SCHEMA_VERSION,
+            source_edition: ProductEdition::Business,
+            exported_at: Utc::now(),
+            control_plane: super::ControlPlaneMigrationBundle {
+                tenants: vec![codex_pool_core::model::Tenant {
+                    id: tenant_id,
+                    name: "Business Solo".to_string(),
+                    created_at: Utc::now(),
+                }],
+                ..Default::default()
+            },
+            usage: super::UsageMigrationBundle::default(),
+            archive: super::EditionMigrationArchiveManifest {
+                items: vec![
+                    super::EditionMigrationArchiveItem {
+                        kind: super::EditionMigrationArchiveKind::TenantCreditAccounts,
+                        count: 1,
+                        description: "信用账户主表".to_string(),
+                        rows: vec![serde_json::json!({
+                            "tenant_id": tenant_id,
+                            "balance_microcredits": 42
+                        })],
+                    },
+                    super::EditionMigrationArchiveItem {
+                        kind: super::EditionMigrationArchiveKind::TenantCreditLedger,
+                        count: 1,
+                        description: "信用账本流水".to_string(),
+                        rows: vec![serde_json::json!({
+                            "id": Uuid::new_v4(),
+                            "tenant_id": tenant_id,
+                            "request_id": "req-1"
+                        })],
+                    },
+                ],
+            },
+        };
+
+        let report = super::preflight_package(&package, ProductEdition::Personal);
+
+        assert!(report.allowed);
+        assert!(report.blockers.is_empty());
+        assert!(report
+            .warnings
+            .iter()
+            .any(|item| item.code == "archive_item_present"));
+    }
+
+    #[tokio::test]
+    async fn import_single_tenant_business_package_into_personal_sqlite_preserves_core_state() {
+        let tenant_id = Uuid::new_v4();
+        let package = super::EditionMigrationPackage {
+            schema_version: super::EDITION_MIGRATION_SCHEMA_VERSION,
+            source_edition: ProductEdition::Business,
+            exported_at: Utc::now(),
+            control_plane: super::ControlPlaneMigrationBundle {
+                tenants: vec![codex_pool_core::model::Tenant {
+                    id: tenant_id,
+                    name: "Business Solo".to_string(),
+                    created_at: Utc::now(),
+                }],
+                revision: 11,
+                ..Default::default()
+            },
+            usage: super::UsageMigrationBundle::default(),
+            archive: super::EditionMigrationArchiveManifest {
+                items: vec![super::EditionMigrationArchiveItem {
+                    kind: super::EditionMigrationArchiveKind::TenantCreditAccounts,
+                    count: 1,
+                    description: "信用账户主表".to_string(),
+                    rows: vec![serde_json::json!({
+                        "tenant_id": tenant_id,
+                        "balance_microcredits": 42
+                    })],
+                }],
+            },
+        };
+
+        let target_url = sqlite_path("edition-migrate-business-to-personal");
+        super::import_package_into_sqlite(&target_url, &package)
+            .await
+            .expect("import business package into personal sqlite");
+
+        let imported_store = SqliteBackedStore::connect(&target_url)
+            .await
+            .expect("connect imported sqlite store");
+        let tenants = imported_store.list_tenants().await.expect("list tenants");
+
+        assert_eq!(tenants.len(), 1);
+        assert_eq!(tenants[0].id, tenant_id);
     }
 
     #[test]
