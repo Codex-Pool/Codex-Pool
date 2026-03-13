@@ -1,4 +1,5 @@
 use std::net::SocketAddr;
+use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -200,7 +201,7 @@ fn billing_reconcile_allowed_for_edition(edition: ProductEdition) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::billing_reconcile_allowed_for_edition;
+    use super::{billing_reconcile_allowed_for_edition, resolve_runtime_edition};
     use codex_pool_core::api::ProductEdition;
 
     #[test]
@@ -212,6 +213,38 @@ mod tests {
         assert!(billing_reconcile_allowed_for_edition(
             ProductEdition::Business
         ));
+    }
+
+    #[test]
+    fn runtime_edition_uses_env_before_binary_name() {
+        assert_eq!(
+            resolve_runtime_edition(Some("team"), Some("codex-pool-personal")),
+            ProductEdition::Team
+        );
+    }
+
+    #[test]
+    fn runtime_edition_infers_product_binary_names() {
+        assert_eq!(
+            resolve_runtime_edition(None, Some("codex-pool-personal")),
+            ProductEdition::Personal
+        );
+        assert_eq!(
+            resolve_runtime_edition(None, Some("/tmp/codex-pool-team")),
+            ProductEdition::Team
+        );
+        assert_eq!(
+            resolve_runtime_edition(None, Some("codex-pool-business")),
+            ProductEdition::Business
+        );
+    }
+
+    #[test]
+    fn runtime_edition_defaults_to_business_for_unknown_binary_name() {
+        assert_eq!(
+            resolve_runtime_edition(None, Some("control-plane")),
+            ProductEdition::Business
+        );
     }
 }
 
@@ -314,6 +347,37 @@ fn personal_sqlite_database_url(raw: Option<&str>) -> anyhow::Result<String> {
     ))
 }
 
+fn infer_edition_from_executable_name(executable_name: Option<&str>) -> Option<ProductEdition> {
+    let file_name = executable_name
+        .map(Path::new)
+        .and_then(Path::file_name)
+        .and_then(|value| value.to_str())?;
+    match file_name {
+        "codex-pool-personal" => Some(ProductEdition::Personal),
+        "codex-pool-team" => Some(ProductEdition::Team),
+        "codex-pool-business" => Some(ProductEdition::Business),
+        _ => None,
+    }
+}
+
+fn resolve_runtime_edition(
+    env_value: Option<&str>,
+    executable_name: Option<&str>,
+) -> ProductEdition {
+    if env_value.is_some() {
+        return ProductEdition::from_env_value(env_value);
+    }
+    infer_edition_from_executable_name(executable_name).unwrap_or(ProductEdition::Business)
+}
+
+fn runtime_edition() -> ProductEdition {
+    let env_value = std::env::var(CODEX_POOL_EDITION_ENV).ok();
+    let executable_name = std::env::args_os()
+        .next()
+        .and_then(|value| value.into_string().ok());
+    resolve_runtime_edition(env_value.as_deref(), executable_name.as_deref())
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     codex_pool_core::logging::init_local_tracing();
@@ -321,7 +385,7 @@ async fn main() -> anyhow::Result<()> {
     let config = ControlPlaneConfig::from_env(DEFAULT_AUTH_VALIDATE_CACHE_TTL_SEC)?;
     config.apply_runtime_env_defaults();
     control_plane::security::ensure_api_key_hasher_configured()?;
-    let edition = ProductEdition::from_env_var(CODEX_POOL_EDITION_ENV);
+    let edition = runtime_edition();
     if matches!(edition, ProductEdition::Personal | ProductEdition::Team) {
         let defaults = apply_single_binary_runtime_env_defaults(config.listen_addr);
         tracing::info!(

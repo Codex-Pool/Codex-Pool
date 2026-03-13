@@ -10,6 +10,22 @@
 | `team` | `docker-compose.team.yml` | PostgreSQL，无 Redis / ClickHouse | 2-10 人小团队 |
 | `business` | `docker-compose.yml` | PostgreSQL + PgBouncer + Redis + ClickHouse | 高并发、多租户、可水平扩容 |
 
+## 产品名二进制入口
+
+`control-plane` crate 现在额外提供三个产品名二进制：
+
+```bash
+cargo build --release -p control-plane --bin codex-pool-personal
+cargo build --release -p control-plane --bin codex-pool-team
+cargo build --release -p control-plane --bin codex-pool-business
+```
+
+约定：
+
+- 当 `CODEX_POOL_EDITION` 未显式设置时，这三个二进制会分别默认推断为 `personal`、`team`、`business`。
+- 如果你显式设置了 `CODEX_POOL_EDITION`，环境变量优先级更高。
+- `codex-pool-personal` 和 `codex-pool-team` 适合单机/单容器直接启动；`business` 仍建议使用 Compose 或编排平台管理多服务。
+
 ## edition-migrate 命令
 
 `edition-migrate` 现在支持以下核心动作：

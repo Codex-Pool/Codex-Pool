@@ -221,6 +221,7 @@ docker compose --env-file docker/.env.team -f docker-compose.team.yml up -d --bu
 - 运维指南：[`docs/editions-and-migration.md`](./docs/editions-and-migration.md)
 - 覆盖内容：
   - `personal / team / business` 部署矩阵
+  - 产品名二进制：`codex-pool-personal / codex-pool-team / codex-pool-business`
   - `edition-migrate export / preflight / import / archive inspect / shrink` 命令
   - 升级路径：`personal -> team/business`、`team -> business`
   - 降级路径：`business -> team`、`team/business -> personal`

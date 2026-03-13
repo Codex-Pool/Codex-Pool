@@ -10,6 +10,18 @@ autotests = false
 name = "integration"
 path = "tests/integration.rs"
 
+[[bin]]
+name = "codex-pool-personal"
+path = "src/main.rs"
+
+[[bin]]
+name = "codex-pool-team"
+path = "src/main.rs"
+
+[[bin]]
+name = "codex-pool-business"
+path = "src/main.rs"
+
 [dependencies]
 anyhow.workspace = true
 async-trait.workspace = true

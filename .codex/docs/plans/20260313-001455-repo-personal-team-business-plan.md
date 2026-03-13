@@ -128,6 +128,9 @@
 - [x] 编写三档版本的运维与迁移文档
 - [x] 在 README 接入升级/降级与扩容指南入口
 - [x] 第十三阶段 edition operations docs 验证通过，并准备进入下一阶段
+- [x] 为 `personal/team/business` 提供产品名可执行入口
+- [x] 文档同步补齐产品名二进制的使用方式
+- [x] 第十四阶段 edition binary naming 验证通过，并准备进入下一阶段
 
 ## Progress Notes
 
@@ -253,3 +256,10 @@
   - 迁移链路的关键命令现在有统一文档，不再需要靠读源码或计划笔记来拼装操作步骤
 - 第十三阶段验证已覆盖：
   - `git -C /Users/wangnov/Codex-Pool/.worktrees/edition-foundation diff --check`
+- 第十四阶段已把产品名落到单机可执行入口：
+  - `control-plane` crate 新增 `codex-pool-personal`、`codex-pool-team`、`codex-pool-business` 三个 bin target
+  - 运行时 edition 推断现在遵循“环境变量优先，产品名二进制兜底”，避免单机启动还要求用户手动记忆 `CODEX_POOL_EDITION`
+  - 运维文档已同步补上产品名二进制的构建和使用说明
+- 第十四阶段验证已覆盖：
+  - `cargo test -p control-plane runtime_edition -- --nocapture`
+  - `cargo test -p control-plane --lib --bins`
