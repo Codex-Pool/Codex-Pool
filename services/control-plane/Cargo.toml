@@ -17,8 +17,10 @@ axum.workspace = true
 chrono.workspace = true
 clickhouse = "0.14"
 codex-pool-core = { path = "../../crates/codex-pool-core" }
+data-plane = { path = "../data-plane" }
 reqwest.workspace = true
 regex.workspace = true
+include_dir = "0.7"
 sqlx-core = { version = "=0.8.6", default-features = false, features = ["_rt-tokio", "_tls-rustls-ring-webpki", "chrono", "uuid"] }
 sqlx-postgres = { version = "=0.8.6", default-features = false, features = ["chrono", "uuid"] }
 sqlx-sqlite = { version = "=0.8.6", default-features = false, features = ["chrono", "uuid", "bundled"] }

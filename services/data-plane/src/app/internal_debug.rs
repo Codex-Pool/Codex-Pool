@@ -337,19 +337,8 @@ fn invalid_auth_cache_evict_request() -> (StatusCode, axum::Json<ErrorEnvelope>)
 mod tests {
     use super::{build_app, max_request_body_bytes_from_env};
     use crate::config::DataPlaneConfig;
+    use crate::test_support::{set_env, ENV_LOCK};
     use codex_pool_core::model::RoutingStrategy;
-    use std::sync::{LazyLock, Mutex};
-
-    static ENV_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
-
-    fn set_env(key: &str, value: Option<&str>) -> Option<String> {
-        let previous = std::env::var(key).ok();
-        match value {
-            Some(v) => std::env::set_var(key, v),
-            None => std::env::remove_var(key),
-        }
-        previous
-    }
 
     fn empty_config() -> DataPlaneConfig {
         DataPlaneConfig {

@@ -99,6 +99,10 @@
 - [x] `control-plane` 在 `personal` edition 下自动接入 SQLite store 与 usage repo
 - [x] `data-plane` 在 `personal` 且无 Redis 时切换到 control-plane HTTP event sink
 - [x] 第五阶段 personal SQLite runtime foundation 验证通过，并准备进入下一阶段
+- [x] `personal` 在单进程下合并 control-plane / data-plane 路由
+- [x] `personal` 单进程内嵌前端静态资源并提供 SPA fallback
+- [x] `personal` 强制收口 self-loopback 的 auth/snapshot/usage 运行时地址
+- [x] 第六阶段 personal single-binary foundation 验证通过，并准备进入下一阶段
 
 ## Progress Notes
 
@@ -149,4 +153,17 @@
   - `cargo test -p control-plane sqlite_ -- --nocapture`
   - `cargo test -p control-plane --lib --bins`
   - `cargo test -p data-plane select_event_sink_kind -- --nocapture`
+  - `cargo test -p data-plane --lib --bins`
+- 第六阶段已把 `personal` 的部署形态从“SQLite 双进程”推进到“单二进制单端口”：
+  - `control-plane` 现在会在 `personal` 下强制把 `CONTROL_PLANE_LISTEN`、`CODEX_OAUTH_CALLBACK_LISTEN`、`CONTROL_PLANE_BASE_URL`、`AUTH_VALIDATE_URL` 收口到同一个 loopback/self-base-url
+  - `data-plane` 新增“不带 `/health` `/livez` `/readyz`”的子路由构造器，避免与 `control-plane` 主路由冲突
+  - `control-plane` 在 `personal` 下会把 data-plane 的 `/v1/*`、`/backend-api/*`、`/api/codex/usage` 路由直接 merge 到同一个 Axum app 中
+  - `control-plane` 新增 `personal` 前端 fallback：编译时会把 `frontend` 构建产物嵌入二进制，运行时统一由单端口返回 SPA shell 和静态资源
+  - 为了避免 `frontend/dist` 过期，`control-plane` 的 `build.rs` 会在构建 personal 单二进制时自动执行 `frontend` 的打包流程，再复制产物做嵌入
+- 第六阶段验证已覆盖：
+  - `cargo check -p control-plane`
+  - `cargo check -p data-plane`
+  - `cargo test -p control-plane personal::tests -- --nocapture`
+  - `cargo test -p data-plane build_app_without_status_routes -- --nocapture`
+  - `cargo test -p control-plane --lib --bins`
   - `cargo test -p data-plane --lib --bins`

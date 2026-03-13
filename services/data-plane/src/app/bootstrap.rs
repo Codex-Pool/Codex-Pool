@@ -241,22 +241,70 @@ pub async fn build_app(config: DataPlaneConfig) -> anyhow::Result<Router> {
         EventSinkKind::Noop => Arc::new(NoopEventSink),
     };
 
-    build_app_with_event_sink_and_allowed_keys(config, event_sink, allowed_api_keys_from_env())
-        .await
+    build_app_with_options(config, event_sink, allowed_api_keys_from_env(), true).await
+}
+
+pub async fn build_app_without_status_routes(config: DataPlaneConfig) -> anyhow::Result<Router> {
+    let control_plane_base_url = resolve_control_plane_base_url(&config);
+    let edition = ProductEdition::from_env_var(CODEX_POOL_EDITION_ENV);
+    let event_sink: Arc<dyn EventSink> = match select_event_sink_kind(
+        edition,
+        config.redis_url.as_deref(),
+        control_plane_base_url.as_deref(),
+    ) {
+        EventSinkKind::Redis => {
+            let Some(redis_url) = config.redis_url.as_deref() else {
+                return Err(anyhow!("redis event sink selected without redis_url"));
+            };
+            Arc::new(RedisStreamEventSink::new(
+                redis_url,
+                config.request_log_stream(),
+            ))
+        }
+        EventSinkKind::ControlPlaneHttp => {
+            let Some(base_url) = control_plane_base_url.as_deref() else {
+                return Err(anyhow!(
+                    "control plane http event sink selected without control_plane_base_url"
+                ));
+            };
+            Arc::new(ControlPlaneHttpEventSink::new(
+                base_url,
+                resolve_internal_auth_token()?,
+            ))
+        }
+        EventSinkKind::Noop => Arc::new(NoopEventSink),
+    };
+
+    build_app_with_options(config, event_sink, allowed_api_keys_from_env(), false).await
 }
 
 pub async fn build_app_with_event_sink(
     config: DataPlaneConfig,
     event_sink: Arc<dyn EventSink>,
 ) -> anyhow::Result<Router> {
-    build_app_with_event_sink_and_allowed_keys(config, event_sink, allowed_api_keys_from_env())
-        .await
+    build_app_with_options(config, event_sink, allowed_api_keys_from_env(), true).await
+}
+
+pub async fn build_app_with_event_sink_without_status_routes(
+    config: DataPlaneConfig,
+    event_sink: Arc<dyn EventSink>,
+) -> anyhow::Result<Router> {
+    build_app_with_options(config, event_sink, allowed_api_keys_from_env(), false).await
 }
 
 pub async fn build_app_with_event_sink_and_allowed_keys(
     config: DataPlaneConfig,
     event_sink: Arc<dyn EventSink>,
     allowed_api_keys: Vec<String>,
+) -> anyhow::Result<Router> {
+    build_app_with_options(config, event_sink, allowed_api_keys, true).await
+}
+
+async fn build_app_with_options(
+    config: DataPlaneConfig,
+    event_sink: Arc<dyn EventSink>,
+    allowed_api_keys: Vec<String>,
+    include_status_routes: bool,
 ) -> anyhow::Result<Router> {
     let control_plane_base_url = resolve_control_plane_base_url(&config);
     let control_plane_internal_auth_token = resolve_internal_auth_token()?;
@@ -444,11 +492,15 @@ pub async fn build_app_with_event_sink_and_allowed_keys(
         ));
 
     let mut app = Router::new()
-        .route("/health", get(healthz))
-        .route("/livez", get(livez))
-        .route("/readyz", get(readyz))
         .route("/api/codex/usage", get(usage_handler))
         .merge(protected_routes);
+
+    if include_status_routes {
+        app = app
+            .route("/health", get(healthz))
+            .route("/livez", get(livez))
+            .route("/readyz", get(readyz));
+    }
 
     if enable_internal_debug_routes {
         let internal_debug_routes = Router::new()
@@ -694,8 +746,51 @@ async fn readyz(State(state): State<Arc<AppState>>) -> (StatusCode, axum::Json<R
 
 #[cfg(test)]
 mod bootstrap_tests {
-    use super::{select_event_sink_kind, EventSinkKind};
+    use super::{
+        build_app_with_event_sink_without_status_routes, select_event_sink_kind, EventSinkKind,
+    };
+    use crate::config::DataPlaneConfig;
+    use crate::event::NoopEventSink;
+    use crate::test_support::{set_env, ENV_LOCK};
+    use axum::body::Body;
+    use axum::http::{Request, StatusCode};
     use codex_pool_core::api::ProductEdition;
+    use codex_pool_core::model::RoutingStrategy;
+    use std::sync::Arc;
+    use tower::util::ServiceExt;
+
+    fn test_config() -> DataPlaneConfig {
+        DataPlaneConfig {
+            listen_addr: "127.0.0.1:8091".parse().unwrap(),
+            routing_strategy: RoutingStrategy::RoundRobin,
+            upstream_accounts: Vec::new(),
+            account_ejection_ttl_sec: 30,
+            enable_request_failover: true,
+            same_account_quick_retry_max: 1,
+            request_failover_wait_ms: 100,
+            retry_poll_interval_ms: 50,
+            sticky_prefer_non_conflicting: true,
+            shared_routing_cache_enabled: false,
+            enable_metered_stream_billing: false,
+            billing_authorize_required_for_stream: false,
+            stream_billing_reserve_microcredits: 0,
+            billing_dynamic_preauth_enabled: false,
+            billing_preauth_expected_output_tokens: 0,
+            billing_preauth_safety_factor: 1.0,
+            billing_preauth_min_microcredits: 0,
+            billing_preauth_max_microcredits: 0,
+            billing_preauth_unit_price_microcredits: 0,
+            stream_billing_drain_timeout_ms: 500,
+            billing_capture_retry_max: 1,
+            billing_capture_retry_backoff_ms: 50,
+            redis_url: None,
+            auth_validate_url: None,
+            auth_validate_cache_ttl_sec: 0,
+            auth_validate_negative_cache_ttl_sec: 0,
+            auth_fail_open: false,
+            enable_internal_debug_routes: false,
+        }
+    }
 
     #[test]
     fn select_event_sink_kind_prefers_redis_when_available() {
@@ -732,5 +827,42 @@ mod bootstrap_tests {
         let selected = select_event_sink_kind(ProductEdition::Personal, None, None);
 
         assert_eq!(selected, EventSinkKind::Noop);
+    }
+
+    #[tokio::test]
+    async fn build_app_without_status_routes_omits_health_endpoints() {
+        let _guard = ENV_LOCK.lock().expect("lock env");
+        let old_internal_auth =
+            set_env("CONTROL_PLANE_INTERNAL_AUTH_TOKEN", Some("test-internal-token"));
+
+        let app = build_app_with_event_sink_without_status_routes(
+            test_config(),
+            Arc::new(NoopEventSink),
+        )
+        .await
+        .expect("build app without status routes");
+
+        let health = app
+            .clone()
+            .oneshot(Request::builder().uri("/health").body(Body::empty()).unwrap())
+            .await
+            .expect("health response");
+        assert_eq!(health.status(), StatusCode::NOT_FOUND);
+
+        let usage = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/codex/usage")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .expect("usage response");
+        assert_eq!(usage.status(), StatusCode::OK);
+
+        set_env(
+            "CONTROL_PLANE_INTERNAL_AUTH_TOKEN",
+            old_internal_auth.as_deref(),
+        );
     }
 }
