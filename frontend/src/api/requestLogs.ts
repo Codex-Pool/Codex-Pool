@@ -26,6 +26,7 @@ export interface RequestAuditLogItem {
   latency_ms: number
   is_stream: boolean
   error_code?: string
+  estimated_cost_microusd?: number
   event_version: number
   created_at: string
 }

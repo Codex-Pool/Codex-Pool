@@ -6,6 +6,7 @@ import { AlertTriangle, Cpu, Database, type LucideIcon, Server } from 'lucide-re
 import { useTranslation } from 'react-i18next'
 
 import { adminApi } from '@/api/settings'
+import { systemApi, DEFAULT_SYSTEM_CAPABILITIES } from '@/api/system'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { StandardDataTable } from '@/components/ui/standard-data-table'
@@ -83,6 +84,11 @@ function calcRatio(numerator: number, denominator: number): number | undefined {
 
 export default function System() {
     const { t, i18n } = useTranslation()
+    const { data: capabilities = DEFAULT_SYSTEM_CAPABILITIES } = useQuery({
+        queryKey: ['systemCapabilities'],
+        queryFn: () => systemApi.getCapabilities(),
+        staleTime: 5 * 60_000,
+    })
     const { data: systemState, isLoading } = useQuery({
         queryKey: ['adminSystemState'],
         queryFn: adminApi.getSystemState,
@@ -329,8 +335,8 @@ export default function System() {
                         : t('system.observability.na'),
                 hint: t('system.observability.hints.billingPreauthTopModelP95'),
             },
-        ]
-    }, [countFormatter, observability, ratioFormatter, t])
+        ].filter((item) => capabilities.features.credit_billing || !item.id.startsWith('billing_'))
+    }, [capabilities.features.credit_billing, countFormatter, observability, ratioFormatter, t])
 
     const components = useMemo<SystemComponentRow[]>(() => {
         const controlPlaneStatus: ComponentStatus = isLoading

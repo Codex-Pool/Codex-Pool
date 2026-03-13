@@ -101,6 +101,7 @@ impl UsageQueryRepository for FakeUsageRepo {
             tenant_api_key_total_requests: 7,
             unique_account_count: 2,
             unique_tenant_api_key_count: 2,
+            estimated_cost_microusd: None,
             dashboard_metrics: None,
         })
     }

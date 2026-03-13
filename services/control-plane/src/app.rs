@@ -1266,6 +1266,345 @@ mod usage_ingest_tests {
     }
 }
 
+#[cfg(test)]
+mod usage_cost_surface_tests {
+    use super::build_app_with_store_ttl_usage_repo_import_store_and_admin_auth;
+    use crate::admin_auth::AdminAuthService;
+    use crate::import_jobs::InMemoryOAuthImportJobStore;
+    use crate::store::{ControlPlaneStore, InMemoryStore};
+    use crate::test_support::{set_env, ENV_LOCK};
+    use crate::usage::clickhouse_repo::UsageQueryRepository;
+    use axum::body::{to_bytes, Body};
+    use axum::http::{Request, StatusCode};
+    use chrono::Utc;
+    use codex_pool_core::api::{
+        UsageDashboardMetrics, UsageDashboardModelDistributionItem,
+        UsageDashboardTokenBreakdown, UsageDashboardTokenTrendPoint, UsageSummaryQueryResponse,
+    };
+    use serde_json::{json, Value};
+    use std::sync::Arc;
+    use tower::ServiceExt;
+    use uuid::Uuid;
+
+    const TEST_ADMIN_USERNAME: &str = "admin";
+    const TEST_ADMIN_PASSWORD: &str = "admin123456";
+    const TEST_ADMIN_JWT_SECRET: &str = "control-plane-test-jwt-secret";
+    const TEST_INTERNAL_AUTH_TOKEN: &str = "control-plane-test-internal-auth-token";
+
+    #[derive(Clone)]
+    struct CostSurfaceUsageRepo {
+        rows: Vec<crate::usage::RequestLogRow>,
+        summary: UsageSummaryQueryResponse,
+    }
+
+    #[async_trait::async_trait]
+    impl UsageQueryRepository for CostSurfaceUsageRepo {
+        async fn query_hourly_accounts(
+            &self,
+            _start_ts: i64,
+            _end_ts: i64,
+            _limit: u32,
+            _account_id: Option<Uuid>,
+        ) -> anyhow::Result<Vec<codex_pool_core::api::HourlyAccountUsagePoint>> {
+            Ok(Vec::new())
+        }
+
+        async fn query_hourly_tenant_api_keys(
+            &self,
+            _start_ts: i64,
+            _end_ts: i64,
+            _limit: u32,
+            _tenant_id: Option<Uuid>,
+            _api_key_id: Option<Uuid>,
+        ) -> anyhow::Result<Vec<codex_pool_core::api::HourlyTenantApiKeyUsagePoint>> {
+            Ok(Vec::new())
+        }
+
+        async fn query_hourly_account_totals(
+            &self,
+            _start_ts: i64,
+            _end_ts: i64,
+            _limit: u32,
+            _account_id: Option<Uuid>,
+        ) -> anyhow::Result<Vec<codex_pool_core::api::HourlyUsageTotalPoint>> {
+            Ok(Vec::new())
+        }
+
+        async fn query_hourly_tenant_api_key_totals(
+            &self,
+            _start_ts: i64,
+            _end_ts: i64,
+            _limit: u32,
+            _tenant_id: Option<Uuid>,
+            _api_key_id: Option<Uuid>,
+        ) -> anyhow::Result<Vec<codex_pool_core::api::HourlyUsageTotalPoint>> {
+            Ok(Vec::new())
+        }
+
+        async fn query_hourly_tenant_totals(
+            &self,
+            _start_ts: i64,
+            _end_ts: i64,
+            _limit: u32,
+            _tenant_id: Option<Uuid>,
+            _api_key_id: Option<Uuid>,
+        ) -> anyhow::Result<Vec<codex_pool_core::api::HourlyTenantUsageTotalPoint>> {
+            Ok(Vec::new())
+        }
+
+        async fn query_summary(
+            &self,
+            _start_ts: i64,
+            _end_ts: i64,
+            _tenant_id: Option<Uuid>,
+            _account_id: Option<Uuid>,
+            _api_key_id: Option<Uuid>,
+        ) -> anyhow::Result<UsageSummaryQueryResponse> {
+            Ok(self.summary.clone())
+        }
+
+        async fn query_tenant_leaderboard(
+            &self,
+            _start_ts: i64,
+            _end_ts: i64,
+            _limit: u32,
+            _tenant_id: Option<Uuid>,
+        ) -> anyhow::Result<Vec<codex_pool_core::api::TenantUsageLeaderboardItem>> {
+            Ok(Vec::new())
+        }
+
+        async fn query_account_leaderboard(
+            &self,
+            _start_ts: i64,
+            _end_ts: i64,
+            _limit: u32,
+            _account_id: Option<Uuid>,
+        ) -> anyhow::Result<Vec<codex_pool_core::api::AccountUsageLeaderboardItem>> {
+            Ok(Vec::new())
+        }
+
+        async fn query_api_key_leaderboard(
+            &self,
+            _start_ts: i64,
+            _end_ts: i64,
+            _limit: u32,
+            _tenant_id: Option<Uuid>,
+            _api_key_id: Option<Uuid>,
+        ) -> anyhow::Result<Vec<codex_pool_core::api::ApiKeyUsageLeaderboardItem>> {
+            Ok(Vec::new())
+        }
+
+        async fn query_request_logs(
+            &self,
+            _query: crate::usage::RequestLogQuery,
+        ) -> anyhow::Result<Vec<crate::usage::RequestLogRow>> {
+            Ok(self.rows.clone())
+        }
+    }
+
+    fn configure_test_env() -> [Option<String>; 4] {
+        [
+            set_env("ADMIN_USERNAME", Some(TEST_ADMIN_USERNAME)),
+            set_env("ADMIN_PASSWORD", Some(TEST_ADMIN_PASSWORD)),
+            set_env("ADMIN_JWT_SECRET", Some(TEST_ADMIN_JWT_SECRET)),
+            set_env(
+                "CONTROL_PLANE_INTERNAL_AUTH_TOKEN",
+                Some(TEST_INTERNAL_AUTH_TOKEN),
+            ),
+        ]
+    }
+
+    fn restore_test_env(old_values: [Option<String>; 4]) {
+        let [old_username, old_password, old_secret, old_internal] = old_values;
+        set_env("ADMIN_USERNAME", old_username.as_deref());
+        set_env("ADMIN_PASSWORD", old_password.as_deref());
+        set_env("ADMIN_JWT_SECRET", old_secret.as_deref());
+        set_env("CONTROL_PLANE_INTERNAL_AUTH_TOKEN", old_internal.as_deref());
+    }
+
+    fn build_test_app(usage_repo: Arc<dyn UsageQueryRepository>) -> axum::Router {
+        let store: Arc<dyn ControlPlaneStore> = Arc::new(InMemoryStore::default());
+        let admin_auth = AdminAuthService::from_env().expect("admin auth");
+        build_app_with_store_ttl_usage_repo_import_store_and_admin_auth(
+            store,
+            super::DEFAULT_AUTH_VALIDATE_CACHE_TTL_SEC,
+            Some(usage_repo),
+            Arc::new(InMemoryOAuthImportJobStore::default()),
+            admin_auth,
+        )
+    }
+
+    async fn login_and_get_admin_token(app: &axum::Router) -> String {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/admin/auth/login")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        json!({
+                            "username": TEST_ADMIN_USERNAME,
+                            "password": TEST_ADMIN_PASSWORD,
+                        })
+                        .to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .expect("admin login response");
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let payload: Value = serde_json::from_slice(&body).unwrap();
+        payload["access_token"]
+            .as_str()
+            .expect("access_token must be present")
+            .to_string()
+    }
+
+    fn sample_summary() -> UsageSummaryQueryResponse {
+        UsageSummaryQueryResponse {
+            start_ts: 1_700_000_000,
+            end_ts: 1_700_086_400,
+            account_total_requests: 3,
+            tenant_api_key_total_requests: 2,
+            unique_account_count: 1,
+            unique_tenant_api_key_count: 1,
+            estimated_cost_microusd: Some(2_750_000),
+            dashboard_metrics: Some(UsageDashboardMetrics {
+                total_requests: 3,
+                estimated_cost_microusd: Some(2_750_000),
+                token_breakdown: UsageDashboardTokenBreakdown {
+                    input_tokens: 1_200,
+                    cached_input_tokens: 200,
+                    output_tokens: 600,
+                    reasoning_tokens: 40,
+                    total_tokens: 2_040,
+                },
+                avg_first_token_latency_ms: Some(120),
+                token_trends: vec![UsageDashboardTokenTrendPoint {
+                    hour_start: 1_700_000_000,
+                    request_count: 2,
+                    input_tokens: 800,
+                    cached_input_tokens: 100,
+                    output_tokens: 400,
+                    reasoning_tokens: 20,
+                    total_tokens: 1_320,
+                    estimated_cost_microusd: Some(1_500_000),
+                }],
+                model_request_distribution: vec![UsageDashboardModelDistributionItem {
+                    model: "gpt-5.3-codex".to_string(),
+                    request_count: 3,
+                    total_tokens: 2_040,
+                }],
+                model_token_distribution: vec![UsageDashboardModelDistributionItem {
+                    model: "gpt-5.3-codex".to_string(),
+                    request_count: 3,
+                    total_tokens: 2_040,
+                }],
+            }),
+        }
+    }
+
+    fn sample_request_log_row() -> crate::usage::RequestLogRow {
+        crate::usage::RequestLogRow {
+            id: Uuid::new_v4(),
+            account_id: Uuid::new_v4(),
+            tenant_id: Some(Uuid::new_v4()),
+            api_key_id: Some(Uuid::new_v4()),
+            request_id: Some("req_cost_surface".to_string()),
+            path: "/v1/responses".to_string(),
+            method: "POST".to_string(),
+            model: Some("gpt-5.3-codex".to_string()),
+            service_tier: Some("default".to_string()),
+            input_tokens: Some(800),
+            cached_input_tokens: Some(100),
+            output_tokens: Some(400),
+            reasoning_tokens: Some(20),
+            first_token_latency_ms: Some(88),
+            status_code: 200,
+            latency_ms: 420,
+            is_stream: false,
+            error_code: None,
+            billing_phase: Some("captured".to_string()),
+            authorization_id: Some(Uuid::new_v4()),
+            capture_status: Some("captured".to_string()),
+            estimated_cost_microusd: Some(1_500_000),
+            created_at: Utc::now(),
+            event_version: 1,
+        }
+    }
+
+    #[tokio::test]
+    async fn admin_usage_summary_exposes_estimated_cost_fields() {
+        let _guard = ENV_LOCK.lock().expect("lock env");
+        let old_values = configure_test_env();
+        let app = build_test_app(Arc::new(CostSurfaceUsageRepo {
+            rows: vec![sample_request_log_row()],
+            summary: sample_summary(),
+        }));
+        let access_token = login_and_get_admin_token(&app).await;
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/api/v1/admin/usage/summary?start_ts=1700000000&end_ts=1700086400")
+                    .header("authorization", format!("Bearer {access_token}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        restore_test_env(old_values);
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let payload: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(payload["estimated_cost_microusd"], 2_750_000);
+        assert_eq!(
+            payload["dashboard_metrics"]["estimated_cost_microusd"],
+            2_750_000
+        );
+        assert_eq!(
+            payload["dashboard_metrics"]["token_trends"][0]["estimated_cost_microusd"],
+            1_500_000
+        );
+    }
+
+    #[tokio::test]
+    async fn admin_request_logs_expose_estimated_cost_per_item() {
+        let _guard = ENV_LOCK.lock().expect("lock env");
+        let old_values = configure_test_env();
+        let app = build_test_app(Arc::new(CostSurfaceUsageRepo {
+            rows: vec![sample_request_log_row()],
+            summary: sample_summary(),
+        }));
+        let access_token = login_and_get_admin_token(&app).await;
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/api/v1/admin/request-logs?start_ts=1700000000&end_ts=1700086400")
+                    .header("authorization", format!("Bearer {access_token}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        restore_test_env(old_values);
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let payload: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(payload["items"][0]["estimated_cost_microusd"], 1_500_000);
+    }
+}
+
 fn add_multi_tenant_routes(
     router: Router<AppState>,
     capabilities: &SystemCapabilitiesResponse,

@@ -118,6 +118,7 @@ export interface UsageSummaryQueryResponse {
   tenant_api_key_total_requests: number
   unique_account_count: number
   unique_tenant_api_key_count: number
+  estimated_cost_microusd?: number
   dashboard_metrics?: UsageDashboardMetrics
 }
 
@@ -150,6 +151,7 @@ export interface UsageDashboardTokenTrendPoint {
   output_tokens: number
   reasoning_tokens: number
   total_tokens: number
+  estimated_cost_microusd?: number
 }
 
 export interface UsageDashboardModelDistributionItem {
@@ -160,6 +162,7 @@ export interface UsageDashboardModelDistributionItem {
 
 export interface UsageDashboardMetrics {
   total_requests: number
+  estimated_cost_microusd?: number
   token_breakdown: UsageDashboardTokenBreakdown
   avg_first_token_latency_ms?: number
   token_trends: UsageDashboardTokenTrendPoint[]

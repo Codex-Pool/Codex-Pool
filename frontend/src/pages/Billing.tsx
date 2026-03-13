@@ -11,6 +11,7 @@ import {
   type AdminTenantCreditLedgerItem,
 } from '@/api/adminTenants'
 import { localizeApiErrorDisplay, localizeHttpStatusDisplay } from '@/api/errorI18n'
+import { systemApi, DEFAULT_SYSTEM_CAPABILITIES } from '@/api/system'
 import {
   getServiceTierBadgeTone,
   getServiceTierDefaultLabel,
@@ -34,6 +35,7 @@ import {
 } from '@/components/ui/select'
 import { StandardDataTable } from '@/components/ui/standard-data-table'
 import { TrendChart } from '@/components/ui/trend-chart'
+import { AdminCostReportPage } from '@/features/billing/admin-cost-report'
 
 type BillingGranularity = 'day' | 'month'
 
@@ -590,6 +592,20 @@ function escapeCsvField(value: string) {
 }
 
 export default function Billing() {
+  const { data: capabilities = DEFAULT_SYSTEM_CAPABILITIES } = useQuery({
+    queryKey: ['systemCapabilities'],
+    queryFn: () => systemApi.getCapabilities(),
+    staleTime: 5 * 60_000,
+  })
+
+  if (!capabilities.features.credit_billing && capabilities.features.cost_reports) {
+    return <AdminCostReportPage capabilities={capabilities} />
+  }
+
+  return <BusinessBillingPage />
+}
+
+function BusinessBillingPage() {
   const { i18n, t } = useTranslation()
   const queryClient = useQueryClient()
   const locale = i18n.resolvedLanguage ?? i18n.language

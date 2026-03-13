@@ -154,6 +154,8 @@ struct RequestLogItemResponse {
     authorization_id: Option<Uuid>,
     #[serde(skip_serializing_if = "Option::is_none")]
     capture_status: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    estimated_cost_microusd: Option<i64>,
     created_at: DateTime<Utc>,
     event_version: u16,
 }

@@ -929,44 +929,22 @@ fn authorization_capture_is_idempotent(status: &str) -> bool {
     status == "captured"
 }
 
-const PRICING_PER_MILLION_TOKENS_SCALE: i128 = 1_000_000;
-
-fn charge_tokens_by_per_million_price(tokens: i64, price_per_million_microcredits: i64) -> i64 {
-    let normalized_tokens = tokens.max(0) as i128;
-    let normalized_price = price_per_million_microcredits.max(0) as i128;
-    if normalized_tokens == 0 || normalized_price == 0 {
-        return 0;
-    }
-    // Round to nearest microcredit to avoid systematic under/over charging on small requests.
-    let numerator = normalized_tokens
-        .saturating_mul(normalized_price)
-        .saturating_add(PRICING_PER_MILLION_TOKENS_SCALE / 2);
-    let charged = numerator / PRICING_PER_MILLION_TOKENS_SCALE;
-    charged.clamp(0, i64::MAX as i128) as i64
-}
-
 fn calculate_charged_microcredits(
     input_tokens: i64,
     cached_input_tokens: i64,
     output_tokens: i64,
     pricing: &BillingPricingResolved,
 ) -> i64 {
-    let normalized_input_tokens = input_tokens.max(0);
-    let normalized_cached_input_tokens = cached_input_tokens.max(0).min(normalized_input_tokens);
-    let billable_input_tokens = normalized_input_tokens.saturating_sub(normalized_cached_input_tokens);
-    let normalized_output_tokens = output_tokens.max(0);
-
-    let input_charge =
-        charge_tokens_by_per_million_price(billable_input_tokens, pricing.input_price_microcredits);
-    let cached_input_charge = charge_tokens_by_per_million_price(
-        normalized_cached_input_tokens,
-        pricing.cached_input_price_microcredits,
-    );
-    let output_charge =
-        charge_tokens_by_per_million_price(normalized_output_tokens, pricing.output_price_microcredits);
-    input_charge
-        .saturating_add(cached_input_charge)
-        .saturating_add(output_charge)
+    crate::cost::calculate_estimated_cost_microusd(
+        input_tokens,
+        cached_input_tokens,
+        output_tokens,
+        crate::cost::TokenPriceMicrousd {
+            input_price_microusd: pricing.input_price_microcredits,
+            cached_input_price_microusd: pricing.cached_input_price_microcredits,
+            output_price_microusd: pricing.output_price_microcredits,
+        },
+    )
 }
 
 #[cfg(test)]

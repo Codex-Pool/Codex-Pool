@@ -9,8 +9,9 @@ use serde::Serialize;
 use uuid::Uuid;
 
 use crate::usage::{
-    request_log_row_from_event, usage_rows_from_request_log_event, HourlyAccountUsageRow,
+    aggregate_by_hour, request_log_row_from_event, HourlyAccountUsageRow,
     HourlyTenantAccountUsageRow, HourlyTenantApiKeyUsageRow, RequestLogRow,
+    UsageAggregationEvent,
 };
 
 #[derive(Debug, Clone)]
@@ -590,21 +591,16 @@ where
 
         let mut message_ids = Vec::with_capacity(messages.len());
         let mut request_log_rows = Vec::with_capacity(messages.len());
-        let mut account_rows = Vec::with_capacity(messages.len());
-        let mut tenant_api_key_rows = Vec::with_capacity(messages.len());
-        let mut tenant_account_rows = Vec::with_capacity(messages.len());
+        let mut aggregation_events = Vec::with_capacity(messages.len());
         for message in messages {
             let resolved_tenant_id = message.tenant_id.or(message.event.tenant_id);
             let resolved_api_key_id = message.api_key_id.or(message.event.api_key_id);
             if message.event.billing_phase.as_deref() != Some("streaming_open") {
-                let usage_rows = usage_rows_from_request_log_event(
+                aggregation_events.push(UsageAggregationEvent::from_request_log_event(
                     &message.event,
                     resolved_tenant_id,
                     resolved_api_key_id,
-                );
-                account_rows.extend(usage_rows.account_rows);
-                tenant_api_key_rows.extend(usage_rows.tenant_api_key_rows);
-                tenant_account_rows.extend(usage_rows.tenant_account_rows);
+                ));
             }
             request_log_rows.push(request_log_row_from_event(
                 &message.event,
@@ -613,10 +609,15 @@ where
             ));
             message_ids.push(message.message_id);
         }
+        let hourly_rows = aggregate_by_hour(aggregation_events);
 
         self.repo.upsert_request_logs(request_log_rows).await?;
         self.repo
-            .upsert_hourly(account_rows, tenant_api_key_rows, tenant_account_rows)
+            .upsert_hourly(
+                hourly_rows.account_rows,
+                hourly_rows.tenant_api_key_rows,
+                hourly_rows.tenant_account_rows,
+            )
             .await?;
         self.stream_reader.ack(&message_ids).await?;
 

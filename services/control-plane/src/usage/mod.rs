@@ -62,6 +62,7 @@ pub struct RequestLogRow {
     pub billing_phase: Option<String>,
     pub authorization_id: Option<Uuid>,
     pub capture_status: Option<String>,
+    pub estimated_cost_microusd: Option<i64>,
     pub created_at: DateTime<Utc>,
     pub event_version: u16,
 }
@@ -219,6 +220,7 @@ pub fn request_log_row_from_event(
         billing_phase: event.billing_phase.clone(),
         authorization_id: event.authorization_id,
         capture_status: event.capture_status.clone(),
+        estimated_cost_microusd: None,
         created_at: event.created_at,
         event_version: event.event_version,
     }

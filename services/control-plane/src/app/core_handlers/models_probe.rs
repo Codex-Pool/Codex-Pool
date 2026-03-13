@@ -1076,6 +1076,7 @@ mod models_probe_tests {
             billing_phase: Some("released".to_string()),
             authorization_id: None,
             capture_status: Some("captured".to_string()),
+            estimated_cost_microusd: None,
             created_at: Utc::now(),
             event_version: 2,
         }];
@@ -1292,6 +1293,7 @@ mod models_probe_tests {
                 tenant_api_key_total_requests: 0,
                 unique_account_count: 0,
                 unique_tenant_api_key_count: 0,
+                estimated_cost_microusd: None,
                 dashboard_metrics: None,
             })
         }
@@ -1418,6 +1420,7 @@ mod models_probe_tests {
             billing_phase: Some("released".to_string()),
             authorization_id: None,
             capture_status: Some("captured".to_string()),
+            estimated_cost_microusd: None,
             created_at: Utc::now(),
             event_version: 2,
         }]);

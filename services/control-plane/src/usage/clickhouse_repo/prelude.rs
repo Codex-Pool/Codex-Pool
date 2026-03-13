@@ -460,6 +460,7 @@ impl TryFrom<ClickHouseRequestLogQueryRow> for RequestLogRow {
                     )
                 })?,
             capture_status: row.capture_status,
+            estimated_cost_microusd: None,
             created_at,
             event_version: row.event_version,
         })

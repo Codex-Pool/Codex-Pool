@@ -9,6 +9,7 @@ pub(crate) use sqlx_postgres::PgConnection;
 pub mod admin_auth;
 pub mod app;
 pub mod config;
+pub mod cost;
 pub mod crypto;
 pub mod import_jobs;
 pub mod oauth;

@@ -1257,6 +1257,50 @@ export default {
             rawText: "Official text snapshot",
         }
     },
+    costReports: {
+        admin: {
+            title: "コストレポート",
+            description: "直近 30 日間の推定 USD 利用額を読み取り専用で表示します。"
+        },
+        tenant: {
+            title: "利用コストレポート",
+            description: "現在のテナントの推定 USD 利用額を読み取り専用で表示します。"
+        },
+        summary: {
+            totalCost: "推定コスト",
+            totalRequests: "総リクエスト数",
+            avgCostPerRequest: "1 リクエストあたり平均コスト"
+        },
+        chart: {
+            title: "コスト推移",
+            description: "リクエストログから集計した推定 USD コストです。",
+            empty: "選択した範囲にはコストデータがありません。",
+            series: {
+                cost: "推定コスト"
+            }
+        },
+        logs: {
+            title: "リクエストログ",
+            empty: "この範囲にはリクエストログがありません。",
+            searchPlaceholder: "リクエスト ID、モデル、テナント、またはステータスで検索",
+            columns: {
+                time: "時刻",
+                tenant: "テナント",
+                requestId: "リクエスト ID",
+                model: "モデル",
+                status: "ステータス",
+                cost: "推定コスト"
+            }
+        },
+        filters: {
+            tenant: "テナント",
+            allTenants: "すべてのテナント",
+            apiKey: "API キー",
+            allApiKeys: "すべての API キー",
+            day: "日次",
+            month: "月次"
+        }
+    },
     nav: {
         accounts: "アカウントプール",
         modelRouting: "Model Routing",

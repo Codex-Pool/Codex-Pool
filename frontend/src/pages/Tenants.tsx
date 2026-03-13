@@ -13,6 +13,7 @@ import {
 import { apiClient } from '@/api/client'
 import { localizeApiErrorDisplay } from '@/api/errorI18n'
 import { apiKeysApi, type ApiKey, type CreateApiKeyResponse } from '@/api/settings'
+import { systemApi, DEFAULT_SYSTEM_CAPABILITIES } from '@/api/system'
 import type { UsageSummaryQueryResponse } from '@/api/types'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -85,6 +86,11 @@ interface TenantPoolRow {
 export default function Tenants() {
   const { t } = useTranslation()
   const queryClient = useQueryClient()
+  const { data: capabilities = DEFAULT_SYSTEM_CAPABILITIES } = useQuery({
+    queryKey: ['systemCapabilities'],
+    queryFn: () => systemApi.getCapabilities(),
+    staleTime: 5 * 60_000,
+  })
 
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
@@ -757,50 +763,54 @@ export default function Tenants() {
                   </section>
 
                   <section className={POOL_ELEVATED_SECTION_CLASS_NAME}>
-                    <h3 className="text-base font-medium">
-                      {t('tenants.recharge.title', { defaultValue: 'Tenant Recharge' })}
-                    </h3>
-                    <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-                      <div className="space-y-1.5">
-                        <label htmlFor="profile-recharge-amount" className={LABEL_CLASS_NAME}>
-                          {t('tenants.recharge.fields.amount', { defaultValue: 'Microcredits (integer)' })}
-                        </label>
-                        <Input
-                          id="profile-recharge-amount"
-                          name="amount_microcredits"
-                          type="number"
-                          min={0}
-                          value={rechargeForm.amount_microcredits}
-                          onChange={(e) =>
-                            setRechargeForm((prev) => ({
-                              ...prev,
-                              amount_microcredits: e.target.value,
-                            }))
-                          }
-                        />
-                      </div>
-                      <div className="space-y-1.5">
-                        <label htmlFor="profile-recharge-reason" className={LABEL_CLASS_NAME}>
-                          {t('tenants.recharge.fields.reason', { defaultValue: 'Reason' })}
-                        </label>
-                        <Input
-                          id="profile-recharge-reason"
-                          name="reason"
-                          value={rechargeForm.reason}
-                          onChange={(e) =>
-                            setRechargeForm((prev) => ({ ...prev, reason: e.target.value }))
-                          }
-                        />
-                      </div>
-                    </div>
-                    <Button onClick={() => rechargeMutation.mutate()} disabled={rechargeMutation.isPending}>
-                      {rechargeMutation.isPending ? (
-                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      ) : null}
-                      {t('tenants.recharge.submit', { defaultValue: 'Apply Recharge' })}
-                    </Button>
+                    {capabilities.features.tenant_recharge ? (
+                      <>
+                        <h3 className="text-base font-medium">
+                          {t('tenants.recharge.title', { defaultValue: 'Tenant Recharge' })}
+                        </h3>
+                        <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                          <div className="space-y-1.5">
+                            <label htmlFor="profile-recharge-amount" className={LABEL_CLASS_NAME}>
+                              {t('tenants.recharge.fields.amount', { defaultValue: 'Microcredits (integer)' })}
+                            </label>
+                            <Input
+                              id="profile-recharge-amount"
+                              name="amount_microcredits"
+                              type="number"
+                              min={0}
+                              value={rechargeForm.amount_microcredits}
+                              onChange={(e) =>
+                                setRechargeForm((prev) => ({
+                                  ...prev,
+                                  amount_microcredits: e.target.value,
+                                }))
+                              }
+                            />
+                          </div>
+                          <div className="space-y-1.5">
+                            <label htmlFor="profile-recharge-reason" className={LABEL_CLASS_NAME}>
+                              {t('tenants.recharge.fields.reason', { defaultValue: 'Reason' })}
+                            </label>
+                            <Input
+                              id="profile-recharge-reason"
+                              name="reason"
+                              value={rechargeForm.reason}
+                              onChange={(e) =>
+                                setRechargeForm((prev) => ({ ...prev, reason: e.target.value }))
+                              }
+                            />
+                          </div>
+                        </div>
+                        <Button onClick={() => rechargeMutation.mutate()} disabled={rechargeMutation.isPending}>
+                          {rechargeMutation.isPending ? (
+                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          ) : null}
+                          {t('tenants.recharge.submit', { defaultValue: 'Apply Recharge' })}
+                        </Button>
 
-                    <div className="h-px bg-border" />
+                        <div className="h-px bg-border" />
+                      </>
+                    ) : null}
 
                     <h3 className="text-base font-medium">
                       {t('tenants.impersonation.title', { defaultValue: 'Admin Impersonation' })}

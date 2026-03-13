@@ -317,6 +317,7 @@ impl ClickHouseUsageRepo {
                     .saturating_add(row.cached_input_tokens)
                     .saturating_add(row.output_tokens)
                     .saturating_add(row.reasoning_tokens),
+                estimated_cost_microusd: None,
             })
             .collect())
     }
@@ -481,6 +482,7 @@ impl ClickHouseUsageRepo {
 
                 Some(UsageDashboardMetrics {
                     total_requests: dashboard_summary.total_requests,
+                    estimated_cost_microusd: None,
                     token_breakdown,
                     avg_first_token_latency_ms: dashboard_summary.avg_first_token_latency_ms,
                     token_trends,
@@ -509,6 +511,7 @@ impl ClickHouseUsageRepo {
             tenant_api_key_total_requests: tenant_api_key_summary.tenant_api_key_total_requests,
             unique_account_count: account_summary.unique_account_count,
             unique_tenant_api_key_count: tenant_api_key_summary.unique_tenant_api_key_count,
+            estimated_cost_microusd: None,
             dashboard_metrics,
         })
     }

@@ -13,6 +13,7 @@ use sqlx_postgres::{PgPool, Postgres};
 use uuid::Uuid;
 
 use crate::Row;
+use crate::cost::{calculate_estimated_cost_microusd, TokenPriceMicrousd};
 
 use crate::usage::clickhouse_repo::UsageQueryRepository;
 use crate::usage::{
@@ -57,6 +58,152 @@ impl PostgresUsageRepo {
 
     fn as_u16(value: i32, field: &str) -> Result<u16> {
         u16::try_from(value).with_context(|| format!("{field} is out of range: {value}"))
+    }
+
+    fn parse_i64_env_positive(key: &str) -> Option<i64> {
+        std::env::var(key)
+            .ok()
+            .and_then(|raw| raw.parse::<i64>().ok())
+            .filter(|value| *value > 0)
+    }
+
+    fn parse_i64_env_non_negative(key: &str) -> Option<i64> {
+        std::env::var(key)
+            .ok()
+            .and_then(|raw| raw.parse::<i64>().ok())
+            .filter(|value| *value >= 0)
+    }
+
+    fn normalize_cached_input_price_microusd(input_price: i64, cached_input_price: i64) -> i64 {
+        if cached_input_price <= 0 {
+            return input_price.max(0);
+        }
+        cached_input_price
+    }
+
+    fn normalize_service_tier(raw: Option<&str>) -> String {
+        match raw
+            .unwrap_or("default")
+            .trim()
+            .to_ascii_lowercase()
+            .as_str()
+        {
+            "priority" | "fast" => "priority".to_string(),
+            "flex" => "flex".to_string(),
+            _ => "default".to_string(),
+        }
+    }
+
+    fn pricing_override_lookup_tiers(service_tier: &str) -> Vec<&str> {
+        match service_tier {
+            "priority" => vec!["priority", "default"],
+            "flex" => vec!["flex", "default"],
+            _ => vec!["default"],
+        }
+    }
+
+    fn fallback_pricing() -> Option<TokenPriceMicrousd> {
+        let input_price_microusd =
+            Self::parse_i64_env_positive("BILLING_DEFAULT_INPUT_PRICE_MICROCREDITS")?;
+        let output_price_microusd =
+            Self::parse_i64_env_positive("BILLING_DEFAULT_OUTPUT_PRICE_MICROCREDITS")?;
+        let cached_input_price_microusd =
+            Self::parse_i64_env_non_negative("BILLING_DEFAULT_CACHED_INPUT_PRICE_MICROCREDITS")
+                .unwrap_or(input_price_microusd / 10)
+                .max(0);
+        Some(TokenPriceMicrousd {
+            input_price_microusd,
+            cached_input_price_microusd,
+            output_price_microusd,
+        })
+    }
+
+    async fn resolve_base_model_pricing(
+        &self,
+        model: &str,
+        service_tier: Option<&str>,
+    ) -> Result<Option<TokenPriceMicrousd>> {
+        let normalized_model = model.trim();
+        if normalized_model.is_empty() {
+            return Ok(None);
+        }
+
+        let normalized_service_tier = Self::normalize_service_tier(service_tier);
+        for lookup_tier in Self::pricing_override_lookup_tiers(&normalized_service_tier) {
+            if let Some(row) = sqlx::query(
+                r#"
+                SELECT input_price_microcredits, cached_input_price_microcredits, output_price_microcredits
+                FROM model_pricing_overrides
+                WHERE model = $1 AND service_tier = $2 AND enabled = true
+                "#,
+            )
+            .bind(normalized_model)
+            .bind(lookup_tier)
+            .fetch_optional(&self.pool)
+            .await
+            .context("failed to query postgres model pricing override for usage cost")?
+            {
+                let input_price_microusd: i64 = row.try_get("input_price_microcredits")?;
+                let cached_input_price_microusd = Self::normalize_cached_input_price_microusd(
+                    input_price_microusd,
+                    row.try_get("cached_input_price_microcredits")?,
+                );
+                return Ok(Some(TokenPriceMicrousd {
+                    input_price_microusd,
+                    cached_input_price_microusd,
+                    output_price_microusd: row.try_get("output_price_microcredits")?,
+                }));
+            }
+        }
+
+        if let Some(row) = sqlx::query(
+            r#"
+            SELECT input_price_microcredits, cached_input_price_microcredits, output_price_microcredits
+            FROM openai_models_catalog
+            WHERE model_id = $1
+            "#,
+        )
+        .bind(normalized_model)
+        .fetch_optional(&self.pool)
+        .await
+        .context("failed to query postgres official pricing catalog for usage cost")?
+        {
+            let input_price_microusd: i64 = row.try_get("input_price_microcredits")?;
+            let cached_input_price_microusd = Self::normalize_cached_input_price_microusd(
+                input_price_microusd,
+                row.try_get("cached_input_price_microcredits")?,
+            );
+            return Ok(Some(TokenPriceMicrousd {
+                input_price_microusd,
+                cached_input_price_microusd,
+                output_price_microusd: row.try_get("output_price_microcredits")?,
+            }));
+        }
+
+        Ok(Self::fallback_pricing())
+    }
+
+    async fn resolve_request_log_cost_microusd(
+        &self,
+        model: Option<&str>,
+        service_tier: Option<&str>,
+        input_tokens: Option<i64>,
+        cached_input_tokens: Option<i64>,
+        output_tokens: Option<i64>,
+    ) -> Result<Option<i64>> {
+        let Some(model) = model.map(str::trim).filter(|value| !value.is_empty()) else {
+            return Ok(None);
+        };
+        let Some(pricing) = self.resolve_base_model_pricing(model, service_tier).await? else {
+            return Ok(None);
+        };
+
+        Ok(Some(calculate_estimated_cost_microusd(
+            input_tokens.unwrap_or(0),
+            cached_input_tokens.unwrap_or(0),
+            output_tokens.unwrap_or(0),
+            pricing,
+        )))
     }
 
     async fn upsert_hourly_account_row(
@@ -149,6 +296,7 @@ impl PostgresUsageRepo {
              COALESCE(SUM(COALESCE(cached_input_tokens, 0)), 0) AS cached_input_tokens, \
              COALESCE(SUM(COALESCE(output_tokens, 0)), 0) AS output_tokens, \
              COALESCE(SUM(COALESCE(reasoning_tokens, 0)), 0) AS reasoning_tokens, \
+             COALESCE(SUM(COALESCE(estimated_cost_microusd, 0)), 0) AS estimated_cost_microusd, \
              CASE \
                  WHEN COUNT(first_token_latency_ms) = 0 THEN NULL \
                  ELSE ROUND(AVG(first_token_latency_ms)::numeric, 0)::bigint \
@@ -195,6 +343,7 @@ impl PostgresUsageRepo {
                 row.try_get::<i64, _>("reasoning_tokens")?,
                 "reasoning_tokens",
             )?,
+            estimated_cost_microusd: row.try_get("estimated_cost_microusd")?,
             avg_first_token_latency_ms: row
                 .try_get::<Option<i64>, _>("avg_first_token_latency_ms")?
                 .map(|value| Self::as_u64(value, "avg_first_token_latency_ms"))
@@ -219,7 +368,8 @@ impl PostgresUsageRepo {
              COALESCE(SUM(COALESCE(input_tokens, 0)), 0) AS input_tokens, \
              COALESCE(SUM(COALESCE(cached_input_tokens, 0)), 0) AS cached_input_tokens, \
              COALESCE(SUM(COALESCE(output_tokens, 0)), 0) AS output_tokens, \
-             COALESCE(SUM(COALESCE(reasoning_tokens, 0)), 0) AS reasoning_tokens \
+             COALESCE(SUM(COALESCE(reasoning_tokens, 0)), 0) AS reasoning_tokens, \
+             COALESCE(SUM(COALESCE(estimated_cost_microusd, 0)), 0) AS estimated_cost_microusd \
              FROM usage_request_logs \
              WHERE created_at >= ",
         );
@@ -278,6 +428,7 @@ impl PostgresUsageRepo {
                         .saturating_add(cached_input_tokens)
                         .saturating_add(output_tokens)
                         .saturating_add(reasoning_tokens),
+                    estimated_cost_microusd: row.try_get("estimated_cost_microusd")?,
                 })
             })
             .collect()
@@ -357,13 +508,24 @@ struct DashboardSummaryRow {
     cached_input_tokens: u64,
     output_tokens: u64,
     reasoning_tokens: u64,
+    estimated_cost_microusd: Option<i64>,
     avg_first_token_latency_ms: Option<u64>,
 }
 
 #[async_trait]
 impl UsageIngestRepository for PostgresUsageRepo {
     async fn ingest_request_log(&self, event: RequestLogEvent) -> Result<()> {
-        let request_log_row = request_log_row_from_event(&event, event.tenant_id, event.api_key_id);
+        let mut request_log_row =
+            request_log_row_from_event(&event, event.tenant_id, event.api_key_id);
+        request_log_row.estimated_cost_microusd = self
+            .resolve_request_log_cost_microusd(
+                request_log_row.model.as_deref(),
+                request_log_row.service_tier.as_deref(),
+                request_log_row.input_tokens,
+                request_log_row.cached_input_tokens,
+                request_log_row.output_tokens,
+            )
+            .await?;
         let usage_rows =
             usage_rows_from_request_log_event(&event, event.tenant_id, event.api_key_id);
         let mut tx = self
@@ -396,12 +558,13 @@ impl UsageIngestRepository for PostgresUsageRepo {
                 billing_phase,
                 authorization_id,
                 capture_status,
+                estimated_cost_microusd,
                 created_at,
                 event_version
             )
             VALUES (
                 $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12,
-                $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23
+                $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24
             )
             ON CONFLICT (id) DO NOTHING
             "#,
@@ -432,6 +595,7 @@ impl UsageIngestRepository for PostgresUsageRepo {
         .bind(request_log_row.billing_phase.as_deref())
         .bind(request_log_row.authorization_id)
         .bind(request_log_row.capture_status.as_deref())
+        .bind(request_log_row.estimated_cost_microusd)
         .bind(request_log_row.created_at)
         .bind(i32::from(request_log_row.event_version))
         .execute(tx.as_mut())
@@ -756,39 +920,11 @@ impl UsageQueryRepository for PostgresUsageRepo {
             .await
             .context("failed to query postgres tenant api-key usage summary")?;
 
-        let dashboard_metrics = match tokio::try_join!(
-            self.fetch_dashboard_summary_row(start_ts, end_ts, tenant_id, account_id, api_key_id),
-            self.fetch_dashboard_token_trends(start_ts, end_ts, tenant_id, account_id, api_key_id),
-            self.fetch_dashboard_model_distribution(
-                start_ts, end_ts, tenant_id, account_id, api_key_id, false
-            ),
-            self.fetch_dashboard_model_distribution(
-                start_ts, end_ts, tenant_id, account_id, api_key_id, true
-            ),
-        ) {
-            Ok((
-                dashboard_summary,
-                token_trends,
-                model_request_distribution,
-                model_token_distribution,
-            )) => Some(UsageDashboardMetrics {
-                total_requests: dashboard_summary.total_requests,
-                token_breakdown: UsageDashboardTokenBreakdown {
-                    input_tokens: dashboard_summary.input_tokens,
-                    cached_input_tokens: dashboard_summary.cached_input_tokens,
-                    output_tokens: dashboard_summary.output_tokens,
-                    reasoning_tokens: dashboard_summary.reasoning_tokens,
-                    total_tokens: dashboard_summary
-                        .input_tokens
-                        .saturating_add(dashboard_summary.cached_input_tokens)
-                        .saturating_add(dashboard_summary.output_tokens)
-                        .saturating_add(dashboard_summary.reasoning_tokens),
-                },
-                avg_first_token_latency_ms: dashboard_summary.avg_first_token_latency_ms,
-                token_trends,
-                model_request_distribution,
-                model_token_distribution,
-            }),
+        let dashboard_summary = match self
+            .fetch_dashboard_summary_row(start_ts, end_ts, tenant_id, account_id, api_key_id)
+            .await
+        {
+            Ok(summary) => Some(summary),
             Err(err) => {
                 tracing::warn!(
                     error = ?err,
@@ -797,10 +933,57 @@ impl UsageQueryRepository for PostgresUsageRepo {
                     ?api_key_id,
                     start_ts,
                     end_ts,
-                    "postgres dashboard metrics query failed; falling back to summary-only response"
+                    "postgres dashboard summary query failed; falling back to summary-only response"
                 );
                 None
             }
+        };
+
+        let dashboard_metrics = match dashboard_summary.as_ref() {
+            Some(dashboard_summary) => match tokio::try_join!(
+                self.fetch_dashboard_token_trends(start_ts, end_ts, tenant_id, account_id, api_key_id),
+                self.fetch_dashboard_model_distribution(
+                    start_ts, end_ts, tenant_id, account_id, api_key_id, false
+                ),
+                self.fetch_dashboard_model_distribution(
+                    start_ts, end_ts, tenant_id, account_id, api_key_id, true
+                ),
+            ) {
+                Ok((token_trends, model_request_distribution, model_token_distribution)) => {
+                    Some(UsageDashboardMetrics {
+                        total_requests: dashboard_summary.total_requests,
+                        estimated_cost_microusd: dashboard_summary.estimated_cost_microusd,
+                        token_breakdown: UsageDashboardTokenBreakdown {
+                            input_tokens: dashboard_summary.input_tokens,
+                            cached_input_tokens: dashboard_summary.cached_input_tokens,
+                            output_tokens: dashboard_summary.output_tokens,
+                            reasoning_tokens: dashboard_summary.reasoning_tokens,
+                            total_tokens: dashboard_summary
+                                .input_tokens
+                                .saturating_add(dashboard_summary.cached_input_tokens)
+                                .saturating_add(dashboard_summary.output_tokens)
+                                .saturating_add(dashboard_summary.reasoning_tokens),
+                        },
+                        avg_first_token_latency_ms: dashboard_summary.avg_first_token_latency_ms,
+                        token_trends,
+                        model_request_distribution,
+                        model_token_distribution,
+                    })
+                }
+                Err(err) => {
+                    tracing::warn!(
+                        error = ?err,
+                        ?tenant_id,
+                        ?account_id,
+                        ?api_key_id,
+                        start_ts,
+                        end_ts,
+                        "postgres dashboard detail query failed; falling back to summary-only response"
+                    );
+                    None
+                }
+            },
+            None => None,
         };
 
         Ok(UsageSummaryQueryResponse {
@@ -822,6 +1005,9 @@ impl UsageQueryRepository for PostgresUsageRepo {
                 tenant_api_key_summary_row.try_get::<i64, _>("unique_tenant_api_key_count")?,
                 "unique_tenant_api_key_count",
             )?,
+            estimated_cost_microusd: dashboard_summary
+                .as_ref()
+                .and_then(|summary| summary.estimated_cost_microusd),
             dashboard_metrics,
         })
     }
@@ -1017,7 +1203,7 @@ impl UsageQueryRepository for PostgresUsageRepo {
                 id, account_id, tenant_id, api_key_id, request_id, path, method, model, service_tier, \
                 input_tokens, cached_input_tokens, output_tokens, reasoning_tokens, first_token_latency_ms, \
                 status_code, latency_ms, is_stream, error_code, billing_phase, authorization_id, \
-                capture_status, created_at, event_version \
+                capture_status, estimated_cost_microusd, created_at, event_version \
              FROM usage_request_logs \
              WHERE created_at >= ",
         );
@@ -1095,6 +1281,7 @@ impl UsageQueryRepository for PostgresUsageRepo {
                     billing_phase: row.try_get("billing_phase")?,
                     authorization_id: row.try_get("authorization_id")?,
                     capture_status: row.try_get("capture_status")?,
+                    estimated_cost_microusd: row.try_get("estimated_cost_microusd")?,
                     created_at: row.try_get("created_at")?,
                     event_version: u16::try_from(row.try_get::<i32, _>("event_version")?)
                         .context("event_version is out of range")?,

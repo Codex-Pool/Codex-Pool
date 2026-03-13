@@ -1257,6 +1257,50 @@ export default {
             rawText: "官方文字快照",
         }
     },
+    costReports: {
+        admin: {
+            title: "成本報表",
+            description: "最近 30 天的唯讀美元消耗估算。"
+        },
+        tenant: {
+            title: "用量成本報表",
+            description: "目前租戶的唯讀美元消耗估算。"
+        },
+        summary: {
+            totalCost: "預估成本",
+            totalRequests: "總請求數",
+            avgCostPerRequest: "平均每次請求成本"
+        },
+        chart: {
+            title: "成本趨勢",
+            description: "根據請求日誌彙總的美元消耗估算。",
+            empty: "目前範圍內尚無成本資料。",
+            series: {
+                cost: "預估成本"
+            }
+        },
+        logs: {
+            title: "請求日誌",
+            empty: "目前範圍內尚無請求日誌。",
+            searchPlaceholder: "搜尋請求 ID、模型、租戶或狀態",
+            columns: {
+                time: "時間",
+                tenant: "租戶",
+                requestId: "請求 ID",
+                model: "模型",
+                status: "狀態",
+                cost: "預估成本"
+            }
+        },
+        filters: {
+            tenant: "租戶",
+            allTenants: "全部租戶",
+            apiKey: "API Key",
+            allApiKeys: "全部 API Key",
+            day: "按日",
+            month: "按月"
+        }
+    },
     nav: {
         accounts: "帳號池",
         modelRouting: "模型調度",

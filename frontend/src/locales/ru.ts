@@ -1257,6 +1257,50 @@ export default {
             rawText: "Official text snapshot",
         }
     },
+    costReports: {
+        admin: {
+            title: "Отчеты по затратам",
+            description: "Оценка расхода в USD за последние 30 дней в режиме только чтения."
+        },
+        tenant: {
+            title: "Отчет по стоимости использования",
+            description: "Оценка расхода в USD для текущего арендатора в режиме только чтения."
+        },
+        summary: {
+            totalCost: "Оценочная стоимость",
+            totalRequests: "Всего запросов",
+            avgCostPerRequest: "Средняя стоимость запроса"
+        },
+        chart: {
+            title: "Динамика затрат",
+            description: "Оценка стоимости в USD, агрегированная из журналов запросов.",
+            empty: "Для выбранной области пока нет данных о стоимости.",
+            series: {
+                cost: "Оценочная стоимость"
+            }
+        },
+        logs: {
+            title: "Журнал запросов",
+            empty: "Для этой области нет журналов запросов.",
+            searchPlaceholder: "Поиск по request ID, модели, арендатору или статусу",
+            columns: {
+                time: "Время",
+                tenant: "Арендатор",
+                requestId: "Request ID",
+                model: "Модель",
+                status: "Статус",
+                cost: "Оценочная стоимость"
+            }
+        },
+        filters: {
+            tenant: "Арендатор",
+            allTenants: "Все арендаторы",
+            apiKey: "API-ключ",
+            allApiKeys: "Все API-ключи",
+            day: "По дням",
+            month: "По месяцам"
+        }
+    },
     nav: {
         accounts: "Пул аккаунтов",
         modelRouting: "Model Routing",

@@ -1257,6 +1257,50 @@ export default {
             rawText: "官方文本快照",
         }
     },
+    costReports: {
+        admin: {
+            title: "成本报表",
+            description: "最近 30 天的只读美元消耗估算。"
+        },
+        tenant: {
+            title: "用量成本报表",
+            description: "当前租户的只读美元消耗估算。"
+        },
+        summary: {
+            totalCost: "预估成本",
+            totalRequests: "总请求数",
+            avgCostPerRequest: "平均单次请求成本"
+        },
+        chart: {
+            title: "成本趋势",
+            description: "基于请求日志聚合的美元消耗估算。",
+            empty: "当前范围内暂无成本数据。",
+            series: {
+                cost: "预估成本"
+            }
+        },
+        logs: {
+            title: "请求日志",
+            empty: "当前范围内暂无请求日志。",
+            searchPlaceholder: "搜索请求 ID、模型、租户或状态",
+            columns: {
+                time: "时间",
+                tenant: "租户",
+                requestId: "请求 ID",
+                model: "模型",
+                status: "状态",
+                cost: "预估成本"
+            }
+        },
+        filters: {
+            tenant: "租户",
+            allTenants: "全部租户",
+            apiKey: "API Key",
+            allApiKeys: "全部 API Key",
+            day: "按日",
+            month: "按月"
+        }
+    },
     nav: {
         accounts: "账号池",
         modelRouting: "模型调度",

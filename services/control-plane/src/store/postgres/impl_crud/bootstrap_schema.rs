@@ -1772,6 +1772,7 @@ impl PostgresStore {
                 billing_phase TEXT NULL,
                 authorization_id UUID NULL,
                 capture_status TEXT NULL,
+                estimated_cost_microusd BIGINT NULL,
                 created_at TIMESTAMPTZ NOT NULL,
                 event_version INTEGER NOT NULL
             )
@@ -1780,6 +1781,16 @@ impl PostgresStore {
         .execute(tx.as_mut())
         .await
         .context("failed to create usage_request_logs table")?;
+
+        sqlx::query(
+            r#"
+            ALTER TABLE usage_request_logs
+            ADD COLUMN IF NOT EXISTS estimated_cost_microusd BIGINT NULL
+            "#,
+        )
+        .execute(tx.as_mut())
+        .await
+        .context("failed to add usage_request_logs.estimated_cost_microusd column")?;
 
         sqlx::query(
             r#"

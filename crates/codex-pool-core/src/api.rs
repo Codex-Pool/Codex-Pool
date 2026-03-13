@@ -496,6 +496,8 @@ pub struct UsageDashboardTokenTrendPoint {
     pub output_tokens: u64,
     pub reasoning_tokens: u64,
     pub total_tokens: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub estimated_cost_microusd: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -508,6 +510,8 @@ pub struct UsageDashboardModelDistributionItem {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct UsageDashboardMetrics {
     pub total_requests: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub estimated_cost_microusd: Option<i64>,
     pub token_breakdown: UsageDashboardTokenBreakdown,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub avg_first_token_latency_ms: Option<u64>,
@@ -564,6 +568,8 @@ pub struct UsageSummaryQueryResponse {
     pub tenant_api_key_total_requests: u64,
     pub unique_account_count: u64,
     pub unique_tenant_api_key_count: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub estimated_cost_microusd: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dashboard_metrics: Option<UsageDashboardMetrics>,
 }

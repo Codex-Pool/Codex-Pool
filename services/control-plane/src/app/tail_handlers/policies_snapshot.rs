@@ -262,6 +262,7 @@ fn map_request_log_row(row: crate::usage::RequestLogRow) -> RequestLogItemRespon
         billing_phase: row.billing_phase,
         authorization_id: row.authorization_id,
         capture_status: row.capture_status,
+        estimated_cost_microusd: row.estimated_cost_microusd,
         created_at: row.created_at,
         event_version: row.event_version,
     }

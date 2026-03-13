@@ -1257,6 +1257,50 @@ export default {
             rawText: "Official text snapshot",
         }
     },
+    costReports: {
+        admin: {
+            title: "Cost Reports",
+            description: "Read-only estimated USD usage for the last 30 days."
+        },
+        tenant: {
+            title: "Usage Cost Reports",
+            description: "Read-only estimated USD usage for your current tenant."
+        },
+        summary: {
+            totalCost: "Estimated cost",
+            totalRequests: "Total requests",
+            avgCostPerRequest: "Average cost / request"
+        },
+        chart: {
+            title: "Cost trend",
+            description: "Estimated USD cost aggregated from request logs.",
+            empty: "No cost data is available for the selected scope yet.",
+            series: {
+                cost: "Estimated cost"
+            }
+        },
+        logs: {
+            title: "Request logs",
+            empty: "No request logs are available for this scope.",
+            searchPlaceholder: "Search request ID, model, tenant, or status",
+            columns: {
+                time: "Time",
+                tenant: "Tenant",
+                requestId: "Request ID",
+                model: "Model",
+                status: "Status",
+                cost: "Estimated cost"
+            }
+        },
+        filters: {
+            tenant: "Tenant",
+            allTenants: "All tenants",
+            apiKey: "API key",
+            allApiKeys: "All API keys",
+            day: "By day",
+            month: "By month"
+        }
+    },
     nav: {
         accounts: "Accounts Pool",
         modelRouting: "Model Routing",

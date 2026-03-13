@@ -89,6 +89,11 @@
 - [x] 新增 `control-plane` 内部 usage ingest 路由与 TDD 回归
 - [x] `data-plane` 在 `team` 且无 Redis 时切换到 control-plane HTTP event sink
 - [x] 第三阶段 team Postgres-only usage pipeline 验证通过，并准备进入下一阶段
+- [x] 为 usage summary / request logs 增加 `estimated_cost_microusd` 跨版本契约
+- [x] `team` 版 PostgreSQL usage ingest/query 基于 pricing 解析写入请求成本
+- [x] 非 `business` 的 admin / tenant Billing 页面切换为只读 cost report
+- [x] 收口 `team/personal` 下的 recharge 与 billing-only system 指标入口
+- [x] 第四阶段 non-business cost report 骨架验证通过，并准备进入下一阶段
 
 ## Progress Notes
 
@@ -113,3 +118,17 @@
   - `cargo test -p control-plane --lib --bins`
   - `cargo test -p data-plane --lib --bins`
   - `cargo test --workspace --lib --bins --locked`
+- 第四阶段已把 `personal/team` 的“只展示成本”语义接到 usage 面：
+  - `UsageSummaryQueryResponse`、dashboard token trends、request logs 统一新增 `estimated_cost_microusd`
+  - `team` 的 `PostgresUsageRepo` 会在 ingest 时解析 pricing，并把估算美元成本写入 `usage_request_logs`
+  - `business` 现有 credit ledger 语义保持不变，但成本计算底座已经抽到共享 `cost` 模块
+- 管理端与租户端 Billing 页面在 `credit_billing=false && cost_reports=true` 时会切到只读 cost report，不再展示充值/签到/信用账本交互。
+- `team/personal` 下已进一步隐藏 tenant recharge 区块和 system 页中的 billing-only 观测指标卡。
+- 第四阶段修复并验证了 `usage_worker::dual_level_aggregation`，避免同一小时桶在 worker flush 时被拆成重复 upsert 行。
+- 第四阶段验证已覆盖：
+  - `cargo test -p control-plane --locked`
+  - `cd frontend && npm run i18n:check`
+  - `cd frontend && npm run i18n:hardcode -- --no-baseline`
+  - `cd frontend && node scripts/i18n/check-missing-runtime-keys.mjs`
+  - `cd frontend && npm run lint`
+  - `cd frontend && npm run build`

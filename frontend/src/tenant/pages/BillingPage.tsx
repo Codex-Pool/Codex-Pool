@@ -15,6 +15,7 @@ import {
   shouldHighlightServiceTier,
 } from '@/features/billing/service-tier'
 import { groupsApi } from '@/api/groups'
+import { systemApi, DEFAULT_SYSTEM_CAPABILITIES } from '@/api/system'
 import { tenantCreditsApi, type TenantCreditLedgerItem } from '@/api/tenantCredits'
 import { tenantKeysApi } from '@/api/tenantKeys'
 import { notify } from '@/lib/notification'
@@ -33,6 +34,7 @@ import {
 import { StandardDataTable } from '@/components/ui/standard-data-table'
 import { TrendChart } from '@/components/ui/trend-chart'
 import { formatDateTime, formatMicrocredits } from '@/tenant/lib/format'
+import { TenantCostReportPage } from '@/features/billing/tenant-cost-report'
 
 type BillingGranularity = 'day' | 'month'
 
@@ -539,6 +541,20 @@ function formatMicrocreditsAdaptive(value: number | undefined) {
 }
 
 export function TenantBillingPage() {
+  const { data: capabilities = DEFAULT_SYSTEM_CAPABILITIES } = useQuery({
+    queryKey: ['systemCapabilities'],
+    queryFn: () => systemApi.getCapabilities(),
+    staleTime: 5 * 60_000,
+  })
+
+  if (!capabilities.features.credit_billing && capabilities.features.cost_reports) {
+    return <TenantCostReportPage />
+  }
+
+  return <TenantBusinessBillingPage />
+}
+
+function TenantBusinessBillingPage() {
   const { t } = useTranslation()
   const queryClient = useQueryClient()
   const [searchParams] = useSearchParams()

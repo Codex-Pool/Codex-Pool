@@ -232,6 +232,7 @@ impl UsageQueryRepository for FakeUsageRepo {
             tenant_api_key_total_requests: 0,
             unique_account_count: 0,
             unique_tenant_api_key_count: 0,
+            estimated_cost_microusd: None,
             dashboard_metrics: None,
         })
     }
@@ -320,6 +321,7 @@ async fn admin_request_logs_forwards_filters_and_returns_rows() {
         billing_phase: Some("released".to_string()),
         authorization_id: Some(Uuid::new_v4()),
         capture_status: Some("captured".to_string()),
+        estimated_cost_microusd: None,
         created_at: chrono::Utc::now(),
         event_version: 2,
     };
@@ -403,6 +405,7 @@ async fn admin_request_correlation_returns_request_and_audit_context() {
         billing_phase: Some("released".to_string()),
         authorization_id: None,
         capture_status: Some("captured".to_string()),
+        estimated_cost_microusd: None,
         created_at: chrono::Utc::now(),
         event_version: 2,
     };
@@ -532,6 +535,7 @@ async fn tenant_request_logs_overrides_tenant_scope_from_principal() {
             billing_phase: None,
             authorization_id: None,
             capture_status: None,
+            estimated_cost_microusd: None,
             created_at: chrono::Utc::now(),
             event_version: 2,
         }],
