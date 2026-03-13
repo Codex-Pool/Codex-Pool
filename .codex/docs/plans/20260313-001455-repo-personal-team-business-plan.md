@@ -94,6 +94,11 @@
 - [x] 非 `business` 的 admin / tenant Billing 页面切换为只读 cost report
 - [x] 收口 `team/personal` 下的 recharge 与 billing-only system 指标入口
 - [x] 第四阶段 non-business cost report 骨架验证通过，并准备进入下一阶段
+- [x] 为 `personal` 版新增 SQLite 持久化 control-plane store
+- [x] 为 `personal` 版新增 SQLite usage ingest/query repo
+- [x] `control-plane` 在 `personal` edition 下自动接入 SQLite store 与 usage repo
+- [x] `data-plane` 在 `personal` 且无 Redis 时切换到 control-plane HTTP event sink
+- [x] 第五阶段 personal SQLite runtime foundation 验证通过，并准备进入下一阶段
 
 ## Progress Notes
 
@@ -132,3 +137,16 @@
   - `cd frontend && node scripts/i18n/check-missing-runtime-keys.mjs`
   - `cd frontend && npm run lint`
   - `cd frontend && npm run build`
+- 第五阶段已打通 `personal` 的 SQLite 运行时底座：
+  - `control-plane` 新增 `SqliteBackedStore`，把 tenant、API key、upstream accounts、routing/model settings 等 state 以单行 JSON snapshot 形式持久化到 SQLite
+  - `SqliteBackedStore::data_plane_snapshot_events` 在 revision 变化后返回 `cursor_gone`，让 `data-plane` 通过全量 snapshot reload 保持一致性
+  - `control-plane` 新增 `SqliteUsageRepo`，在 SQLite 中保存 request logs，并提供 summary、dashboard、leaderboard、request logs 查询
+  - `personal` edition 启动时会强制选择 SQLite，并把 usage ingest/query 一并切到 `SqliteUsageRepo`
+  - `data-plane` 现在会在 `personal` 且无 Redis 时自动改走 control-plane HTTP sink，避免 personal 版对 Redis 的运行时依赖
+- 第五阶段验证已覆盖：
+  - `cargo check -p control-plane`
+  - `cargo check -p data-plane`
+  - `cargo test -p control-plane sqlite_ -- --nocapture`
+  - `cargo test -p control-plane --lib --bins`
+  - `cargo test -p data-plane select_event_sink_kind -- --nocapture`
+  - `cargo test -p data-plane --lib --bins`

@@ -9,6 +9,7 @@ use uuid::Uuid;
 pub mod clickhouse_repo;
 pub mod postgres_repo;
 pub mod redis_reader;
+pub mod sqlite_repo;
 pub mod worker;
 
 #[async_trait]

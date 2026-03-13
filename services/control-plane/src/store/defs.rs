@@ -440,7 +440,7 @@ pub trait ControlPlaneStore: Send + Sync {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct OAuthCredentialRecord {
     access_token_enc: String,
     refresh_token_enc: String,
@@ -487,7 +487,7 @@ impl OAuthCredentialRecord {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct SessionProfileRecord {
     credential_kind: SessionCredentialKind,
     token_expires_at: Option<DateTime<Utc>>,
@@ -622,12 +622,12 @@ impl SessionProfileRecord {
     }
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 struct UpstreamAccountHealthStateRecord {
     seen_ok_at: Option<DateTime<Utc>>,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 struct AccountModelSupportRecord {
     supported_models: Vec<String>,
 }

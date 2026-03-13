@@ -21,6 +21,7 @@ reqwest.workspace = true
 regex.workspace = true
 sqlx-core = { version = "=0.8.6", default-features = false, features = ["_rt-tokio", "_tls-rustls-ring-webpki", "chrono", "uuid"] }
 sqlx-postgres = { version = "=0.8.6", default-features = false, features = ["chrono", "uuid"] }
+sqlx-sqlite = { version = "=0.8.6", default-features = false, features = ["chrono", "uuid", "bundled"] }
 serde.workspace = true
 serde_json.workspace = true
 redis = { workspace = true, features = ["streams"] }

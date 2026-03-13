@@ -199,7 +199,7 @@ fn select_event_sink_kind(
         return EventSinkKind::Redis;
     }
 
-    if matches!(edition, ProductEdition::Team)
+    if matches!(edition, ProductEdition::Team | ProductEdition::Personal)
         && control_plane_base_url
             .map(str::trim)
             .is_some_and(|base_url| !base_url.is_empty())
@@ -712,6 +712,17 @@ mod bootstrap_tests {
     fn select_event_sink_kind_uses_control_plane_http_for_team_without_redis() {
         let selected =
             select_event_sink_kind(ProductEdition::Team, None, Some("http://127.0.0.1:8090"));
+
+        assert_eq!(selected, EventSinkKind::ControlPlaneHttp);
+    }
+
+    #[test]
+    fn select_event_sink_kind_uses_control_plane_http_for_personal_without_redis() {
+        let selected = select_event_sink_kind(
+            ProductEdition::Personal,
+            None,
+            Some("http://127.0.0.1:8090"),
+        );
 
         assert_eq!(selected, EventSinkKind::ControlPlaneHttp);
     }

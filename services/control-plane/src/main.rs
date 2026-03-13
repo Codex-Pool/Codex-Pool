@@ -2,6 +2,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
+use anyhow::anyhow;
 use codex_pool_core::api::ProductEdition;
 use control_plane::admin_auth::AdminAuthService;
 use control_plane::app::{
@@ -12,13 +13,16 @@ use control_plane::app::{
 use control_plane::config::ControlPlaneConfig;
 use control_plane::import_jobs::{InMemoryOAuthImportJobStore, PostgresOAuthImportJobStore};
 use control_plane::store::postgres::PostgresStore;
-use control_plane::store::{ControlPlaneStore, InMemoryStore};
+use control_plane::store::{
+    normalize_sqlite_database_url, ControlPlaneStore, InMemoryStore, SqliteBackedStore,
+};
 use control_plane::tenant::{
     record_billing_reconcile_runtime_failed, record_billing_reconcile_runtime_stats,
     BillingReconcileFactRequest, BillingReconcileRequest, BillingReconcileStats, TenantAuthService,
 };
 use control_plane::usage::clickhouse_repo::{ClickHouseUsageRepo, UsageQueryRepository};
 use control_plane::usage::postgres_repo::PostgresUsageRepo;
+use control_plane::usage::sqlite_repo::SqliteUsageRepo;
 use control_plane::usage::UsageIngestRepository;
 use tokio::time::MissedTickBehavior;
 
@@ -292,6 +296,21 @@ fn merge_reconcile_stats(total: &mut BillingReconcileStats, delta: &BillingRecon
         .saturating_add(delta.adjusted_microcredits_total);
 }
 
+fn personal_sqlite_database_url(raw: Option<&str>) -> anyhow::Result<String> {
+    if raw.is_some_and(|value| {
+        let trimmed = value.trim().to_ascii_lowercase();
+        trimmed.starts_with("postgres://") || trimmed.starts_with("postgresql://")
+    }) {
+        return Err(anyhow!(
+            "personal edition requires sqlite storage, but CONTROL_PLANE_DATABASE_URL points to postgres"
+        ));
+    }
+
+    Ok(normalize_sqlite_database_url(
+        raw.unwrap_or("./codex-pool-personal.sqlite"),
+    ))
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     codex_pool_core::logging::init_local_tracing();
@@ -299,13 +318,24 @@ async fn main() -> anyhow::Result<()> {
     let config = ControlPlaneConfig::from_env(DEFAULT_AUTH_VALIDATE_CACHE_TTL_SEC)?;
     config.apply_runtime_env_defaults();
     control_plane::security::ensure_api_key_hasher_configured()?;
+    let edition = ProductEdition::from_env_var(CODEX_POOL_EDITION_ENV);
 
     let (store, import_job_store, admin_auth): (
         Arc<dyn ControlPlaneStore>,
         Arc<dyn control_plane::import_jobs::OAuthImportJobStore>,
         AdminAuthService,
-    ) = match config.database_url.as_deref() {
-        Some(database_url) => {
+    ) = match (edition, config.database_url.as_deref()) {
+        (ProductEdition::Personal, raw_database_url) => {
+            let database_url = personal_sqlite_database_url(raw_database_url)?;
+            let sqlite_store = SqliteBackedStore::connect(&database_url).await?;
+            let admin_auth = AdminAuthService::from_env()?;
+            (
+                Arc::new(sqlite_store),
+                Arc::new(InMemoryOAuthImportJobStore::default()),
+                admin_auth,
+            )
+        }
+        (_, Some(database_url)) => {
             let postgres_store = PostgresStore::connect(database_url).await?;
             let import_store =
                 PostgresOAuthImportJobStore::new(postgres_store.clone_pool()).await?;
@@ -313,7 +343,7 @@ async fn main() -> anyhow::Result<()> {
             admin_auth.ensure_bootstrap_admin_user().await?;
             (Arc::new(postgres_store), Arc::new(import_store), admin_auth)
         }
-        None => (
+        (_, None) => (
             Arc::new(InMemoryStore::default()),
             Arc::new(InMemoryOAuthImportJobStore::default()),
             AdminAuthService::from_env()?,
@@ -453,7 +483,6 @@ async fn main() -> anyhow::Result<()> {
         "data-plane outbox cleanup loop started"
     );
 
-    let edition = ProductEdition::from_env_var(CODEX_POOL_EDITION_ENV);
     if billing_reconcile_allowed_for_edition(edition) && billing_reconcile_enabled_from_env() {
         if let Some(pool) = store.postgres_pool() {
             let interval_sec = billing_reconcile_interval_sec_from_env();
@@ -680,6 +709,15 @@ async fn main() -> anyhow::Result<()> {
     } else {
         None
     };
+    let personal_sqlite_usage_repo = if matches!(edition, ProductEdition::Personal) {
+        let sqlite_url = personal_sqlite_database_url(config.database_url.as_deref())?;
+        Some(Arc::new(
+            SqliteUsageRepo::new(SqliteBackedStore::connect(&sqlite_url).await?.clone_pool())
+                .await?,
+        ))
+    } else {
+        None
+    };
 
     let usage_repo: Option<Arc<dyn UsageQueryRepository>> = match edition {
         ProductEdition::Business => config.clickhouse_url.clone().map(|clickhouse_url| {
@@ -695,14 +733,19 @@ async fn main() -> anyhow::Result<()> {
         ProductEdition::Team => team_postgres_usage_repo
             .clone()
             .map(|repo| repo as Arc<dyn UsageQueryRepository>),
-        ProductEdition::Personal => None,
+        ProductEdition::Personal => personal_sqlite_usage_repo
+            .clone()
+            .map(|repo| repo as Arc<dyn UsageQueryRepository>),
     };
 
     let usage_ingest_repo: Option<Arc<dyn UsageIngestRepository>> = match edition {
         ProductEdition::Team => team_postgres_usage_repo
             .clone()
             .map(|repo| repo as Arc<dyn UsageIngestRepository>),
-        ProductEdition::Personal | ProductEdition::Business => None,
+        ProductEdition::Personal => personal_sqlite_usage_repo
+            .clone()
+            .map(|repo| repo as Arc<dyn UsageIngestRepository>),
+        ProductEdition::Business => None,
     };
 
     let app = build_app_with_store_ttl_usage_repos_import_store_and_admin_auth(
