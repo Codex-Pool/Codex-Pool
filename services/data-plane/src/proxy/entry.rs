@@ -39,6 +39,9 @@ use uuid::Uuid;
 
 use crate::app::{AppState, CachedModelsResponse};
 use crate::auth::ApiPrincipal;
+use crate::upstream_health::{
+    LiveResultReportRequest, LiveResultReportSource, LiveResultReportStatus,
+};
 
 const CHATGPT_ACCOUNT_ID: &str = "chatgpt-account-id";
 const OPENAI_BETA_HEADER: &str = "openai-beta";
@@ -1011,6 +1014,13 @@ pub async fn proxy_handler(
                     return response;
                 }
 
+                spawn_failed_live_report(
+                    &state,
+                    account.id,
+                    parsed_policy_context.model.clone(),
+                    status,
+                    upstream_error_context.as_ref(),
+                );
                 let retryable = is_failover_retryable_error(
                     UpstreamErrorSource::Http,
                     status,
@@ -1271,6 +1281,13 @@ pub async fn proxy_handler(
                             error = %error_detail,
                             account_id = %account.id,
                             "upstream stream ended before first chunk"
+                        );
+                        spawn_failed_live_report(
+                            &state,
+                            account.id,
+                            parsed_policy_context.model.clone(),
+                            status,
+                            error_context.as_ref(),
                         );
                         if state.enable_request_failover
                             && should_retry_same_account
@@ -1623,6 +1640,13 @@ pub async fn proxy_handler(
                 return response;
             }
 
+            spawn_failed_live_report(
+                &state,
+                account.id,
+                parsed_policy_context.model.clone(),
+                status,
+                upstream_error_context.as_ref(),
+            );
             let retryable = is_failover_retryable_error(
                 UpstreamErrorSource::Http,
                 status,
@@ -2367,6 +2391,20 @@ pub async fn proxy_websocket_handler(
 fn spawn_seen_ok_reports(state: &Arc<AppState>, account_id: Uuid, model_id: Option<String>) {
     if let Some(seen_ok_reporter) = state.seen_ok_reporter.clone() {
         tokio::spawn(async move {
+            seen_ok_reporter
+                .report_live_result(
+                    account_id,
+                    LiveResultReportRequest {
+                        status: LiveResultReportStatus::Ok,
+                        source: LiveResultReportSource::Passive,
+                        status_code: Some(StatusCode::OK.as_u16()),
+                        error_code: None,
+                        error_message: None,
+                        upstream_request_id: None,
+                        model: model_id.clone(),
+                    },
+                )
+                .await;
             seen_ok_reporter.report_seen_ok(account_id).await;
             if let Some(model_id) = model_id.as_deref() {
                 seen_ok_reporter
@@ -2374,6 +2412,48 @@ fn spawn_seen_ok_reports(state: &Arc<AppState>, account_id: Uuid, model_id: Opti
                     .await;
             }
         });
+    }
+}
+
+fn spawn_failed_live_report(
+    state: &Arc<AppState>,
+    account_id: Uuid,
+    model_id: Option<String>,
+    status: StatusCode,
+    error_context: Option<&UpstreamErrorContext>,
+) {
+    if let Some(seen_ok_reporter) = state.seen_ok_reporter.clone() {
+        let report = LiveResultReportRequest {
+            status: LiveResultReportStatus::Failed,
+            source: LiveResultReportSource::Passive,
+            status_code: Some(status.as_u16()),
+            error_code: error_context
+                .and_then(|context| context.error_code.clone())
+                .or_else(|| live_result_error_code_for_class(error_context.map(|context| context.class))),
+            error_message: error_context
+                .and_then(|context| context.error_message.clone())
+                .or_else(|| error_context.and_then(|context| context.raw_error.clone())),
+            upstream_request_id: error_context.and_then(|context| context.upstream_request_id.clone()),
+            model: model_id,
+        };
+        tokio::spawn(async move {
+            seen_ok_reporter.report_live_result(account_id, report).await;
+        });
+    }
+}
+
+fn live_result_error_code_for_class(class: Option<UpstreamErrorClass>) -> Option<String> {
+    match class {
+        Some(UpstreamErrorClass::TokenInvalidated) => Some("token_invalidated".to_string()),
+        Some(UpstreamErrorClass::AuthExpired) => Some("auth_expired".to_string()),
+        Some(UpstreamErrorClass::AccountDeactivated) => Some("account_deactivated".to_string()),
+        Some(UpstreamErrorClass::QuotaExhausted) => Some("quota_exhausted".to_string()),
+        Some(UpstreamErrorClass::RateLimited) => Some("rate_limited".to_string()),
+        Some(UpstreamErrorClass::Overloaded) => Some("overloaded".to_string()),
+        Some(UpstreamErrorClass::UpstreamUnavailable) => Some("upstream_unavailable".to_string()),
+        Some(UpstreamErrorClass::TransientServer) => Some("transient_server".to_string()),
+        Some(UpstreamErrorClass::NonRetryableClient) => Some("non_retryable_client".to_string()),
+        Some(UpstreamErrorClass::Unknown) | None => None,
     }
 }
 
@@ -2513,12 +2593,17 @@ mod entry_route_selection_tests {
     use crate::event::NoopEventSink;
     use crate::routing_cache::InMemoryRoutingCache;
     use crate::router::RoundRobinRouter;
+    use crate::upstream_health::SeenOkReporter;
     use codex_pool_core::model::{
         AiErrorLearningSettings, CompiledModelRoutingPolicy, CompiledRoutingPlan,
         CompiledRoutingProfile, RoutingStrategy, UpstreamErrorTemplateRecord,
     };
+    use serde_json::json;
     use std::collections::HashMap;
     use std::sync::atomic::AtomicU64;
+    use std::sync::Arc;
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
 
     fn account(label: &str) -> UpstreamAccount {
         UpstreamAccount {
@@ -2556,6 +2641,13 @@ mod entry_route_selection_tests {
     }
 
     fn test_state(accounts: Vec<UpstreamAccount>) -> Arc<AppState> {
+        test_state_with_reporter(accounts, None)
+    }
+
+    fn test_state_with_reporter(
+        accounts: Vec<UpstreamAccount>,
+        seen_ok_reporter: Option<Arc<SeenOkReporter>>,
+    ) -> Arc<AppState> {
         Arc::new(AppState {
             router: RoundRobinRouter::new(accounts),
             http_client: reqwest::Client::new(),
@@ -2584,7 +2676,7 @@ mod entry_route_selection_tests {
             models_cache: std::sync::RwLock::new(std::collections::HashMap::new()),
             routing_cache: Arc::new(InMemoryRoutingCache::new()),
             alive_ring_router: None,
-            seen_ok_reporter: None,
+            seen_ok_reporter,
             event_sink: Arc::new(NoopEventSink),
             auth_validator: None,
             control_plane_internal_auth_token: Arc::<str>::from("cp-internal-test-token"),
@@ -2658,5 +2750,124 @@ mod entry_route_selection_tests {
         .expect("alive ring should skip disallowed free account");
 
         assert_eq!(picked.id, paid.id);
+    }
+
+    #[tokio::test]
+    async fn spawn_seen_ok_reports_posts_passive_live_result_and_seen_ok() {
+        let control_plane = MockServer::start().await;
+        let account = account("passive-ok");
+        Mock::given(method("POST"))
+            .and(path(format!(
+                "/internal/v1/upstream-accounts/{}/health/live-result",
+                account.id
+            )))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({"ok": true})))
+            .mount(&control_plane)
+            .await;
+        Mock::given(method("POST"))
+            .and(path(format!(
+                "/internal/v1/upstream-accounts/{}/health/seen-ok",
+                account.id
+            )))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({"ok": true})))
+            .mount(&control_plane)
+            .await;
+        Mock::given(method("POST"))
+            .and(path(format!(
+                "/internal/v1/upstream-accounts/{}/models/seen-ok",
+                account.id
+            )))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({"ok": true})))
+            .mount(&control_plane)
+            .await;
+        let reporter = SeenOkReporter::new(
+            control_plane.uri(),
+            Arc::<str>::from("cp-internal-test-token"),
+            Duration::from_millis(250),
+            Duration::from_secs(0),
+        )
+        .expect("reporter must build");
+        let state = test_state_with_reporter(vec![account.clone()], Some(Arc::new(reporter)));
+
+        spawn_seen_ok_reports(&state, account.id, Some("gpt-5.1-codex-mini".to_string()));
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        let requests = control_plane.received_requests().await.unwrap();
+        assert!(
+            requests
+                .iter()
+                .any(|request| request.url.path().ends_with("/health/live-result")),
+            "expected passive live-result request"
+        );
+        assert!(
+            requests
+                .iter()
+                .any(|request| request.url.path().ends_with("/health/seen-ok")),
+            "expected seen-ok request"
+        );
+        assert!(
+            requests
+                .iter()
+                .any(|request| request.url.path().ends_with("/models/seen-ok")),
+            "expected model seen-ok request"
+        );
+    }
+
+    #[tokio::test]
+    async fn spawn_failed_live_report_posts_passive_failure_payload() {
+        let control_plane = MockServer::start().await;
+        let account = account("passive-failed");
+        Mock::given(method("POST"))
+            .and(path(format!(
+                "/internal/v1/upstream-accounts/{}/health/live-result",
+                account.id
+            )))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({"ok": true})))
+            .mount(&control_plane)
+            .await;
+        let reporter = SeenOkReporter::new(
+            control_plane.uri(),
+            Arc::<str>::from("cp-internal-test-token"),
+            Duration::from_millis(250),
+            Duration::from_secs(0),
+        )
+        .expect("reporter must build");
+        let state = test_state_with_reporter(vec![account.clone()], Some(Arc::new(reporter)));
+        let error_context = UpstreamErrorContext {
+            upstream_status: StatusCode::PAYMENT_REQUIRED,
+            status: StatusCode::FORBIDDEN,
+            error_code: Some("deactivated_workspace".to_string()),
+            error_message: Some("workspace is deactivated".to_string()),
+            raw_error: Some(
+                "{\"detail\":{\"code\":\"deactivated_workspace\"}}".to_string(),
+            ),
+            retry_after: None,
+            upstream_request_id: Some("req-passive-failed".to_string()),
+            class: UpstreamErrorClass::AccountDeactivated,
+            learned_resolution: None,
+        };
+
+        spawn_failed_live_report(
+            &state,
+            account.id,
+            Some("gpt-5.1-codex-mini".to_string()),
+            StatusCode::PAYMENT_REQUIRED,
+            Some(&error_context),
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        let requests = control_plane.received_requests().await.unwrap();
+        let live_request = requests
+            .iter()
+            .find(|request| request.url.path().ends_with("/health/live-result"))
+            .expect("expected passive live-result failure request");
+        let body: serde_json::Value =
+            serde_json::from_slice(&live_request.body).expect("body should be json");
+
+        assert_eq!(body["status"], "failed");
+        assert_eq!(body["source"], "passive");
+        assert_eq!(body["status_code"], 402);
+        assert_eq!(body["error_code"], "deactivated_workspace");
+        assert_eq!(body["upstream_request_id"], "req-passive-failed");
     }
 }

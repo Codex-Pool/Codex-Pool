@@ -1134,12 +1134,14 @@ fn extract_upstream_error_details(body: &[u8]) -> (Option<String>, Option<String
             .get("error")
             .and_then(|error| error.get("code"))
             .and_then(Value::as_str)
+            .or_else(|| value.get("detail").and_then(|detail| detail.get("code")).and_then(Value::as_str))
             .or_else(|| value.get("code").and_then(Value::as_str))
             .map(ToString::to_string);
         let message = value
             .get("error")
             .and_then(|error| error.get("message"))
             .and_then(Value::as_str)
+            .or_else(|| value.get("detail").and_then(|detail| detail.get("message")).and_then(Value::as_str))
             .or_else(|| value.get("error").and_then(|error| error.get("detail")).and_then(Value::as_str))
             .or_else(|| value.get("message").and_then(Value::as_str))
             .or_else(|| value.get("detail").and_then(Value::as_str))
@@ -1207,7 +1209,7 @@ fn classify_upstream_error(
     if code == "token_invalidated" {
         return UpstreamErrorClass::TokenInvalidated;
     }
-    if code == "account_deactivated" {
+    if matches!(code.as_str(), "account_deactivated" | "deactivated_workspace") {
         return UpstreamErrorClass::AccountDeactivated;
     }
     if matches!(
@@ -2269,6 +2271,27 @@ mod request_utils_tests {
             )
         );
         assert_eq!(context.raw_error.as_deref(), Some(std::str::from_utf8(body).unwrap()));
+    }
+
+    #[test]
+    fn extracts_error_code_from_nested_detail_object() {
+        let body = br#"{"detail":{"code":"deactivated_workspace","message":"workspace is deactivated"}}"#;
+
+        assert_eq!(
+            super::extract_upstream_error_code(body).as_deref(),
+            Some("deactivated_workspace")
+        );
+    }
+
+    #[test]
+    fn classifies_deactivated_workspace_as_account_deactivated() {
+        let class = classify_upstream_error(
+            StatusCode::PAYMENT_REQUIRED,
+            Some("deactivated_workspace"),
+            Some("workspace is deactivated"),
+        );
+
+        assert_eq!(class, UpstreamErrorClass::AccountDeactivated);
     }
 
     #[test]

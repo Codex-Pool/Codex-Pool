@@ -1288,7 +1288,9 @@ async fn ws_billing_uses_priority_service_tier_for_pricing_and_logs_effective_ti
     assert_eq!(pricing_payload["model"], "gpt-5.4");
     assert_eq!(pricing_payload["service_tier"], "priority");
 
-    let final_event = events.last().expect("expected final stream request log event");
+    let final_event = events
+        .last()
+        .expect("expected final stream request log event");
     assert_eq!(final_event.request_id.as_deref(), Some("req-tier-1"));
     assert_eq!(final_event.authorization_id, Some(authorization_id));
     assert_eq!(final_event.service_tier.as_deref(), Some("priority"));

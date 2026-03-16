@@ -727,7 +727,12 @@ async fn codex_models_passthrough_preserves_raw_body_headers_and_local_304_cache
             .and_then(|value| value.to_str().ok()),
         Some("\"models-upstream-etag\"")
     );
-    let first_body = first_response.into_body().collect().await.unwrap().to_bytes();
+    let first_body = first_response
+        .into_body()
+        .collect()
+        .await
+        .unwrap()
+        .to_bytes();
     assert_eq!(std::str::from_utf8(&first_body).unwrap(), raw_body);
 
     let cached_response = app
@@ -750,7 +755,12 @@ async fn codex_models_passthrough_preserves_raw_body_headers_and_local_304_cache
             .and_then(|value| value.to_str().ok()),
         Some("\"models-upstream-etag\"")
     );
-    let cached_body = cached_response.into_body().collect().await.unwrap().to_bytes();
+    let cached_body = cached_response
+        .into_body()
+        .collect()
+        .await
+        .unwrap()
+        .to_bytes();
     assert!(cached_body.is_empty());
 }
 
@@ -796,7 +806,12 @@ async fn codex_models_cache_is_scoped_by_effective_client_version() {
         .await
         .unwrap();
     assert_eq!(first_response.status(), StatusCode::OK);
-    let first_body = first_response.into_body().collect().await.unwrap().to_bytes();
+    let first_body = first_response
+        .into_body()
+        .collect()
+        .await
+        .unwrap()
+        .to_bytes();
     let first_payload: Value = serde_json::from_slice(&first_body).unwrap();
     assert_eq!(first_payload["models"][0]["id"], "o3");
 
@@ -812,7 +827,12 @@ async fn codex_models_cache_is_scoped_by_effective_client_version() {
         .await
         .unwrap();
     assert_eq!(second_response.status(), StatusCode::OK);
-    let second_body = second_response.into_body().collect().await.unwrap().to_bytes();
+    let second_body = second_response
+        .into_body()
+        .collect()
+        .await
+        .unwrap()
+        .to_bytes();
     let second_payload: Value = serde_json::from_slice(&second_body).unwrap();
     assert_eq!(second_payload["models"][0]["id"], "o4-mini");
 }

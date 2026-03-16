@@ -141,6 +141,36 @@ struct ModelSeenOkReportRequest {
     status_code: Option<u16>,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum LiveResultReportStatus {
+    Ok,
+    Failed,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum LiveResultReportSource {
+    Active,
+    Passive,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct LiveResultReportRequest {
+    pub status: LiveResultReportStatus,
+    pub source: LiveResultReportSource,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub status_code: Option<u16>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error_code: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error_message: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub upstream_request_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+}
+
 #[derive(Clone)]
 pub struct SeenOkReporter {
     client: reqwest::Client,
@@ -148,6 +178,7 @@ pub struct SeenOkReporter {
     internal_auth_token: Arc<str>,
     min_interval: Duration,
     latest_reported: Arc<RwLock<HashMap<Uuid, Instant>>>,
+    latest_live_reported: Arc<RwLock<HashMap<Uuid, (Instant, String)>>>,
     latest_model_reported: Arc<RwLock<HashMap<(Uuid, String), Instant>>>,
 }
 
@@ -168,6 +199,7 @@ impl SeenOkReporter {
             internal_auth_token,
             min_interval,
             latest_reported: Arc::new(RwLock::new(HashMap::new())),
+            latest_live_reported: Arc::new(RwLock::new(HashMap::new())),
             latest_model_reported: Arc::new(RwLock::new(HashMap::new())),
         })
     }
@@ -184,6 +216,34 @@ impl SeenOkReporter {
             }
         }
         latest.insert(account_id, now);
+        true
+    }
+
+    fn should_report_live_result(
+        &self,
+        account_id: Uuid,
+        report: &LiveResultReportRequest,
+    ) -> bool {
+        let now = Instant::now();
+        let signature = format!(
+            "{:?}|{:?}|{:?}|{}|{}|{}",
+            report.status,
+            report.source,
+            report.status_code,
+            report.error_code.as_deref().unwrap_or_default(),
+            report.error_message.as_deref().unwrap_or_default(),
+            report.model.as_deref().unwrap_or_default(),
+        );
+        let mut latest = match self.latest_live_reported.write() {
+            Ok(lock) => lock,
+            Err(_) => return false,
+        };
+        if let Some((last, last_signature)) = latest.get(&account_id) {
+            if *last_signature == signature && now.duration_since(*last) < self.min_interval {
+                return false;
+            }
+        }
+        latest.insert(account_id, (now, signature));
         true
     }
 
@@ -221,7 +281,7 @@ impl SeenOkReporter {
             .client
             .post(&endpoint)
             .bearer_auth(self.internal_auth_token.as_ref());
-        self.log_if_report_failed(request, &endpoint, account_id, None)
+        self.log_if_report_failed(request, &endpoint, account_id, None, "seen_ok")
             .await;
     }
 
@@ -243,8 +303,32 @@ impl SeenOkReporter {
                 model: model.to_string(),
                 status_code: Some(200),
             });
-        self.log_if_report_failed(request, &endpoint, account_id, Some(model))
+        self.log_if_report_failed(request, &endpoint, account_id, Some(model), "model seen_ok")
             .await;
+    }
+
+    pub async fn report_live_result(&self, account_id: Uuid, report: LiveResultReportRequest) {
+        if !self.should_report_live_result(account_id, &report) {
+            return;
+        }
+
+        let endpoint = format!(
+            "{}/internal/v1/upstream-accounts/{account_id}/health/live-result",
+            self.endpoint_base
+        );
+        let request = self
+            .client
+            .post(&endpoint)
+            .bearer_auth(self.internal_auth_token.as_ref())
+            .json(&report);
+        self.log_if_report_failed(
+            request,
+            &endpoint,
+            account_id,
+            report.model.as_deref(),
+            "live result",
+        )
+        .await;
     }
 
     async fn log_if_report_failed(
@@ -253,6 +337,7 @@ impl SeenOkReporter {
         endpoint: &str,
         account_id: Uuid,
         model: Option<&str>,
+        signal_kind: &str,
     ) {
         match request.send().await {
             Ok(response) => {
@@ -271,7 +356,7 @@ impl SeenOkReporter {
                         endpoint,
                         status_code = status.as_u16(),
                         response_body,
-                        "failed to report model seen_ok signal to control plane"
+                        "failed to report {signal_kind} signal to control plane"
                     );
                 } else {
                     tracing::warn!(
@@ -279,7 +364,7 @@ impl SeenOkReporter {
                         endpoint,
                         status_code = status.as_u16(),
                         response_body,
-                        "failed to report seen_ok signal to control plane"
+                        "failed to report {signal_kind} signal to control plane"
                     );
                 }
             }
@@ -290,14 +375,14 @@ impl SeenOkReporter {
                         account_id = %account_id,
                         model,
                         endpoint,
-                        "failed to report model seen_ok signal to control plane"
+                        "failed to report {signal_kind} signal to control plane"
                     );
                 } else {
                     tracing::warn!(
                         error = %err,
                         account_id = %account_id,
                         endpoint,
-                        "failed to report seen_ok signal to control plane"
+                        "failed to report {signal_kind} signal to control plane"
                     );
                 }
             }
@@ -382,6 +467,7 @@ pub fn seen_ok_report_config_from_env() -> SeenOkReportConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
     use std::io;
     use std::sync::{Arc, Mutex};
 
@@ -490,6 +576,107 @@ mod tests {
             logged.contains("control plane unavailable"),
             "expected reporter failure log to include response body, got: {logged}"
         );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn seen_ok_reporter_posts_success_live_result_payload() {
+        let control_plane = MockServer::start().await;
+        let account_id = Uuid::new_v4();
+        Mock::given(method("POST"))
+            .and(path(format!(
+                "/internal/v1/upstream-accounts/{account_id}/health/live-result"
+            )))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({"ok": true})))
+            .mount(&control_plane)
+            .await;
+
+        let reporter = SeenOkReporter::new(
+            control_plane.uri(),
+            Arc::<str>::from("internal-token"),
+            Duration::from_millis(250),
+            Duration::from_secs(0),
+        )
+        .expect("reporter must build");
+
+        reporter
+            .report_live_result(
+                account_id,
+                LiveResultReportRequest {
+                    status: LiveResultReportStatus::Ok,
+                    source: LiveResultReportSource::Passive,
+                    status_code: Some(200),
+                    error_code: None,
+                    error_message: None,
+                    upstream_request_id: Some("req-live-ok".to_string()),
+                    model: Some("gpt-5.1-codex-mini".to_string()),
+                },
+            )
+            .await;
+
+        let requests = control_plane.received_requests().await.unwrap();
+        let live_request = requests
+            .iter()
+            .find(|request| request.url.path().ends_with("/health/live-result"))
+            .expect("expected live-result request");
+        let body: serde_json::Value =
+            serde_json::from_slice(&live_request.body).expect("request body should be json");
+
+        assert_eq!(body["status"], "ok");
+        assert_eq!(body["source"], "passive");
+        assert_eq!(body["status_code"], 200);
+        assert_eq!(body["upstream_request_id"], "req-live-ok");
+        assert_eq!(body["model"], "gpt-5.1-codex-mini");
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn seen_ok_reporter_posts_failed_live_result_payload() {
+        let control_plane = MockServer::start().await;
+        let account_id = Uuid::new_v4();
+        Mock::given(method("POST"))
+            .and(path(format!(
+                "/internal/v1/upstream-accounts/{account_id}/health/live-result"
+            )))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({"ok": true})))
+            .mount(&control_plane)
+            .await;
+
+        let reporter = SeenOkReporter::new(
+            control_plane.uri(),
+            Arc::<str>::from("internal-token"),
+            Duration::from_millis(250),
+            Duration::from_secs(0),
+        )
+        .expect("reporter must build");
+
+        reporter
+            .report_live_result(
+                account_id,
+                LiveResultReportRequest {
+                    status: LiveResultReportStatus::Failed,
+                    source: LiveResultReportSource::Passive,
+                    status_code: Some(402),
+                    error_code: Some("deactivated_workspace".to_string()),
+                    error_message: Some("workspace is deactivated".to_string()),
+                    upstream_request_id: Some("req-live-failed".to_string()),
+                    model: Some("gpt-5.1-codex-mini".to_string()),
+                },
+            )
+            .await;
+
+        let requests = control_plane.received_requests().await.unwrap();
+        let live_request = requests
+            .iter()
+            .find(|request| request.url.path().ends_with("/health/live-result"))
+            .expect("expected live-result request");
+        let body: serde_json::Value =
+            serde_json::from_slice(&live_request.body).expect("request body should be json");
+
+        assert_eq!(body["status"], "failed");
+        assert_eq!(body["source"], "passive");
+        assert_eq!(body["status_code"], 402);
+        assert_eq!(body["error_code"], "deactivated_workspace");
+        assert_eq!(body["error_message"], "workspace is deactivated");
+        assert_eq!(body["upstream_request_id"], "req-live-failed");
     }
 }
 
