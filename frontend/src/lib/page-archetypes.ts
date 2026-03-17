@@ -57,6 +57,12 @@ export interface ModelsWorkspaceLayout {
   feedbackPlacement: 'within-status-panel'
 }
 
+export interface ProxiesWorkspaceLayout {
+  mobileControlsPlacement: 'after-intro'
+  filterPlacement: 'within-controls-panel'
+  densityPlacement: 'within-controls-panel'
+}
+
 const ARCHETYPE_CONFIG: Record<PageArchetype, PageArchetypeConfig> = {
   auth: {
     name: 'auth',
@@ -223,5 +229,13 @@ export function describeModelsWorkspaceLayout(): ModelsWorkspaceLayout {
     mobileContextPlacement: 'after-intro',
     actionPlacement: 'within-status-panel',
     feedbackPlacement: 'within-status-panel',
+  }
+}
+
+export function describeProxiesWorkspaceLayout(): ProxiesWorkspaceLayout {
+  return {
+    mobileControlsPlacement: 'after-intro',
+    filterPlacement: 'within-controls-panel',
+    densityPlacement: 'within-controls-panel',
   }
 }

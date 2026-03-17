@@ -151,3 +151,17 @@ test('describeModelsWorkspaceLayout keeps the intro separate from the actions co
     feedbackPlacement: 'within-status-panel',
   })
 })
+
+test('describeProxiesWorkspaceLayout keeps filters and density controls grouped with health-check actions ahead of the table', () => {
+  const describeProxiesWorkspaceLayout = (
+    pageArchetypes as typeof pageArchetypes & {
+      describeProxiesWorkspaceLayout?: () => unknown
+    }
+  ).describeProxiesWorkspaceLayout
+
+  assert.deepEqual(describeProxiesWorkspaceLayout?.(), {
+    mobileControlsPlacement: 'after-intro',
+    filterPlacement: 'within-controls-panel',
+    densityPlacement: 'within-controls-panel',
+  })
+})
