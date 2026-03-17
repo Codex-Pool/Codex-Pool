@@ -307,6 +307,9 @@ git commit -m "docs(frontend): record page archetype rollout" -m "Capture the de
 - `Billing` 与 `TenantBillingPage` 已迁移到共享 `detail/report` 节奏，并补充 `describeBillingReportLayout()` 约束 `intro -> toolbar -> lead -> rail -> detail` 的阅读顺序。
 - `frontend/src/components/layout/page-archetypes.tsx` 已新增 `ReportMetricGrid / ReportMetricCard`，用于更安静的报表 KPI 呈现；admin 充值与 tenant API Key 分组定价都已降级到右侧 `rail`。
 - 共享趋势图已增加正尺寸守卫，避免 Recharts 在 Billing 桌面端与移动端首帧渲染时输出 `width(-1) / height(-1)` 告警。
+- `Logs` 与 `TenantLogsPage` 已迁移到共享 `workspace/detail` 节奏，统一使用 `PageIntro / PagePanel / SectionHeader`，让 tab 带、过滤区和活动表格形成稳定的排障工作流。
+- `frontend/src/lib/page-archetypes.ts` 已补充 `describeLogsWorkbenchLayout()`，约束日志页遵循 `intro -> toolbar -> active panel` 顺序，并把筛选留在当前 tab 的主面板内。
+- `frontend/src/features/logs/filter-controls.tsx` 已新增 `LogsFilterField`，把原本只靠 placeholder 的筛选器收拢为带可见标签的过滤表单，移动端可扫读性明显更稳定。
 - `tenantUsage` 与 `usage` 相关多语言文案已同步修正，移除日文/俄文中的占位翻译，并校正 admin Usage 图表语义。
 - 最终验证通过：
   - `cd frontend && node --test src/lib/page-archetypes.test.ts src/components/ui/trend-chart-core.test.ts src/components/threads-utils.test.ts src/lib/dashboard-chart-a11y.test.ts`
@@ -327,3 +330,7 @@ git commit -m "docs(frontend): record page archetype rollout" -m "Capture the de
   - `/tmp/admin-billing-mobile-20260317.png`
   - `/tmp/tenant-billing-desktop-20260317.png`
   - `/tmp/tenant-billing-mobile-20260317.png`
+  - `/tmp/admin-logs-after-desktop-20260317.png`
+  - `/tmp/admin-logs-after-mobile-20260317.png`
+  - `/tmp/tenant-logs-after-desktop-20260317.png`
+  - `/tmp/tenant-logs-after-mobile-20260317.png`
