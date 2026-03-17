@@ -2399,19 +2399,19 @@ export default {
             rangeAriaLabel: "时间范围"
         },
         hourly: {
-            description: "按小时查看请求量变化。",
+            description: "按采样小时查看可核对的请求量。",
             empty: "暂无数据",
-            title: "每小时请求量"
+            title: "逐小时明细"
         },
         leaderboard: {
-            description: "按请求量统计当前租户 API 密钥。",
+            description: "当前筛选条件下的 API 密钥请求量排名。",
             empty: "暂无排行数据",
             title: "API 密钥排行"
         },
-        subtitle: "查看请求趋势与 API 密钥排行。",
+        subtitle: "按 API 密钥筛选请求趋势，并查看逐小时明细。",
         title: "用量分析",
         trend: {
-            description: "按所选时间范围汇总请求量。",
+            description: "所选时间范围内的逐小时请求量。",
             empty: "暂无趋势数据",
             title: "请求趋势"
         }
@@ -2589,10 +2589,10 @@ export default {
         chart: {
             empty: "此时段内无数据记录。",
             requests: "请求次数",
-            subtitle: "跨所有上游服务商的数据汇聚",
-            title: "近30日 Token 消耗"
+            subtitle: "按天汇总所有租户与上游提供方的请求量",
+            title: "近 30 天请求量"
         },
-        subtitle: "网关请求消耗与基础设施调用量聚合统计",
+        subtitle: "查看近 30 天的请求体量与 API 密钥集中度。",
         title: "用量分析",
         topKeys: {
             columns: {
@@ -2605,7 +2605,7 @@ export default {
             empty: "暂无用量记录。",
             keyFallback: "API 密钥 {{keyId}}",
             searchPlaceholder: "搜索 API 密钥或租户…",
-            subtitle: "按请求调用量统计",
+            subtitle: "按请求量排序",
             title: "API 密钥排行",
             reqs: "次"
         }

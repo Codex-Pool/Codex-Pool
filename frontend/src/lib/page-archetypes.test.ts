@@ -2,6 +2,7 @@
 
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import * as pageArchetypes from './page-archetypes.ts'
 
 import {
   describeDashboardShellLayout,
@@ -78,5 +79,19 @@ test('describeDashboardShellLayout keeps dashboard metrics ahead of the rail on 
   assert.deepEqual(describeDashboardShellLayout(), {
     mobileRailPlacement: 'after-content',
     desktopAlignment: 'start',
+  })
+})
+
+test('describeReportShellLayout keeps filters near the intro, shows the main trend first, and defers rail content until after the lead report on mobile', () => {
+  const describeReportShellLayout = (
+    pageArchetypes as typeof pageArchetypes & {
+      describeReportShellLayout?: () => unknown
+    }
+  ).describeReportShellLayout
+
+  assert.deepEqual(describeReportShellLayout?.(), {
+    mobileToolbarPlacement: 'after-intro',
+    mobileRailPlacement: 'after-content',
+    desktopContentBalance: 'lead-first',
   })
 })

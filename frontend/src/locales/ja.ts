@@ -2389,31 +2389,31 @@ export default {
             time: "時間"
         },
         filters: {
-            apiKeyAll: "API キーすべて",
+            apiKeyAll: "すべての API キー",
             apiKeyAriaLabel: "API キーフィルター",
             range: {
                 last24Hours: "過去 24 時間",
-                last30Days: "過去30日間",
+                last30Days: "過去 30 日間",
                 last7Days: "過去 7 日間"
             },
             rangeAriaLabel: "期間"
         },
         hourly: {
-            description: "説明",
-            empty: "空の",
-            title: "タイトル"
+            description: "各時間帯の監査可能なリクエスト数を確認します。",
+            empty: "データはまだありません",
+            title: "時間別の詳細"
         },
         leaderboard: {
-            description: "説明",
-            empty: "空の",
-            title: "タイトル"
+            description: "現在の条件での API キー別リクエスト数です。",
+            empty: "ランキングデータはまだありません",
+            title: "API キーランキング"
         },
-        subtitle: "字幕",
-        title: "タイトル",
+        subtitle: "API キーで絞り込み、リクエスト推移と時間別の詳細を確認します。",
+        title: "利用状況分析",
         trend: {
-            description: "説明",
-            empty: "空の",
-            title: "タイトル"
+            description: "選択した期間の時間別リクエスト数です。",
+            empty: "推移データはまだありません",
+            title: "リクエスト推移"
         }
     },
     tenants: {
@@ -2589,10 +2589,10 @@ export default {
         chart: {
             empty: "この期間のデータはありません。",
             requests: "リクエスト数",
-            subtitle: "すべてのプロバイダの合計",
-            title: "トークン消費量 (過去30日間)"
+            subtitle: "全テナントとすべての上流プロバイダの1日合計",
+            title: "リクエスト量・過去30日"
         },
-        subtitle: "リクエスト消費量とインフラストラクチャのプロファイリング",
+        subtitle: "直近 30 日間のリクエスト量と API キー集中度を確認します。",
         title: "利用状況分析",
         topKeys: {
             columns: {
@@ -2606,7 +2606,7 @@ export default {
             keyFallback: "API キー {{keyId}}",
             searchPlaceholder: "API キーまたはテナントを検索…",
             subtitle: "リクエスト数順",
-            title: "トップ API キー",
+            title: "API キーランキング",
             reqs: "回"
         }
     },

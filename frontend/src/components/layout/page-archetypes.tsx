@@ -3,6 +3,7 @@ import { type HTMLAttributes, type ReactNode } from 'react'
 import {
   describeDashboardShellLayout,
   describePageRegions,
+  describeReportShellLayout,
   resolvePageArchetype,
   type PageArchetype,
 } from '@/lib/page-archetypes'
@@ -179,6 +180,52 @@ export function WorkspaceShell({
         <div className="min-w-0 space-y-6">{primary}</div>
         {secondary ? <aside className="min-w-0 space-y-6">{secondary}</aside> : null}
       </div>
+    </section>
+  )
+}
+
+interface ReportShellProps extends HTMLAttributes<HTMLDivElement> {
+  intro: ReactNode
+  toolbar?: ReactNode
+  lead: ReactNode
+  rail?: ReactNode
+}
+
+export function ReportShell({
+  intro,
+  toolbar,
+  lead,
+  rail,
+  className,
+  children,
+  ...props
+}: ReportShellProps) {
+  const layout = describeReportShellLayout()
+
+  return (
+    <section className={cn('space-y-6 md:space-y-8', className)} {...props}>
+      {intro}
+      {toolbar ? <div>{toolbar}</div> : null}
+      <div
+        className={cn(
+          'grid gap-6 md:gap-8',
+          rail && 'xl:grid-cols-[minmax(0,1.14fr)_minmax(18rem,0.86fr)]',
+          layout.desktopContentBalance === 'lead-first' && 'xl:items-start',
+        )}
+      >
+        <div className="min-w-0 space-y-6 md:space-y-8">{lead}</div>
+        {rail ? (
+          <aside
+            className={cn(
+              'min-w-0 space-y-6',
+              layout.mobileRailPlacement === 'after-content' && 'order-2',
+            )}
+          >
+            {rail}
+          </aside>
+        ) : null}
+      </div>
+      {children ? <div className="space-y-6 md:space-y-8">{children}</div> : null}
     </section>
   )
 }

@@ -27,6 +27,12 @@ export interface DashboardShellLayout {
   desktopAlignment: 'start' | 'stretch'
 }
 
+export interface ReportShellLayout {
+  mobileToolbarPlacement: 'after-intro'
+  mobileRailPlacement: 'after-content' | 'after-toolbar'
+  desktopContentBalance: 'lead-first' | 'balanced'
+}
+
 const ARCHETYPE_CONFIG: Record<PageArchetype, PageArchetypeConfig> = {
   auth: {
     name: 'auth',
@@ -153,5 +159,13 @@ export function describeDashboardShellLayout(): DashboardShellLayout {
   return {
     mobileRailPlacement: 'after-content',
     desktopAlignment: 'start',
+  }
+}
+
+export function describeReportShellLayout(): ReportShellLayout {
+  return {
+    mobileToolbarPlacement: 'after-intro',
+    mobileRailPlacement: 'after-content',
+    desktopContentBalance: 'lead-first',
   }
 }

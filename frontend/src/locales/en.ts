@@ -2399,19 +2399,19 @@ export default {
             rangeAriaLabel: "Time range"
         },
         hourly: {
-            description: "Hourly request volume.",
+            description: "Auditable request counts for each sampled hour.",
             empty: "No data yet",
-            title: "Hourly Requests"
+            title: "Hourly Detail"
         },
         leaderboard: {
-            description: "API keys ranked by request volume.",
+            description: "API keys ranked by request volume for the current selection.",
             empty: "No ranking data yet",
-            title: "API Key Leaderboard"
+            title: "API Key Ranking"
         },
-        subtitle: "View request trends and API key rankings.",
+        subtitle: "Track request trends, filter by API key, and inspect hourly detail.",
         title: "Usage Analysis",
         trend: {
-            description: "Request trend over selected time range.",
+            description: "Hourly request volume for the selected time range.",
             empty: "No trend data yet",
             title: "Request Trend"
         }
@@ -2589,10 +2589,10 @@ export default {
         chart: {
             empty: "No data recorded in this period.",
             requests: "Requests",
-            subtitle: "Aggregated usage across all providers",
-            title: "Token Consumption (30 Days)"
+            subtitle: "Daily totals aggregated across all tenants and upstream providers",
+            title: "Request Volume · 30 Days"
         },
-        subtitle: "Request consumption and infrastructure profiling.",
+        subtitle: "Review request volume and API key concentration across the last 30 days.",
         title: "Usage Analysis",
         topKeys: {
             columns: {
@@ -2605,8 +2605,8 @@ export default {
             empty: "No usage recorded yet.",
             keyFallback: "API Key {{keyId}}",
             searchPlaceholder: "Search API keys…",
-            subtitle: "By request volume",
-            title: "Top API Keys",
+            subtitle: "Sorted by request volume",
+            title: "API Key Ranking",
             reqs: "reqs"
         }
     },
