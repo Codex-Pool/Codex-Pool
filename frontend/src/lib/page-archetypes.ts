@@ -51,6 +51,12 @@ export interface AccountsWorkspaceLayout {
   batchActionsPlacement: 'with-filters'
 }
 
+export interface ModelsWorkspaceLayout {
+  mobileContextPlacement: 'after-intro'
+  actionPlacement: 'within-status-panel'
+  feedbackPlacement: 'within-status-panel'
+}
+
 const ARCHETYPE_CONFIG: Record<PageArchetype, PageArchetypeConfig> = {
   auth: {
     name: 'auth',
@@ -209,5 +215,13 @@ export function describeAccountsWorkspaceLayout(): AccountsWorkspaceLayout {
     mobileToolbarPlacement: 'after-intro',
     mobileFiltersPlacement: 'after-toolbar',
     batchActionsPlacement: 'with-filters',
+  }
+}
+
+export function describeModelsWorkspaceLayout(): ModelsWorkspaceLayout {
+  return {
+    mobileContextPlacement: 'after-intro',
+    actionPlacement: 'within-status-panel',
+    feedbackPlacement: 'within-status-panel',
   }
 }

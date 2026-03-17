@@ -137,3 +137,17 @@ test('describeAccountsWorkspaceLayout keeps primary actions ahead of filters and
     batchActionsPlacement: 'with-filters',
   })
 })
+
+test('describeModelsWorkspaceLayout keeps the intro separate from the actions context and keeps feedback above the table', () => {
+  const describeModelsWorkspaceLayout = (
+    pageArchetypes as typeof pageArchetypes & {
+      describeModelsWorkspaceLayout?: () => unknown
+    }
+  ).describeModelsWorkspaceLayout
+
+  assert.deepEqual(describeModelsWorkspaceLayout?.(), {
+    mobileContextPlacement: 'after-intro',
+    actionPlacement: 'within-status-panel',
+    feedbackPlacement: 'within-status-panel',
+  })
+})

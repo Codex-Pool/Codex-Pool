@@ -1,7 +1,6 @@
 import { useCallback, useMemo, useState } from 'react'
 import { type ColumnDef } from '@tanstack/react-table'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { motion } from 'framer-motion'
 import {
   ActivitySquare,
   CircleAlert,
@@ -19,6 +18,11 @@ import {
   type ModelSchema,
 } from '@/api/models'
 import { localizeApiErrorDisplay } from '@/api/errorI18n'
+import {
+  PageIntro,
+  PagePanel,
+  SectionHeader,
+} from '@/components/layout/page-archetypes'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -34,6 +38,7 @@ import { LoadingOverlay } from '@/components/ui/loading-overlay'
 import { StandardDataTable } from '@/components/ui/standard-data-table'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { formatOptionalExactCount } from '@/lib/count-number-format'
+import { describeModelsWorkspaceLayout } from '@/lib/page-archetypes'
 import { POOL_SECTION_CLASS_NAME } from '@/lib/pool-styles'
 import { cn } from '@/lib/utils'
 import { formatRelativeTime } from '@/lib/time'
@@ -272,6 +277,8 @@ export default function Models() {
     isFetching ||
     syncCatalogMutation.isPending ||
     probeMutation.isPending
+  const modelsLayout = describeModelsWorkspaceLayout()
+  const tableSurfaceClassName = 'border-0 bg-transparent shadow-none'
 
   const openEditor = useCallback((model: ModelSchema) => {
     setEditingModel(model)
@@ -445,100 +452,174 @@ export default function Models() {
     [copyText, i18n.resolvedLanguage, openEditor, t],
   )
 
-  const catalogSyncText = !modelsMeta?.catalog_synced_at
-    ? t('models.syncHint.notSynced', {
-        defaultValue: 'OpenAI catalog has not been synced yet.',
+  const catalogSyncText = !modelsMeta
+    ? t('common.loading', { defaultValue: 'Loading…' })
+    : !modelsMeta.catalog_synced_at
+      ? t('models.syncHint.notSynced', {
+          defaultValue: 'OpenAI catalog has not been synced yet.',
+        })
+      : t('models.syncHint.syncedAt', {
+          defaultValue: 'Catalog synced {{time}}',
+          time: formatRelativeTime(
+            new Date(modelsMeta.catalog_synced_at).getTime(),
+            i18n.resolvedLanguage,
+            true,
+          ),
+        })
+
+  const probeSummaryText = modelsMeta
+    ? t('models.probeSummary', {
+        defaultValue: 'Probe cache: {{stale}}, checked {{checkedAt}}, ttl {{ttlHours}}h, source {{source}}',
+        stale: modelsMeta.probe_cache_stale
+          ? t('models.cache.stale', { defaultValue: 'stale' })
+          : t('models.cache.fresh', { defaultValue: 'fresh' }),
+        checkedAt: modelsMeta.probe_cache_updated_at
+          ? formatRelativeTime(
+              new Date(modelsMeta.probe_cache_updated_at).getTime(),
+              i18n.resolvedLanguage,
+              true,
+            )
+          : t('models.availability.neverChecked', { defaultValue: 'Never checked' }),
+        ttlHours: Math.max(1, Math.round(modelsMeta.probe_cache_ttl_sec / 3600)),
+        source:
+          modelsMeta.probe_source_account_label
+          || t('models.probeSourceUnknown', { defaultValue: 'unknown account' }),
       })
-    : t('models.syncHint.syncedAt', {
-        defaultValue: 'Catalog synced {{time}}',
-        time: formatRelativeTime(
-          new Date(modelsMeta.catalog_synced_at).getTime(),
-          i18n.resolvedLanguage,
-          true,
-        ),
-      })
+    : undefined
+
+  const hasStatusMessages =
+    Boolean(modelsMeta?.catalog_sync_required)
+    || Boolean(modelsMeta?.catalog_last_error)
+    || Boolean(error)
+    || Boolean(notice)
 
   const currentModel = editingModel
   const currentOfficial = currentModel?.official
   const canDeleteOverride = Boolean(currentModel?.override_pricing?.id)
 
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 12 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.3 }}
-      className="flex h-full flex-col overflow-hidden p-8"
-    >
-      <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h2 className="text-3xl font-bold tracking-tight">
-            {t('models.title', { defaultValue: 'Models' })}
-          </h2>
-          <p className="mt-1 text-muted-foreground">
-            {t('models.description', {
-              defaultValue: 'Browse the OpenAI official catalog, verify model availability, and manage manual pricing overrides.',
-            })}
-          </p>
-          <p className="mt-1 text-xs text-muted-foreground">{catalogSyncText}</p>
-          {modelsMeta?.catalog_last_error ? (
-            <p className="mt-1 break-all text-xs text-warning-foreground">{modelsMeta.catalog_last_error}</p>
-          ) : null}
-        </div>
-
-        <div className="flex items-center gap-2">
-          <Button
-            onClick={() => syncCatalogMutation.mutate()}
-            disabled={syncCatalogMutation.isPending}
-          >
-            <RotateCw className={cn('mr-2 h-4 w-4', syncCatalogMutation.isPending && 'animate-spin')} />
-            {t('models.actions.syncOpenAiCatalog', { defaultValue: 'Sync OpenAI catalog' })}
-          </Button>
-          <Button
-            variant="outline"
-            onClick={() => probeMutation.mutate()}
-            disabled={probeMutation.isPending || modelsMeta?.catalog_sync_required}
-          >
-            <ActivitySquare className={cn('mr-2 h-4 w-4', probeMutation.isPending && 'animate-pulse')} />
-            {t('models.actions.probeAvailability', { defaultValue: 'Probe availability' })}
-          </Button>
-        </div>
-      </div>
-
-      {error ? <p className="mb-3 text-sm text-destructive">{error}</p> : null}
-      {notice ? <p className="mb-3 text-sm text-success-foreground">{notice}</p> : null}
-
-      <div className="relative min-h-0 flex-1">
-        <LoadingOverlay
-          show={isBusy}
-          title={t('models.syncing')}
-          description={t('models.loadingHint', {
-            defaultValue: 'Refreshing official catalog and model availability…',
+    <div className="flex-1 p-4 sm:p-6 lg:p-8">
+      <div className="space-y-6 md:space-y-8">
+        <PageIntro
+          archetype="workspace"
+          title={t('models.title', { defaultValue: 'Models' })}
+          description={t('models.description', {
+            defaultValue: 'Browse the OpenAI official catalog, verify model availability, and manage manual pricing overrides.',
           })}
         />
 
-        <TooltipProvider>
-          <StandardDataTable
-            columns={columns}
-            data={models}
-            searchPlaceholder={t('models.actions.search')}
-            searchFn={matchesModelSearch}
-            emptyText={
-              modelsMeta?.catalog_sync_required
-                ? t('models.emptySyncRequired', {
-                    defaultValue: 'No official catalog yet. Sync OpenAI catalog first.',
-                  })
-                : t('models.empty')
-            }
-            actions={
-              modelsMeta?.catalog_sync_required ? (
-                <Button size="sm" onClick={() => syncCatalogMutation.mutate()}>
-                  <RotateCw className="mr-2 h-4 w-4" />
-                  {t('models.actions.syncOpenAiCatalog', { defaultValue: 'Sync OpenAI catalog' })}
-                </Button>
-              ) : undefined
-            }
+        {modelsLayout.mobileContextPlacement === 'after-intro' ? (
+          <PagePanel tone="secondary" className="space-y-4">
+            <SectionHeader
+              title={t('models.actions.sync', { defaultValue: 'Sync Status' })}
+              description={
+                <div className="space-y-1 break-words">
+                  <p>{catalogSyncText}</p>
+                  {probeSummaryText ? (
+                    <p className="text-xs text-slate-500 dark:text-slate-400">{probeSummaryText}</p>
+                  ) : null}
+                </div>
+              }
+              actions={
+                modelsLayout.actionPlacement === 'within-status-panel' ? (
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Button
+                      onClick={() => syncCatalogMutation.mutate()}
+                      disabled={syncCatalogMutation.isPending}
+                    >
+                      <RotateCw
+                        className={cn('mr-2 h-4 w-4', syncCatalogMutation.isPending && 'animate-spin')}
+                      />
+                      {t('models.actions.syncOpenAiCatalog', { defaultValue: 'Sync OpenAI catalog' })}
+                    </Button>
+                    <Button
+                      variant="outline"
+                      onClick={() => probeMutation.mutate()}
+                      disabled={probeMutation.isPending || modelsMeta?.catalog_sync_required}
+                    >
+                      <ActivitySquare
+                        className={cn('mr-2 h-4 w-4', probeMutation.isPending && 'animate-pulse')}
+                      />
+                      {t('models.actions.probeAvailability', { defaultValue: 'Probe availability' })}
+                    </Button>
+                  </div>
+                ) : undefined
+              }
+            />
+
+            <div className="flex flex-wrap items-center gap-2">
+              {modelsMeta ? (
+                <Badge variant={modelsMeta.probe_cache_stale ? 'warning' : 'success'}>
+                  {modelsMeta.probe_cache_stale
+                    ? t('models.cache.stale', { defaultValue: 'stale' })
+                    : t('models.cache.fresh', { defaultValue: 'fresh' })}
+                </Badge>
+              ) : null}
+            </div>
+
+            {modelsLayout.feedbackPlacement === 'within-status-panel' && hasStatusMessages ? (
+              <div className="space-y-2">
+                {modelsMeta?.catalog_sync_required ? (
+                  <p className="break-words rounded-2xl border border-warning/20 bg-warning-muted/65 px-4 py-3 text-sm leading-6 text-warning-foreground">
+                    {t('models.emptySyncRequired', {
+                      defaultValue: 'No official catalog yet. Sync OpenAI catalog first.',
+                    })}
+                  </p>
+                ) : null}
+                {modelsMeta?.catalog_last_error ? (
+                  <p className="break-words rounded-2xl border border-warning/20 bg-warning-muted/65 px-4 py-3 text-sm leading-6 text-warning-foreground">
+                    {modelsMeta.catalog_last_error}
+                  </p>
+                ) : null}
+                {error ? (
+                  <p className="break-words rounded-2xl border border-destructive/15 bg-destructive/5 px-4 py-3 text-sm leading-6 text-destructive">
+                    {error}
+                  </p>
+                ) : null}
+                {notice ? (
+                  <p className="break-words rounded-2xl border border-success/20 bg-success-muted/65 px-4 py-3 text-sm leading-6 text-success-foreground">
+                    {notice}
+                  </p>
+                ) : null}
+              </div>
+            ) : null}
+          </PagePanel>
+        ) : null}
+
+        <PagePanel className="relative overflow-hidden p-0">
+          <LoadingOverlay
+            show={isBusy}
+            title={t('models.syncing')}
+            description={t('models.loadingHint', {
+              defaultValue: 'Refreshing official catalog and model availability…',
+            })}
           />
-        </TooltipProvider>
+
+          <TooltipProvider>
+            <StandardDataTable
+              columns={columns}
+              data={models}
+              className={tableSurfaceClassName}
+              searchPlaceholder={t('models.actions.search')}
+              searchFn={matchesModelSearch}
+              emptyText={
+                modelsMeta?.catalog_sync_required
+                  ? t('models.emptySyncRequired', {
+                      defaultValue: 'No official catalog yet. Sync OpenAI catalog first.',
+                    })
+                  : t('models.empty')
+              }
+              actions={
+                modelsMeta?.catalog_sync_required ? (
+                  <Button size="sm" onClick={() => syncCatalogMutation.mutate()}>
+                    <RotateCw className="mr-2 h-4 w-4" />
+                    {t('models.actions.syncOpenAiCatalog', { defaultValue: 'Sync OpenAI catalog' })}
+                  </Button>
+                ) : undefined
+              }
+            />
+          </TooltipProvider>
+        </PagePanel>
       </div>
 
       <Dialog
@@ -801,6 +882,6 @@ export default function Models() {
           ) : null}
         </DialogContent>
       </Dialog>
-    </motion.div>
+    </div>
   )
 }
