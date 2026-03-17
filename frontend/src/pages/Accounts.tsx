@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import type { TFunction } from 'i18next'
-import { motion } from 'framer-motion'
 import { ChevronDown, Download, Plus, RefreshCw } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router-dom'
@@ -15,6 +14,10 @@ import {
 import { extractApiErrorStatus } from '@/api/client'
 import { localizeApiErrorDisplay, localizeOAuthErrorCodeDisplay } from '@/api/errorI18n'
 import { importJobsApi, type OAuthImportJobSummary } from '@/api/importJobs'
+import {
+  PageIntro,
+  PagePanel,
+} from '@/components/layout/page-archetypes'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { useConfirmDialog } from '@/components/ui/confirm-dialog'
@@ -60,6 +63,7 @@ import {
   resolveCredentialKindShort,
   sortRateLimitDisplays,
 } from '@/features/accounts/utils'
+import { describeAccountsWorkspaceLayout } from '@/lib/page-archetypes'
 import { notify } from '@/lib/notification'
 import { cn } from '@/lib/utils'
 
@@ -1049,6 +1053,8 @@ export default function Accounts() {
   })
 
   const filteredStatusCount = filteredAccounts.length
+  const accountsLayout = describeAccountsWorkspaceLayout()
+  const tableSurfaceClassName = 'border-0 bg-transparent shadow-none'
   const hasPendingAccountAction =
     isBatchOperating
     || toggleEnabledMutation.isPending
@@ -1058,169 +1064,157 @@ export default function Accounts() {
     || enableFamilyMutation.isPending
     || isManualRefreshing
 
-  return (
-    <motion.div
-      initial={{ opacity: 0, y: 10 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.3 }}
-      className="flex h-full flex-col overflow-hidden p-8"
-    >
-      <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h2 className="text-3xl font-bold tracking-tight">{t('accounts.title')}</h2>
-          <p className="mt-1 text-muted-foreground">{t('accounts.subtitle')}</p>
-        </div>
+  const toolbarActions = (
+    <div className="flex flex-wrap items-center gap-2">
+      <Button onClick={() => navigate('/imports')}>
+        <Plus className="mr-2 h-4 w-4" />
+        {t('accounts.actions.add', { defaultValue: 'Add Account' })}
+      </Button>
 
-        <div className="flex flex-wrap items-center gap-2">
-          <Button onClick={() => navigate('/imports')}>
-            <Plus className="mr-2 h-4 w-4" />
-            {t('accounts.actions.add', { defaultValue: 'Add Account' })}
-          </Button>
+      <Button
+        variant="outline"
+        onClick={() => {
+          const payload = filteredAccounts.map((account) => ({
+            ...account,
+            oauth_status: oauthStatusMap.get(account.id),
+          }))
+          const blob = new Blob([JSON.stringify(payload, null, 2)], {
+            type: 'application/json',
+          })
+          const url = URL.createObjectURL(blob)
+          const anchor = document.createElement('a')
+          anchor.href = url
+          anchor.download = `accounts-${Date.now()}.json`
+          anchor.click()
+          URL.revokeObjectURL(url)
+          notify({
+            variant: 'success',
+            title: t('accounts.messages.exportSuccess', { defaultValue: 'Export successful' }),
+          })
+        }}
+      >
+        <Download className="mr-2 h-4 w-4" />
+        {t('accounts.actions.export')}
+      </Button>
 
+      <Button onClick={handleRefreshAccounts} disabled={isManualRefreshing}>
+        <RefreshCw
+          className={cn('mr-2 h-4 w-4', isManualRefreshing ? 'animate-spin' : undefined)}
+        />
+        {isManualRefreshing
+          ? rateLimitRefreshJob && rateLimitRefreshJob.total > 0
+            ? t('accounts.actions.refreshingAccounts', {
+              defaultValue: 'Refreshing',
+            }) + ` ${rateLimitRefreshJob.processed}/${rateLimitRefreshJob.total}`
+            : t('accounts.actions.refreshingAccounts', { defaultValue: 'Refreshing' })
+          : t('accounts.actions.refreshAccounts')}
+      </Button>
+    </div>
+  )
+
+  const batchActionsControl = (
+    <div className="flex flex-wrap items-center gap-2">
+      <Badge variant="secondary" className="font-normal">
+        {t('accounts.filters.total', { count: filteredStatusCount })}
+      </Badge>
+      <Badge variant={selectedCount > 0 ? 'info' : 'secondary'} className="font-normal">
+        {t('accounts.actions.selectedCount', {
+          count: selectedCount,
+          defaultValue: '{{count}} selected',
+        })}
+      </Badge>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
           <Button
+            type="button"
+            size="sm"
             variant="outline"
-            onClick={() => {
-              const payload = filteredAccounts.map((account) => ({
-                ...account,
-                oauth_status: oauthStatusMap.get(account.id),
-              }))
-              const blob = new Blob([JSON.stringify(payload, null, 2)], {
-                type: 'application/json',
-              })
-              const url = URL.createObjectURL(blob)
-              const anchor = document.createElement('a')
-              anchor.href = url
-              anchor.download = `accounts-${Date.now()}.json`
-              anchor.click()
-              URL.revokeObjectURL(url)
-              notify({
-                variant: 'success',
-                title: t('accounts.messages.exportSuccess', { defaultValue: 'Export successful' }),
-              })
-            }}
+            disabled={selectedCount === 0 || hasPendingAccountAction}
           >
-            <Download className="mr-2 h-4 w-4" />
-            {t('accounts.actions.export')}
+            {t('accounts.actions.batchMenu', { defaultValue: 'Batch Actions' })}
+            <ChevronDown className="h-3.5 w-3.5" />
           </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="w-[260px]">
+          <DropdownMenuLabel>
+            {t('accounts.actions.selectedCount', {
+              count: selectedCount,
+              defaultValue: '{{count}} selected',
+            })}
+          </DropdownMenuLabel>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem
+            className="cursor-pointer"
+            disabled={selectedCount === 0 || hasPendingAccountAction}
+            onClick={() => runBatchMutation('enable')}
+          >
+            {t('accounts.actions.batchEnable', { defaultValue: 'Batch Enable' })}
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            className="cursor-pointer"
+            disabled={selectedCount === 0 || hasPendingAccountAction}
+            onClick={() => runBatchMutation('disable')}
+          >
+            {t('accounts.actions.batchDisable', { defaultValue: 'Batch Disable' })}
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            className="cursor-pointer"
+            disabled={selectedRefreshableAccountIds.length === 0 || hasPendingAccountAction}
+            onClick={() => runBatchMutation('refreshLogin')}
+          >
+            {t('accounts.actions.batchRefreshLogin', {
+              count: selectedRefreshableAccountIds.length,
+              defaultValue: 'Batch Refresh Login ({{count}})',
+            })}
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            className="cursor-pointer"
+            disabled={selectedFamilyActionAccountIds.length === 0 || hasPendingAccountAction}
+            onClick={() => runBatchMutation('pauseFamily')}
+          >
+            {t('accounts.actions.batchPauseFamily', {
+              count: selectedFamilyActionAccountIds.length,
+              defaultValue: 'Batch Pause Family ({{count}})',
+            })}
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            className="cursor-pointer"
+            disabled={selectedFamilyActionAccountIds.length === 0 || hasPendingAccountAction}
+            onClick={() => runBatchMutation('resumeFamily')}
+          >
+            {t('accounts.actions.batchResumeFamily', {
+              count: selectedFamilyActionAccountIds.length,
+              defaultValue: 'Batch Resume Family ({{count}})',
+            })}
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem
+            className="cursor-pointer text-destructive focus:bg-destructive/10"
+            disabled={selectedCount === 0 || hasPendingAccountAction}
+            onClick={() => runBatchMutation('delete')}
+          >
+            {t('accounts.actions.batchDelete', { defaultValue: 'Batch Delete' })}
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </div>
+  )
 
-          <Button onClick={handleRefreshAccounts} disabled={isManualRefreshing}>
-            <RefreshCw
-              className={cn('mr-2 h-4 w-4', isManualRefreshing ? 'animate-spin' : undefined)}
-            />
-            {isManualRefreshing
-              ? rateLimitRefreshJob && rateLimitRefreshJob.total > 0
-                ? t('accounts.actions.refreshingAccounts', {
-                  defaultValue: 'Refreshing',
-                }) + ` ${rateLimitRefreshJob.processed}/${rateLimitRefreshJob.total}`
-                : t('accounts.actions.refreshingAccounts', { defaultValue: 'Refreshing' })
-              : t('accounts.actions.refreshAccounts')}
-          </Button>
-        </div>
-      </div>
-
-      <div className="relative min-h-0 flex-1">
-        <LoadingOverlay
-          show={isLoading || isManualRefreshing}
-          title={t('accounts.syncing')}
-          description={t('common.loading')}
+  return (
+    <div className="flex-1 p-4 sm:p-6 lg:p-8">
+      <div className="space-y-6 md:space-y-8">
+        <PageIntro
+          archetype="workspace"
+          title={t('accounts.title')}
+          description={t('accounts.subtitle')}
+          actions={accountsLayout.mobileToolbarPlacement === 'after-intro' ? toolbarActions : undefined}
         />
 
-        <StandardDataTable
-          columns={columns}
-          data={filteredAccounts}
-          density="comfortable"
-          rowClassName="h-[60px]"
-          searchPlaceholder={t('accounts.searchPlaceholder')}
-          searchFn={accountSearchFn}
-          onFilteredDataChange={handleFilteredDataChange}
-          actions={(
-            <div className="flex flex-wrap items-center gap-2">
-              <Badge variant={selectedCount > 0 ? 'info' : 'secondary'} className="font-normal">
-                {t('accounts.actions.selectedCount', {
-                  count: selectedCount,
-                  defaultValue: '{{count}} selected',
-                })}
-              </Badge>
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    disabled={selectedCount === 0 || hasPendingAccountAction}
-                  >
-                    {t('accounts.actions.batchMenu', { defaultValue: 'Batch Actions' })}
-                    <ChevronDown className="h-3.5 w-3.5" />
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="w-[260px]">
-                  <DropdownMenuLabel>
-                    {t('accounts.actions.selectedCount', {
-                      count: selectedCount,
-                      defaultValue: '{{count}} selected',
-                    })}
-                  </DropdownMenuLabel>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem
-                    className="cursor-pointer"
-                    disabled={selectedCount === 0 || hasPendingAccountAction}
-                    onClick={() => runBatchMutation('enable')}
-                  >
-                    {t('accounts.actions.batchEnable', { defaultValue: 'Batch Enable' })}
-                  </DropdownMenuItem>
-                  <DropdownMenuItem
-                    className="cursor-pointer"
-                    disabled={selectedCount === 0 || hasPendingAccountAction}
-                    onClick={() => runBatchMutation('disable')}
-                  >
-                    {t('accounts.actions.batchDisable', { defaultValue: 'Batch Disable' })}
-                  </DropdownMenuItem>
-                  <DropdownMenuItem
-                    className="cursor-pointer"
-                    disabled={selectedRefreshableAccountIds.length === 0 || hasPendingAccountAction}
-                    onClick={() => runBatchMutation('refreshLogin')}
-                  >
-                    {t('accounts.actions.batchRefreshLogin', {
-                      count: selectedRefreshableAccountIds.length,
-                      defaultValue: 'Batch Refresh Login ({{count}})',
-                    })}
-                  </DropdownMenuItem>
-                  <DropdownMenuItem
-                    className="cursor-pointer"
-                    disabled={selectedFamilyActionAccountIds.length === 0 || hasPendingAccountAction}
-                    onClick={() => runBatchMutation('pauseFamily')}
-                  >
-                    {t('accounts.actions.batchPauseFamily', {
-                      count: selectedFamilyActionAccountIds.length,
-                      defaultValue: 'Batch Pause Family ({{count}})',
-                    })}
-                  </DropdownMenuItem>
-                  <DropdownMenuItem
-                    className="cursor-pointer"
-                    disabled={selectedFamilyActionAccountIds.length === 0 || hasPendingAccountAction}
-                    onClick={() => runBatchMutation('resumeFamily')}
-                  >
-                    {t('accounts.actions.batchResumeFamily', {
-                      count: selectedFamilyActionAccountIds.length,
-                      defaultValue: 'Batch Resume Family ({{count}})',
-                    })}
-                  </DropdownMenuItem>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem
-                    className="cursor-pointer text-destructive focus:bg-destructive/10"
-                    disabled={selectedCount === 0 || hasPendingAccountAction}
-                    onClick={() => runBatchMutation('delete')}
-                  >
-                    {t('accounts.actions.batchDelete', { defaultValue: 'Batch Delete' })}
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            </div>
-          )}
-          filters={(
-            <>
+        {accountsLayout.mobileFiltersPlacement === 'after-toolbar' ? (
+          <PagePanel tone="secondary" className="space-y-4">
+            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
               <Select value={statusFilter} onValueChange={(value) => setStatusFilter(value as StatusFilter)}>
-                <SelectTrigger className="w-[170px]" aria-label={t('accounts.actions.filter')}>
+                <SelectTrigger className="w-full" aria-label={t('accounts.actions.filter')}>
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -1231,7 +1225,7 @@ export default function Accounts() {
               </Select>
 
               <Select value={modeFilter} onValueChange={(value) => setModeFilter(value as ModeFilter)}>
-                <SelectTrigger className="w-[170px]" aria-label={t('accounts.filters.mode')}>
+                <SelectTrigger className="w-full" aria-label={t('accounts.filters.mode')}>
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -1245,7 +1239,7 @@ export default function Accounts() {
                 value={credentialFilter}
                 onValueChange={(value) => setCredentialFilter(value as CredentialFilter)}
               >
-                <SelectTrigger className="w-[170px]" aria-label={t('accounts.filters.credential')}>
+                <SelectTrigger className="w-full" aria-label={t('accounts.filters.credential')}>
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -1265,7 +1259,7 @@ export default function Accounts() {
               </Select>
 
               <Select value={planFilter} onValueChange={(value) => setPlanFilter(value as PlanFilter)}>
-                <SelectTrigger className="w-[170px]" aria-label={t('accounts.filters.plan')}>
+                <SelectTrigger className="w-full" aria-label={t('accounts.filters.plan')}>
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -1282,12 +1276,35 @@ export default function Accounts() {
                 </SelectContent>
               </Select>
 
-              <Badge variant="secondary" className="font-normal">
-                {t('accounts.filters.total', { count: filteredStatusCount })}
-              </Badge>
-            </>
-          )}
-        />
+              <div className="flex items-center">
+                <Badge variant="secondary" className="font-normal">
+                  {t('accounts.filters.total', { count: filteredStatusCount })}
+                </Badge>
+              </div>
+            </div>
+
+            {accountsLayout.batchActionsPlacement === 'with-filters' ? batchActionsControl : null}
+          </PagePanel>
+        ) : null}
+
+        <PagePanel className="relative overflow-hidden p-0">
+          <LoadingOverlay
+            show={isLoading || isManualRefreshing}
+            title={t('accounts.syncing')}
+            description={t('common.loading')}
+          />
+
+          <StandardDataTable
+            columns={columns}
+            data={filteredAccounts}
+            density="comfortable"
+            rowClassName="h-[60px]"
+            className={tableSurfaceClassName}
+            searchPlaceholder={t('accounts.searchPlaceholder')}
+            searchFn={accountSearchFn}
+            onFilteredDataChange={handleFilteredDataChange}
+          />
+        </PagePanel>
       </div>
 
       <AccountDetailDialog
@@ -1303,6 +1320,6 @@ export default function Accounts() {
       />
 
       {confirmDialog}
-    </motion.div>
+    </div>
   )
 }

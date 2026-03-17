@@ -123,3 +123,17 @@ test('describeLogsWorkbenchLayout keeps tab switching near the intro and keeps f
     filterPlacement: 'within-panel',
   })
 })
+
+test('describeAccountsWorkspaceLayout keeps primary actions ahead of filters and keeps batch actions attached to the workbench controls', () => {
+  const describeAccountsWorkspaceLayout = (
+    pageArchetypes as typeof pageArchetypes & {
+      describeAccountsWorkspaceLayout?: () => unknown
+    }
+  ).describeAccountsWorkspaceLayout
+
+  assert.deepEqual(describeAccountsWorkspaceLayout?.(), {
+    mobileToolbarPlacement: 'after-intro',
+    mobileFiltersPlacement: 'after-toolbar',
+    batchActionsPlacement: 'with-filters',
+  })
+})

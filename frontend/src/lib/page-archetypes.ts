@@ -45,6 +45,12 @@ export interface LogsWorkbenchLayout {
   filterPlacement: 'within-panel'
 }
 
+export interface AccountsWorkspaceLayout {
+  mobileToolbarPlacement: 'after-intro'
+  mobileFiltersPlacement: 'after-toolbar'
+  batchActionsPlacement: 'with-filters'
+}
+
 const ARCHETYPE_CONFIG: Record<PageArchetype, PageArchetypeConfig> = {
   auth: {
     name: 'auth',
@@ -195,5 +201,13 @@ export function describeLogsWorkbenchLayout(): LogsWorkbenchLayout {
     mobileToolbarPlacement: 'after-intro',
     desktopToolbarAlignment: 'between',
     filterPlacement: 'within-panel',
+  }
+}
+
+export function describeAccountsWorkspaceLayout(): AccountsWorkspaceLayout {
+  return {
+    mobileToolbarPlacement: 'after-intro',
+    mobileFiltersPlacement: 'after-toolbar',
+    batchActionsPlacement: 'with-filters',
   }
 }
