@@ -16,7 +16,6 @@ import { localizeApiErrorDisplay, localizeOAuthErrorCodeDisplay } from '@/api/er
 import { importJobsApi, type OAuthImportJobSummary } from '@/api/importJobs'
 import {
   PageIntro,
-  PagePanel,
 } from '@/components/layout/page-archetypes'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -1054,7 +1053,8 @@ export default function Accounts() {
 
   const filteredStatusCount = filteredAccounts.length
   const accountsLayout = describeAccountsWorkspaceLayout()
-  const tableSurfaceClassName = 'border-0 bg-transparent shadow-none'
+  const tableSurfaceClassName =
+    'border border-border/60 bg-background/[0.5] shadow-none backdrop-blur-[2px]'
   const hasPendingAccountAction =
     isBatchOperating
     || toggleEnabledMutation.isPending
@@ -1202,109 +1202,148 @@ export default function Accounts() {
 
   return (
     <div className="flex-1 p-4 sm:p-6 lg:p-8">
-      <div className="space-y-6 md:space-y-8">
+      <div className="space-y-6 md:space-y-7">
         <PageIntro
           archetype="workspace"
           title={t('accounts.title')}
           description={t('accounts.subtitle')}
+          meta={(
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+              <span>{t('accounts.filters.total', { count: filteredStatusCount })}</span>
+              <span className="text-border">/</span>
+              <span>
+                {t('accounts.actions.selectedCount', {
+                  count: selectedCount,
+                  defaultValue: '{{count}} selected',
+                })}
+              </span>
+            </div>
+          )}
           actions={accountsLayout.mobileToolbarPlacement === 'after-intro' ? toolbarActions : undefined}
         />
 
         {accountsLayout.mobileFiltersPlacement === 'after-toolbar' ? (
-          <PagePanel tone="secondary" className="space-y-4">
-            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
-              <Select value={statusFilter} onValueChange={(value) => setStatusFilter(value as StatusFilter)}>
-                <SelectTrigger className="w-full" aria-label={t('accounts.actions.filter')}>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">{t('accounts.filters.all')}</SelectItem>
-                  <SelectItem value="active">{t('accounts.filters.active')}</SelectItem>
-                  <SelectItem value="disabled">{t('accounts.filters.disabled')}</SelectItem>
-                </SelectContent>
-              </Select>
+          <section className="space-y-4 border-t border-border/70 pt-4">
+            <div className="rounded-[1rem] border border-border/60 bg-muted/[0.18] p-4">
+              <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_auto] xl:items-end">
+                <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+                  <Select value={statusFilter} onValueChange={(value) => setStatusFilter(value as StatusFilter)}>
+                    <SelectTrigger className="w-full" aria-label={t('accounts.actions.filter')}>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">{t('accounts.filters.all')}</SelectItem>
+                      <SelectItem value="active">{t('accounts.filters.active')}</SelectItem>
+                      <SelectItem value="disabled">{t('accounts.filters.disabled')}</SelectItem>
+                    </SelectContent>
+                  </Select>
 
-              <Select value={modeFilter} onValueChange={(value) => setModeFilter(value as ModeFilter)}>
-                <SelectTrigger className="w-full" aria-label={t('accounts.filters.mode')}>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">{t('accounts.filters.modeAll')}</SelectItem>
-                  <SelectItem value="oauth">{t('accounts.filters.modeOAuth')}</SelectItem>
-                  <SelectItem value="api_key">{t('accounts.filters.modeApiKey')}</SelectItem>
-                </SelectContent>
-              </Select>
+                  <Select value={modeFilter} onValueChange={(value) => setModeFilter(value as ModeFilter)}>
+                    <SelectTrigger className="w-full" aria-label={t('accounts.filters.mode')}>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">{t('accounts.filters.modeAll')}</SelectItem>
+                      <SelectItem value="oauth">{t('accounts.filters.modeOAuth')}</SelectItem>
+                      <SelectItem value="api_key">{t('accounts.filters.modeApiKey')}</SelectItem>
+                    </SelectContent>
+                  </Select>
 
-              <Select
-                value={credentialFilter}
-                onValueChange={(value) => setCredentialFilter(value as CredentialFilter)}
-              >
-                <SelectTrigger className="w-full" aria-label={t('accounts.filters.credential')}>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">
-                    {t('accounts.filters.credentialAll', { defaultValue: 'All Credentials' })}
-                  </SelectItem>
-                  <SelectItem value="rt">
-                    {t('accounts.filters.credentialRt', { defaultValue: 'RT' })}
-                  </SelectItem>
-                  <SelectItem value="at">
-                    {t('accounts.filters.credentialAt', { defaultValue: 'AT' })}
-                  </SelectItem>
-                  <SelectItem value="unknown">
-                    {t('accounts.filters.credentialUnknown', { defaultValue: 'Unknown' })}
-                  </SelectItem>
-                </SelectContent>
-              </Select>
+                  <Select
+                    value={credentialFilter}
+                    onValueChange={(value) => setCredentialFilter(value as CredentialFilter)}
+                  >
+                    <SelectTrigger className="w-full" aria-label={t('accounts.filters.credential')}>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">
+                        {t('accounts.filters.credentialAll', { defaultValue: 'All Credentials' })}
+                      </SelectItem>
+                      <SelectItem value="rt">
+                        {t('accounts.filters.credentialRt', { defaultValue: 'RT' })}
+                      </SelectItem>
+                      <SelectItem value="at">
+                        {t('accounts.filters.credentialAt', { defaultValue: 'AT' })}
+                      </SelectItem>
+                      <SelectItem value="unknown">
+                        {t('accounts.filters.credentialUnknown', { defaultValue: 'Unknown' })}
+                      </SelectItem>
+                    </SelectContent>
+                  </Select>
 
-              <Select value={planFilter} onValueChange={(value) => setPlanFilter(value as PlanFilter)}>
-                <SelectTrigger className="w-full" aria-label={t('accounts.filters.plan')}>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">
-                    {t('accounts.filters.planAll', { defaultValue: 'All Plans' })}
-                  </SelectItem>
-                  {planOptions.map((plan) => (
-                    <SelectItem key={plan} value={plan}>
-                      {plan === PLAN_UNKNOWN_VALUE
-                        ? t('accounts.filters.planUnknown', { defaultValue: 'Not Reported' })
-                        : plan}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+                  <Select value={planFilter} onValueChange={(value) => setPlanFilter(value as PlanFilter)}>
+                    <SelectTrigger className="w-full" aria-label={t('accounts.filters.plan')}>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">
+                        {t('accounts.filters.planAll', { defaultValue: 'All Plans' })}
+                      </SelectItem>
+                      {planOptions.map((plan) => (
+                        <SelectItem key={plan} value={plan}>
+                          {plan === PLAN_UNKNOWN_VALUE
+                            ? t('accounts.filters.planUnknown', { defaultValue: 'Not Reported' })
+                            : plan}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
 
-              <div className="flex items-center">
-                <Badge variant="secondary" className="font-normal">
-                  {t('accounts.filters.total', { count: filteredStatusCount })}
-                </Badge>
+                  <div className="flex items-center">
+                    <Badge variant="secondary" className="font-normal">
+                      {t('accounts.filters.total', { count: filteredStatusCount })}
+                    </Badge>
+                  </div>
+                </div>
+
+                {accountsLayout.batchActionsPlacement === 'with-filters' ? (
+                  <div className="flex flex-wrap items-center gap-2 xl:justify-end">
+                    {batchActionsControl}
+                  </div>
+                ) : null}
               </div>
             </div>
-
-            {accountsLayout.batchActionsPlacement === 'with-filters' ? batchActionsControl : null}
-          </PagePanel>
+          </section>
         ) : null}
 
-        <PagePanel className="relative overflow-hidden p-0">
-          <LoadingOverlay
-            show={isLoading || isManualRefreshing}
-            title={t('accounts.syncing')}
-            description={t('common.loading')}
-          />
+        <section className="space-y-3 border-t border-border/70 pt-4">
+          <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+            <div className="flex flex-wrap items-center gap-2">
+              <span>{t('accounts.filters.total', { count: filteredStatusCount })}</span>
+              {selectedCount > 0 ? (
+                <>
+                  <span className="text-border">/</span>
+                  <span>
+                    {t('accounts.actions.selectedCount', {
+                      count: selectedCount,
+                      defaultValue: '{{count}} selected',
+                    })}
+                  </span>
+                </>
+              ) : null}
+            </div>
+          </div>
 
-          <StandardDataTable
-            columns={columns}
-            data={filteredAccounts}
-            density="comfortable"
-            rowClassName="h-[60px]"
-            className={tableSurfaceClassName}
-            searchPlaceholder={t('accounts.searchPlaceholder')}
-            searchFn={accountSearchFn}
-            onFilteredDataChange={handleFilteredDataChange}
-          />
-        </PagePanel>
+          <div className="relative">
+            <LoadingOverlay
+              show={isLoading || isManualRefreshing}
+              title={t('accounts.syncing')}
+              description={t('common.loading')}
+            />
+
+            <StandardDataTable
+              columns={columns}
+              data={filteredAccounts}
+              density="comfortable"
+              rowClassName="h-[60px]"
+              className={cn('min-h-[32rem]', tableSurfaceClassName)}
+              searchPlaceholder={t('accounts.searchPlaceholder')}
+              searchFn={accountSearchFn}
+              onFilteredDataChange={handleFilteredDataChange}
+            />
+          </div>
+        </section>
       </div>
 
       <AccountDetailDialog

@@ -11,6 +11,7 @@ import {
   type ApiKeyGroupItem,
 } from '@/api/groups'
 import { localizeApiErrorDisplay } from '@/api/errorI18n'
+import { PageIntro } from '@/components/layout/page-archetypes'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -25,7 +26,6 @@ import { Input } from '@/components/ui/input'
 import { LoadingOverlay } from '@/components/ui/loading-overlay'
 import { StandardDataTable } from '@/components/ui/standard-data-table'
 import { Textarea } from '@/components/ui/textarea'
-import { POOL_SECTION_CLASS_NAME } from '@/lib/pool-styles'
 
 function formatMultiplier(ppm?: number | null) {
   if (typeof ppm !== 'number') return '-'
@@ -49,6 +49,11 @@ function pricingLineForModel(model: ApiKeyGroupItem['models'][number]) {
   const finalPricing = `in ${formatMicrocredits(model.final_input_price_microcredits)} · cached ${formatMicrocredits(model.final_cached_input_price_microcredits)} · out ${formatMicrocredits(model.final_output_price_microcredits)}`
   return { formula, finalPricing }
 }
+
+const tableSurfaceClassName =
+  'border border-border/60 bg-background/[0.5] shadow-none backdrop-blur-[2px]'
+const editorSectionClassName =
+  'space-y-4 rounded-[1rem] border border-border/60 bg-background/[0.55] p-4'
 
 export default function Groups() {
   const { t } = useTranslation()
@@ -325,23 +330,44 @@ export default function Groups() {
   }, [currentGroup, mobilePreviewExpanded])
 
   return (
-    <div className="flex-1 p-4 sm:p-6 lg:p-8 space-y-6">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h2 className="text-3xl font-semibold tracking-tight">{t('groupsPage.title', { defaultValue: 'Group Management' })}</h2>
-          <p className="mt-1 text-sm text-muted-foreground">
-            {t('groupsPage.subtitle', { defaultValue: 'Manage API key groups, model allowlists, multipliers, and group-level absolute prices.' })}
-          </p>
+    <div className="flex-1 space-y-6 p-4 sm:p-6 lg:space-y-7 lg:p-8">
+      <PageIntro
+        archetype="workspace"
+        title={t('groupsPage.title', { defaultValue: 'Group Management' })}
+        description={t('groupsPage.subtitle', {
+          defaultValue: 'Manage API key groups, model allowlists, multipliers, and group-level absolute prices.',
+        })}
+        meta={(
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+            <span>{t('accounts.filters.total', { count: groups.length, defaultValue: '{{count}} matched' })}</span>
+            <span className="text-border">/</span>
+            <span>{t('groupsPage.actions.create', { defaultValue: 'Create group' })}</span>
+          </div>
+        )}
+        actions={(
+          <Button type="button" className="w-full sm:w-auto" onClick={() => openEditor(null)}>
+            {t('groupsPage.actions.create', { defaultValue: 'Create group' })}
+          </Button>
+        )}
+      />
+
+      {error ? (
+        <div className="rounded-[0.95rem] border border-destructive/35 bg-destructive/5 px-3.5 py-2.5 text-sm text-destructive">
+          {error}
         </div>
-        <Button type="button" className="w-full sm:w-auto" onClick={() => openEditor(null)}>
-          {t('groupsPage.actions.create', { defaultValue: 'Create group' })}
-        </Button>
-      </div>
+      ) : null}
+      {notice ? (
+        <div className="rounded-[0.95rem] border border-primary/25 bg-primary/5 px-3.5 py-2.5 text-sm text-primary">
+          {notice}
+        </div>
+      ) : null}
 
-      {error ? <div className="rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2 text-sm text-destructive">{error}</div> : null}
-      {notice ? <div className="rounded-md border border-primary/30 bg-primary/5 px-3 py-2 text-sm text-primary">{notice}</div> : null}
+      <section className="space-y-4 border-t border-border/70 pt-4">
+        <div className="flex flex-wrap items-center justify-between gap-3 text-xs text-muted-foreground">
+          <span>{t('accounts.filters.total', { count: groups.length, defaultValue: '{{count}} matched' })}</span>
+          {isFetching && !isLoading ? <span>{t('common.loading')}</span> : null}
+        </div>
 
-      <section className={POOL_SECTION_CLASS_NAME}>
         <div className="relative">
           <LoadingOverlay
             show={isFetching && !isLoading}
@@ -357,6 +383,7 @@ export default function Groups() {
               defaultPageSize={20}
               pageSizeOptions={[20, 50, 100]}
               density="compact"
+              className={tableSurfaceClassName}
               searchPlaceholder={t('groupsPage.searchPlaceholder', { defaultValue: 'Search groups by name, description or status' })}
               emptyText={t('groupsPage.empty', { defaultValue: 'No groups yet' })}
             />
@@ -365,9 +392,9 @@ export default function Groups() {
       </section>
 
       <Dialog open={editorOpen} onOpenChange={setEditorOpen}>
-        <DialogContent className="w-[calc(100vw-1rem)] max-w-[calc(100vw-1rem)] sm:max-w-[min(96vw,1400px)] h-[calc(100dvh-1rem)] sm:h-auto max-h-[calc(100dvh-1rem)] sm:max-h-[92vh] overflow-hidden p-0">
+        <DialogContent className="h-[calc(100dvh-1rem)] max-h-[calc(100dvh-1rem)] w-[calc(100vw-1rem)] max-w-[calc(100vw-1rem)] overflow-hidden border border-border/70 bg-background/98 p-0 sm:h-auto sm:max-h-[92vh] sm:max-w-[min(96vw,1400px)]">
           <div className="flex h-full flex-col">
-            <DialogHeader className="shrink-0 border-b px-4 py-4 text-left sm:px-6">
+            <DialogHeader className="shrink-0 border-b border-border/70 bg-muted/[0.16] px-4 py-4 text-left sm:px-6">
               <DialogTitle>
                 {groupForm.id
                   ? t('groupsPage.editor.editTitle', { defaultValue: 'Edit group' })
@@ -380,7 +407,7 @@ export default function Groups() {
 
             <div className="flex-1 overflow-y-auto px-4 pb-4 pt-4 sm:px-6 sm:pb-6">
               <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)] lg:gap-6">
-                <div className="min-w-0 space-y-4">
+                <div className={editorSectionClassName}>
               <div className="space-y-2">
                 <label className="text-xs font-medium text-muted-foreground">{t('groupsPage.form.name', { defaultValue: 'Group name' })}</label>
                 <Input value={groupForm.name} onChange={(event) => setGroupForm((prev) => ({ ...prev, name: event.target.value }))} />
@@ -432,7 +459,7 @@ export default function Groups() {
             </div>
 
                 <div className="min-w-0 space-y-4">
-              <div className="rounded-md border p-4 space-y-4">
+              <div className={editorSectionClassName}>
                 <div>
                   <div className="font-medium">{t('groupsPage.policy.title', { defaultValue: 'Model policy' })}</div>
                   <div className="text-xs text-muted-foreground">{t('groupsPage.policy.description', { defaultValue: 'Select a model from the unified catalog, then configure multipliers or absolute pricing.' })}</div>
@@ -508,7 +535,7 @@ export default function Groups() {
                 </div>
               </div>
 
-              <div className="rounded-md border p-4 space-y-3">
+              <div className={editorSectionClassName}>
                 <div className="flex items-start justify-between gap-3">
                   <div>
                     <div className="font-medium">{t('groupsPage.preview.title', { defaultValue: 'Effective model preview' })}</div>
@@ -537,7 +564,7 @@ export default function Groups() {
                   {mobilePreviewModels.map((item) => {
                     const pricingLine = pricingLineForModel(item)
                     return (
-                      <div key={item.model} className="rounded-md border p-3 text-sm">
+                      <div key={item.model} className="rounded-[0.9rem] border border-border/60 bg-background/[0.5] p-3 text-sm">
                         <div className="flex items-start justify-between gap-3">
                           <div className="font-mono text-xs break-all">{item.model}</div>
                           <Badge variant={item.uses_absolute_pricing ? 'success' : 'secondary'}>
@@ -568,7 +595,7 @@ export default function Groups() {
                     </div>
                   ) : null}
                 </div>
-                <div className="hidden max-h-[360px] overflow-auto rounded-md border md:block">
+                <div className="hidden max-h-[360px] overflow-auto rounded-[0.95rem] border border-border/60 bg-background/[0.5] md:block">
                   <table className="min-w-[720px] w-full text-sm">
                     <thead className="bg-muted/40 text-left text-xs text-muted-foreground">
                       <tr>
@@ -606,7 +633,7 @@ export default function Groups() {
               </div>
             </div>
 
-            <div className="shrink-0 border-t bg-background/95 p-3 backdrop-blur sm:hidden">
+            <div className="shrink-0 border-t border-border/70 bg-background/95 p-3 backdrop-blur sm:hidden">
               <div className="grid gap-2">
                 <Button type="button" onClick={() => upsertGroupMutation.mutate()} disabled={upsertGroupMutation.isPending}>
                   {upsertGroupMutation.isPending ? <RotateCw className="mr-2 h-4 w-4 animate-spin" /> : null}

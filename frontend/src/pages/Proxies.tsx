@@ -7,7 +7,6 @@ import { useTranslation } from 'react-i18next'
 import { proxiesApi, type ProxyNode } from '@/api/proxies'
 import {
   PageIntro,
-  PagePanel,
 } from '@/components/layout/page-archetypes'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -83,7 +82,8 @@ export default function Proxies() {
     })
   }, [healthFilter, proxies, searchKeyword])
   const proxiesLayout = describeProxiesWorkspaceLayout()
-  const tableSurfaceClassName = 'border-0 bg-transparent shadow-none'
+  const tableSurfaceClassName =
+    'border border-border/60 bg-background/[0.5] shadow-none backdrop-blur-[2px]'
 
   const columns = useMemo<ColumnDef<ProxyNode>[]>(
     () => [
@@ -169,11 +169,18 @@ export default function Proxies() {
 
   return (
     <div className="flex-1 p-4 sm:p-6 lg:p-8">
-      <div className="space-y-6 md:space-y-8">
+      <div className="space-y-6 md:space-y-7">
         <PageIntro
           archetype="workspace"
           title={t('proxies.title')}
           description={t('proxies.subtitle')}
+          meta={(
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+              <span>{t('accounts.filters.total', { count: filteredData.length, defaultValue: '{{count}} matched' })}</span>
+              <span className="text-border">/</span>
+              <span>{t('proxies.filters.label')}</span>
+            </div>
+          )}
           actions={
             <Button
               onClick={() => healthCheckMutation.mutate()}
@@ -186,78 +193,87 @@ export default function Proxies() {
         />
 
         {proxiesLayout.mobileControlsPlacement === 'after-intro' ? (
-          <PagePanel tone="secondary" className="space-y-4">
-            <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">
-              <div className="grid gap-3 md:grid-cols-[minmax(0,14rem)_minmax(0,1fr)]">
-                {proxiesLayout.filterPlacement === 'within-controls-panel' ? (
+          <section className="space-y-4 border-t border-border/70 pt-4">
+            <div className="rounded-[1rem] border border-border/60 bg-muted/[0.18] p-4">
+              <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">
+                <div className="grid gap-3 md:grid-cols-[minmax(0,14rem)_minmax(0,1fr)]">
+                  {proxiesLayout.filterPlacement === 'within-controls-panel' ? (
+                    <div className="space-y-1.5">
+                      <label className="text-xs font-medium text-muted-foreground">
+                        {t('proxies.filters.label')}
+                      </label>
+                      <Select value={healthFilter} onValueChange={(value) => setHealthFilter(value as ProxyFilter)}>
+                        <SelectTrigger className="w-full" aria-label={t('proxies.filters.label')}>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="all">{t('proxies.filters.all')}</SelectItem>
+                          <SelectItem value="healthy">{t('proxies.filters.healthy')}</SelectItem>
+                          <SelectItem value="degraded">{t('proxies.filters.degraded')}</SelectItem>
+                          <SelectItem value="offline">{t('proxies.filters.offline')}</SelectItem>
+                          <SelectItem value="disabled">{t('proxies.filters.disabled')}</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  ) : null}
+
                   <div className="space-y-1.5">
-                    <label className="text-xs font-medium text-muted-foreground">
-                      {t('proxies.filters.label')}
+                    <label htmlFor="proxies-search" className="text-xs font-medium text-muted-foreground">
+                      {t('common.table.searchLabel')}
                     </label>
-                    <Select value={healthFilter} onValueChange={(value) => setHealthFilter(value as ProxyFilter)}>
-                      <SelectTrigger className="w-full" aria-label={t('proxies.filters.label')}>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="all">{t('proxies.filters.all')}</SelectItem>
-                        <SelectItem value="healthy">{t('proxies.filters.healthy')}</SelectItem>
-                        <SelectItem value="degraded">{t('proxies.filters.degraded')}</SelectItem>
-                        <SelectItem value="offline">{t('proxies.filters.offline')}</SelectItem>
-                        <SelectItem value="disabled">{t('proxies.filters.disabled')}</SelectItem>
-                      </SelectContent>
-                    </Select>
+                    <Input
+                      id="proxies-search"
+                      name="proxies_search"
+                      value={searchKeyword}
+                      onChange={(event) => setSearchKeyword(event.target.value)}
+                      placeholder={t('proxies.searchPlaceholder')}
+                      autoComplete="off"
+                    />
+                  </div>
+                </div>
+
+                {proxiesLayout.densityPlacement === 'within-controls-panel' ? (
+                  <div className="flex flex-wrap items-center gap-2 lg:justify-end">
+                    <Button
+                      variant="outline"
+                      onClick={() => {
+                        const next = !compactMode
+                        setCompactMode(next)
+                        localStorage.setItem('cp.proxies.compact', next ? '1' : '0')
+                      }}
+                    >
+                      {compactMode ? t('accounts.actions.comfortableMode') : t('accounts.actions.compactMode')}
+                    </Button>
                   </div>
                 ) : null}
-
-                <div className="space-y-1.5">
-                  <label htmlFor="proxies-search" className="text-xs font-medium text-muted-foreground">
-                    {t('common.table.searchLabel')}
-                  </label>
-                  <Input
-                    id="proxies-search"
-                    name="proxies_search"
-                    value={searchKeyword}
-                    onChange={(event) => setSearchKeyword(event.target.value)}
-                    placeholder={t('proxies.searchPlaceholder')}
-                    autoComplete="off"
-                  />
-                </div>
               </div>
-
-              {proxiesLayout.densityPlacement === 'within-controls-panel' ? (
-                <div className="flex flex-wrap items-center gap-2 lg:justify-end">
-                  <Button
-                    variant="outline"
-                    onClick={() => {
-                      const next = !compactMode
-                      setCompactMode(next)
-                      localStorage.setItem('cp.proxies.compact', next ? '1' : '0')
-                    }}
-                  >
-                    {compactMode ? t('accounts.actions.comfortableMode') : t('accounts.actions.compactMode')}
-                  </Button>
-                </div>
-              ) : null}
             </div>
-          </PagePanel>
+          </section>
         ) : null}
 
-        <PagePanel className="relative overflow-hidden p-0">
-          <LoadingOverlay
-            show={isLoading}
-            title={t('proxies.loading')}
-            description={t('common.loading')}
-          />
+        <section className="space-y-3 border-t border-border/70 pt-4">
+          <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
+            <span>{t('accounts.filters.total', { count: filteredData.length, defaultValue: '{{count}} matched' })}</span>
+            <span>{compactMode ? t('accounts.actions.compactMode') : t('accounts.actions.comfortableMode')}</span>
+          </div>
 
-          <StandardDataTable
-            columns={columns}
-            data={filteredData}
-            className={tableSurfaceClassName}
-            density={compactMode ? 'compact' : 'comfortable'}
-            enableSearch={false}
-            emptyText={t('proxies.empty')}
-          />
-        </PagePanel>
+          <div className="relative">
+            <LoadingOverlay
+              show={isLoading}
+              title={t('proxies.loading')}
+              description={t('common.loading')}
+            />
+
+            <StandardDataTable
+              columns={columns}
+              data={filteredData}
+              className={cn('min-h-[24rem]', tableSurfaceClassName)}
+              density={compactMode ? 'compact' : 'comfortable'}
+              enableSearch={false}
+              emptyText={t('proxies.empty')}
+            />
+          </div>
+        </section>
       </div>
     </div>
   )

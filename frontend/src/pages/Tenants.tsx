@@ -15,6 +15,7 @@ import { localizeApiErrorDisplay } from '@/api/errorI18n'
 import { apiKeysApi, type ApiKey, type CreateApiKeyResponse } from '@/api/settings'
 import { systemApi, DEFAULT_SYSTEM_CAPABILITIES } from '@/api/system'
 import type { UsageSummaryQueryResponse } from '@/api/types'
+import { PageIntro } from '@/components/layout/page-archetypes'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { AccessibleTabList } from '@/components/ui/accessible-tabs'
@@ -508,25 +509,45 @@ export default function Tenants() {
       className="flex h-full flex-col overflow-hidden p-8"
     >
       <div className="space-y-6 overflow-y-auto pr-1">
-      <header>
-        <h2 className="text-3xl font-bold tracking-tight">{t('tenants.title', { defaultValue: 'Tenants' })}</h2>
-        <p className="mt-1 text-muted-foreground">
-          {t('tenants.subtitle', { defaultValue: 'Check tenant availability and manage profiles, API keys, and usage.' })}
-        </p>
-      </header>
+        <PageIntro
+          archetype="workspace"
+          title={t('tenants.title', { defaultValue: 'Tenants' })}
+          description={t('tenants.subtitle', {
+            defaultValue: 'Check tenant availability and manage profiles, API keys, and usage.',
+          })}
+          meta={(
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+              <span>
+                {t('tenants.list.title', { defaultValue: 'Tenant Pool' })}: {tenantPoolRows.length}
+              </span>
+              <span className="text-slate-300 dark:text-slate-600">·</span>
+              <span>
+                {t('tenants.list.columns.apiKeys', { defaultValue: 'API Keys' })}: {keysQuery.data?.length ?? 0}
+              </span>
+            </div>
+          )}
+        />
 
-      {error ? (
-        <p className="text-sm text-destructive" role="status" aria-live="polite">
-          {error}
-        </p>
-      ) : null}
-      {notice ? (
-        <p className="text-sm text-success-foreground" role="status" aria-live="polite">
-          {notice}
-        </p>
-      ) : null}
+        {error ? (
+          <div
+            className="rounded-[0.9rem] border border-destructive/20 bg-destructive/6 px-4 py-3 text-sm text-destructive"
+            role="status"
+            aria-live="polite"
+          >
+            {error}
+          </div>
+        ) : null}
+        {notice ? (
+          <div
+            className="rounded-[0.9rem] border border-success/20 bg-success/8 px-4 py-3 text-sm text-success-foreground"
+            role="status"
+            aria-live="polite"
+          >
+            {notice}
+          </div>
+        ) : null}
 
-      <section className={POOL_ELEVATED_SECTION_CLASS_NAME}>
+      <section className="space-y-4 border-b border-border/70 pb-5">
         <div className="flex items-center justify-between">
           <h2 className="text-lg font-medium">{t('tenants.create.title', { defaultValue: 'Create Tenant' })}</h2>
           <Button
@@ -617,7 +638,7 @@ export default function Tenants() {
         </form>
       </section>
 
-      <section className={POOL_ELEVATED_SECTION_CLASS_NAME}>
+      <section className="space-y-4">
         <h2 className="text-lg font-medium">{t('tenants.list.title', { defaultValue: 'Tenant Pool' })}</h2>
         <StandardDataTable
           columns={tenantPoolColumns}

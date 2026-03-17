@@ -7,8 +7,8 @@ import { useTranslation } from 'react-i18next'
 
 import { adminApi } from '@/api/settings'
 import { systemApi, DEFAULT_SYSTEM_CAPABILITIES } from '@/api/system'
+import { PageIntro } from '@/components/layout/page-archetypes'
 import { Badge } from '@/components/ui/badge'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { StandardDataTable } from '@/components/ui/standard-data-table'
 import { formatRelativeTime } from '@/lib/time'
 
@@ -480,115 +480,144 @@ export default function System() {
         hidden: { opacity: 0 },
         show: { opacity: 1, transition: { staggerChildren: 0.1 } },
     }
+    const tableSurfaceClassName =
+        'h-full border border-border/60 bg-background/[0.5] shadow-none backdrop-blur-[2px]'
 
     return (
-        <div className="flex-1 p-8 bg-background max-w-7xl overflow-y-auto">
-            <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="mb-8">
-                <h2 className="text-3xl font-bold tracking-tight">{t('system.title')}</h2>
-                <p className="text-muted-foreground mt-1">{t('system.subtitle')}</p>
-            </motion.div>
-
-            <motion.div variants={container} initial="hidden" animate="show" className="space-y-6">
-                <Card className="shadow-sm border-border/50">
-                    <CardContent className="h-[460px] min-h-0 pt-6">
-                        <StandardDataTable
-                            columns={columns}
-                            data={components}
-                            className="h-full"
-                            density="compact"
-                            defaultPageSize={10}
-                            pageSizeOptions={[10, 20, 50]}
-                            searchPlaceholder={t('system.searchPlaceholder')}
-                            searchFn={(row, keyword) =>
-                                `${row.name} ${row.version} ${row.details} ${row.uptime}`
-                                    .toLowerCase()
-                                    .includes(keyword)
-                            }
-                        />
-                    </CardContent>
-                </Card>
-
-                <Card className="shadow-sm border-border/50">
-                    <CardHeader>
-                        <CardTitle>{t('system.observability.title')}</CardTitle>
-                        <CardDescription>{t('system.observability.subtitle')}</CardDescription>
-                    </CardHeader>
-                    <CardContent className="space-y-4">
-                        {observability ? (
-                            <>
-                                <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-                                    {observabilityMetrics.map((metric) => (
-                                        <div
-                                            key={metric.id}
-                                            className="rounded-lg border border-border/60 bg-muted/20 p-3"
-                                        >
-                                            <p className="text-xs text-muted-foreground">{metric.label}</p>
-                                            <p className="mt-1 text-xl font-semibold tracking-tight">{metric.value}</p>
-                                            <p className="mt-1 text-xs text-muted-foreground">{metric.hint}</p>
-                                        </div>
-                                    ))}
-                                </div>
-                                <div className="flex flex-wrap gap-2">
-                                    <Badge variant={observability.failoverEnabled ? 'success' : 'secondary'}>
-                                        {observability.failoverEnabled
-                                            ? t('system.observability.badges.failoverOn')
-                                            : t('system.observability.badges.failoverOff')}
-                                    </Badge>
-                                    <Badge
-                                        variant={observability.sharedCacheEnabled ? 'success' : 'secondary'}
-                                    >
-                                        {observability.sharedCacheEnabled
-                                            ? t('system.observability.badges.sharedCacheOn')
-                                            : t('system.observability.badges.sharedCacheOff')}
-                                    </Badge>
-                                    <Badge
-                                        variant={
-                                            observability.stickyPreferNonConflicting
-                                                ? 'success'
-                                                : 'secondary'
-                                        }
-                                    >
-                                        {observability.stickyPreferNonConflicting
-                                            ? t('system.observability.badges.stickyConflictAvoidOn')
-                                            : t('system.observability.badges.stickyConflictAvoidOff')}
-                                    </Badge>
-                                    <Badge variant="outline">
-                                        {t('system.observability.badges.quickRetry', {
-                                            value: observability.sameAccountQuickRetryMax,
-                                        })}
-                                    </Badge>
-                                    <Badge variant="outline">
-                                        {t('system.observability.badges.failoverWait', {
-                                            value: observability.requestFailoverWaitMs,
-                                        })}
-                                    </Badge>
-                                    <Badge variant="outline">
-                                        {t('system.observability.badges.retryPoll', {
-                                            value: observability.retryPollIntervalMs,
-                                        })}
-                                    </Badge>
-                                </div>
-                            </>
-                        ) : (
-                            <div className="flex items-start gap-3 rounded-lg border border-dashed p-4">
-                                <AlertTriangle className="mt-0.5 h-4 w-4 text-muted-foreground" />
-                                <div className="space-y-1">
-                                    <p className="text-sm font-medium">
-                                        {isLoading
-                                            ? t('system.details.checkingAPI')
-                                            : t('system.observability.unavailableTitle')}
-                                    </p>
-                                    <p className="text-sm text-muted-foreground">
-                                        {isLoading
-                                            ? t('system.observability.unavailableLoading')
-                                            : systemState?.data_plane_error ||
-                                              t('system.observability.unavailableDesc')}
-                                    </p>
-                                </div>
+        <div className="flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8">
+            <motion.div
+                variants={container}
+                initial="hidden"
+                animate="show"
+                className="space-y-6 md:space-y-7"
+            >
+                <motion.div variants={{ hidden: { opacity: 0, y: -10 }, show: { opacity: 1, y: 0 } }}>
+                    <PageIntro
+                        archetype="detail"
+                        title={t('system.title')}
+                        description={t('system.subtitle')}
+                        meta={(
+                            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+                                <span>{t('accounts.filters.total', { count: components.length, defaultValue: '{{count}} matched' })}</span>
+                                <span className="text-border">/</span>
+                                <span>{uptimeStr}</span>
                             </div>
                         )}
-                    </CardContent>
-                </Card>
+                    />
+                </motion.div>
+
+                <motion.section
+                    variants={{ hidden: { opacity: 0, y: 10 }, show: { opacity: 1, y: 0 } }}
+                    className="space-y-4 border-t border-border/70 pt-4"
+                >
+                    <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
+                        <span>{t('accounts.filters.total', { count: components.length, defaultValue: '{{count}} matched' })}</span>
+                        <span>{isLoading ? t('system.details.checkingAPI') : uptimeStr}</span>
+                    </div>
+
+                    <StandardDataTable
+                        columns={columns}
+                        data={components}
+                        className={tableSurfaceClassName}
+                        density="compact"
+                        defaultPageSize={10}
+                        pageSizeOptions={[10, 20, 50]}
+                        searchPlaceholder={t('system.searchPlaceholder')}
+                        searchFn={(row, keyword) =>
+                            `${row.name} ${row.version} ${row.details} ${row.uptime}`
+                                .toLowerCase()
+                                .includes(keyword)
+                        }
+                    />
+                </motion.section>
+
+                <motion.section
+                    variants={{ hidden: { opacity: 0, y: 10 }, show: { opacity: 1, y: 0 } }}
+                    className="space-y-4 border-t border-border/70 pt-4"
+                >
+                    <div className="space-y-1">
+                        <h3 className="text-base font-semibold tracking-[-0.016em] text-foreground">
+                            {t('system.observability.title')}
+                        </h3>
+                        <p className="text-sm text-muted-foreground">
+                            {t('system.observability.subtitle')}
+                        </p>
+                    </div>
+
+                    {observability ? (
+                        <>
+                            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
+                                {observabilityMetrics.map((metric) => (
+                                    <div
+                                        key={metric.id}
+                                        className="rounded-[0.95rem] border border-border/60 bg-muted/[0.18] p-3.5"
+                                    >
+                                        <p className="text-xs text-muted-foreground">{metric.label}</p>
+                                        <p className="mt-1 text-xl font-semibold tracking-tight">{metric.value}</p>
+                                        <p className="mt-1 text-xs leading-5 text-muted-foreground">{metric.hint}</p>
+                                    </div>
+                                ))}
+                            </div>
+                            <div className="flex flex-wrap gap-2">
+                                <Badge variant={observability.failoverEnabled ? 'success' : 'secondary'}>
+                                    {observability.failoverEnabled
+                                        ? t('system.observability.badges.failoverOn')
+                                        : t('system.observability.badges.failoverOff')}
+                                </Badge>
+                                <Badge
+                                    variant={observability.sharedCacheEnabled ? 'success' : 'secondary'}
+                                >
+                                    {observability.sharedCacheEnabled
+                                        ? t('system.observability.badges.sharedCacheOn')
+                                        : t('system.observability.badges.sharedCacheOff')}
+                                </Badge>
+                                <Badge
+                                    variant={
+                                        observability.stickyPreferNonConflicting
+                                            ? 'success'
+                                            : 'secondary'
+                                    }
+                                >
+                                    {observability.stickyPreferNonConflicting
+                                        ? t('system.observability.badges.stickyConflictAvoidOn')
+                                        : t('system.observability.badges.stickyConflictAvoidOff')}
+                                </Badge>
+                                <Badge variant="outline">
+                                    {t('system.observability.badges.quickRetry', {
+                                        value: observability.sameAccountQuickRetryMax,
+                                    })}
+                                </Badge>
+                                <Badge variant="outline">
+                                    {t('system.observability.badges.failoverWait', {
+                                        value: observability.requestFailoverWaitMs,
+                                    })}
+                                </Badge>
+                                <Badge variant="outline">
+                                    {t('system.observability.badges.retryPoll', {
+                                        value: observability.retryPollIntervalMs,
+                                    })}
+                                </Badge>
+                            </div>
+                        </>
+                    ) : (
+                        <div className="flex items-start gap-3 rounded-[0.95rem] border border-dashed border-border/70 bg-muted/[0.12] p-4">
+                            <AlertTriangle className="mt-0.5 h-4 w-4 text-muted-foreground" />
+                            <div className="space-y-1">
+                                <p className="text-sm font-medium">
+                                    {isLoading
+                                        ? t('system.details.checkingAPI')
+                                        : t('system.observability.unavailableTitle')}
+                                </p>
+                                <p className="text-sm text-muted-foreground">
+                                    {isLoading
+                                        ? t('system.observability.unavailableLoading')
+                                        : systemState?.data_plane_error ||
+                                          t('system.observability.unavailableDesc')}
+                                </p>
+                            </div>
+                        </div>
+                    )}
+                </motion.section>
             </motion.div>
         </div>
     )
