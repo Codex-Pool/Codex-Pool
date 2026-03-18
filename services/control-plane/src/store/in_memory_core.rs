@@ -15,6 +15,10 @@ impl InMemoryStore {
             account_model_support: Arc::new(RwLock::new(HashMap::new())),
             oauth_rate_limit_caches: Arc::new(RwLock::new(HashMap::new())),
             oauth_rate_limit_refresh_jobs: Arc::new(RwLock::new(HashMap::new())),
+            outbound_proxy_pool_settings: Arc::new(RwLock::new(
+                OutboundProxyPoolSettings::default(),
+            )),
+            outbound_proxy_nodes: Arc::new(RwLock::new(HashMap::new())),
             policies: Arc::new(RwLock::new(HashMap::new())),
             routing_profiles: Arc::new(RwLock::new(HashMap::new())),
             model_routing_policies: Arc::new(RwLock::new(HashMap::new())),
@@ -116,6 +120,109 @@ impl InMemoryStore {
             .values()
             .cloned()
             .collect::<Vec<_>>()
+    }
+
+    fn list_outbound_proxy_nodes_inner(&self) -> Vec<OutboundProxyNode> {
+        let mut nodes = self
+            .outbound_proxy_nodes
+            .read()
+            .unwrap()
+            .values()
+            .cloned()
+            .collect::<Vec<_>>();
+        nodes.sort_by(|left, right| {
+            left.created_at
+                .cmp(&right.created_at)
+                .then_with(|| left.id.cmp(&right.id))
+        });
+        nodes
+    }
+
+    fn create_outbound_proxy_node_inner(
+        &self,
+        req: CreateOutboundProxyNodeRequest,
+    ) -> OutboundProxyNode {
+        let now = Utc::now();
+        let node = OutboundProxyNode {
+            id: Uuid::new_v4(),
+            label: req.label,
+            proxy_url: req.proxy_url,
+            enabled: req.enabled.unwrap_or(true),
+            weight: req.weight.unwrap_or(1),
+            last_test_status: None,
+            last_latency_ms: None,
+            last_error: None,
+            last_tested_at: None,
+            created_at: now,
+            updated_at: now,
+        };
+        self.outbound_proxy_nodes
+            .write()
+            .unwrap()
+            .insert(node.id, node.clone());
+        self.revision.fetch_add(1, Ordering::Relaxed);
+        node
+    }
+
+    fn update_outbound_proxy_node_inner(
+        &self,
+        node_id: Uuid,
+        req: UpdateOutboundProxyNodeRequest,
+    ) -> Result<OutboundProxyNode> {
+        let mut nodes = self.outbound_proxy_nodes.write().unwrap();
+        let Some(node) = nodes.get_mut(&node_id) else {
+            return Err(anyhow!("outbound proxy node not found"));
+        };
+
+        if let Some(label) = req.label {
+            node.label = label;
+        }
+        if let Some(proxy_url) = req.proxy_url {
+            node.proxy_url = proxy_url;
+        }
+        if let Some(enabled) = req.enabled {
+            node.enabled = enabled;
+        }
+        if let Some(weight) = req.weight {
+            node.weight = weight;
+        }
+        node.updated_at = Utc::now();
+        let updated = node.clone();
+        drop(nodes);
+        self.revision.fetch_add(1, Ordering::Relaxed);
+        Ok(updated)
+    }
+
+    fn delete_outbound_proxy_node_inner(&self, node_id: Uuid) -> Result<()> {
+        let removed = self.outbound_proxy_nodes.write().unwrap().remove(&node_id);
+        if removed.is_none() {
+            return Err(anyhow!("outbound proxy node not found"));
+        }
+        self.revision.fetch_add(1, Ordering::Relaxed);
+        Ok(())
+    }
+
+    fn record_outbound_proxy_test_result_inner(
+        &self,
+        node_id: Uuid,
+        last_test_status: Option<String>,
+        last_latency_ms: Option<u64>,
+        last_error: Option<String>,
+        last_tested_at: Option<DateTime<Utc>>,
+    ) -> Result<OutboundProxyNode> {
+        let mut nodes = self.outbound_proxy_nodes.write().unwrap();
+        let Some(node) = nodes.get_mut(&node_id) else {
+            return Err(anyhow!("outbound proxy node not found"));
+        };
+        node.last_test_status = last_test_status;
+        node.last_latency_ms = last_latency_ms;
+        node.last_error = last_error;
+        node.last_tested_at = last_tested_at;
+        node.updated_at = Utc::now();
+        let updated = node.clone();
+        drop(nodes);
+        self.revision.fetch_add(1, Ordering::Relaxed);
+        Ok(updated)
     }
 
     fn set_api_key_enabled_inner(&self, api_key_id: Uuid, enabled: bool) -> Result<ApiKey> {

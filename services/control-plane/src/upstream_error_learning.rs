@@ -42,6 +42,7 @@ pub struct TemplateGenerationContext {
 
 pub struct UpstreamErrorLearningRuntime {
     http_client: reqwest::Client,
+    outbound_proxy_runtime: Option<Arc<crate::outbound_proxy_runtime::OutboundProxyRuntime>>,
     base_url: Option<String>,
     api_key: Option<String>,
     model: String,
@@ -54,6 +55,20 @@ pub struct UpstreamErrorLearningRuntime {
 
 impl UpstreamErrorLearningRuntime {
     pub fn from_env(default_base_url: &str) -> Self {
+        Self::from_env_inner(default_base_url, None)
+    }
+
+    pub fn from_env_with_outbound_proxy_runtime(
+        default_base_url: &str,
+        outbound_proxy_runtime: Arc<crate::outbound_proxy_runtime::OutboundProxyRuntime>,
+    ) -> Self {
+        Self::from_env_inner(default_base_url, Some(outbound_proxy_runtime))
+    }
+
+    fn from_env_inner(
+        default_base_url: &str,
+        outbound_proxy_runtime: Option<Arc<crate::outbound_proxy_runtime::OutboundProxyRuntime>>,
+    ) -> Self {
         let base_url = std::env::var(AI_ERROR_LEARNING_BASE_URL_ENV)
             .ok()
             .filter(|value| !value.trim().is_empty())
@@ -80,6 +95,7 @@ impl UpstreamErrorLearningRuntime {
 
         Self {
             http_client: reqwest::Client::new(),
+            outbound_proxy_runtime,
             base_url,
             api_key,
             model,
@@ -89,6 +105,21 @@ impl UpstreamErrorLearningRuntime {
             new_fingerprint_timestamps: Mutex::new(VecDeque::new()),
             fingerprint_locks: Mutex::new(HashMap::new()),
         }
+    }
+
+    async fn select_http_client(
+        &self,
+    ) -> Result<
+        (
+            reqwest::Client,
+            Option<crate::outbound_proxy_runtime::SelectedHttpClient>,
+        ),
+    > {
+        let Some(runtime) = self.outbound_proxy_runtime.as_ref() else {
+            return Ok((self.http_client.clone(), None));
+        };
+        let selection = runtime.select_http_client(self.timeout).await?;
+        Ok((selection.client.clone(), Some(selection)))
     }
 
     pub async fn lock_for_fingerprint(&self, fingerprint: &str) -> Arc<Mutex<()>> {
@@ -162,6 +193,7 @@ impl UpstreamErrorLearningRuntime {
         ctx: &TemplateGenerationContext,
         locales: &[String],
     ) -> Result<GeneratedUpstreamErrorTemplate> {
+        let (http_client, selection) = self.select_http_client().await?;
         let base_url = self.base_url.as_ref().context("missing ai base url")?;
         let api_key = self.api_key.as_ref().context("missing ai api key")?;
         let endpoint = format!("{}/v1/chat/completions", base_url.trim_end_matches('/'));
@@ -181,8 +213,7 @@ impl UpstreamErrorLearningRuntime {
                 "templates": "object keyed by locale"
             }
         });
-        let response = self
-            .http_client
+        let response = http_client
             .post(endpoint)
             .bearer_auth(api_key)
             .header("x-codex-internal-purpose", "upstream-error-learning")
@@ -203,8 +234,28 @@ impl UpstreamErrorLearningRuntime {
                 ]
             }))
             .send()
-            .await
-            .context("failed to request remote upstream error template generation")?;
+            .await;
+        let response = match response {
+            Ok(response) => {
+                if let (Some(runtime), Some(selection)) =
+                    (self.outbound_proxy_runtime.as_ref(), selection.as_ref())
+                {
+                    runtime
+                        .mark_proxy_http_status(selection, response.status())
+                        .await;
+                }
+                response
+            }
+            Err(err) => {
+                if let (Some(runtime), Some(selection)) =
+                    (self.outbound_proxy_runtime.as_ref(), selection.as_ref())
+                {
+                    runtime.mark_proxy_transport_failure(selection).await;
+                }
+                return Err(err)
+                    .context("failed to request remote upstream error template generation");
+            }
+        };
         let response = response
             .error_for_status()
             .context("remote upstream error template generation returned error status")?;
@@ -254,6 +305,7 @@ impl UpstreamErrorLearningRuntime {
         template: &BuiltinErrorTemplateRecord,
         locales: &[String],
     ) -> Result<LocalizedErrorTemplates> {
+        let (http_client, selection) = self.select_http_client().await?;
         let base_url = self.base_url.as_ref().context("missing ai base url")?;
         let api_key = self.api_key.as_ref().context("missing ai api key")?;
         let endpoint = format!("{}/v1/chat/completions", base_url.trim_end_matches('/'));
@@ -269,8 +321,7 @@ impl UpstreamErrorLearningRuntime {
                 "templates": "object keyed by locale"
             }
         });
-        let response = self
-            .http_client
+        let response = http_client
             .post(endpoint)
             .bearer_auth(api_key)
             .header("x-codex-internal-purpose", "builtin-error-template-rewrite")
@@ -291,8 +342,27 @@ impl UpstreamErrorLearningRuntime {
                 ]
             }))
             .send()
-            .await
-            .context("failed to request builtin error template rewrite")?;
+            .await;
+        let response = match response {
+            Ok(response) => {
+                if let (Some(runtime), Some(selection)) =
+                    (self.outbound_proxy_runtime.as_ref(), selection.as_ref())
+                {
+                    runtime
+                        .mark_proxy_http_status(selection, response.status())
+                        .await;
+                }
+                response
+            }
+            Err(err) => {
+                if let (Some(runtime), Some(selection)) =
+                    (self.outbound_proxy_runtime.as_ref(), selection.as_ref())
+                {
+                    runtime.mark_proxy_transport_failure(selection).await;
+                }
+                return Err(err).context("failed to request builtin error template rewrite");
+            }
+        };
         let response = response
             .error_for_status()
             .context("builtin error template rewrite returned error status")?;

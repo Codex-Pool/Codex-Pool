@@ -13,6 +13,8 @@ mod dashboard_logs_billing_e2e;
 mod i18n_error_locale;
 #[path = "liveness_api.rs"]
 mod liveness_api;
+#[path = "outbound_proxy_runtime.rs"]
+mod outbound_proxy_runtime;
 #[path = "policies.rs"]
 mod policies;
 #[path = "postgres_repo.rs"]

@@ -5,6 +5,7 @@ use codex_pool_core::api::{OAuthRateLimitSnapshot, OAuthRateLimitWindow};
 use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::sync::Arc;
 use thiserror::Error;
 
 const DEFAULT_OPENAI_OAUTH_TOKEN_URL: &str = "https://auth.openai.com/oauth/token";
@@ -135,6 +136,8 @@ pub trait OAuthTokenClient: Send + Sync {
 #[derive(Clone)]
 pub struct OpenAiOAuthClient {
     http_client: reqwest::Client,
+    request_timeout: std::time::Duration,
+    outbound_proxy_runtime: Option<Arc<crate::outbound_proxy_runtime::OutboundProxyRuntime>>,
     token_url: String,
     authorize_url: String,
     client_id: Option<String>,
@@ -142,6 +145,14 @@ pub struct OpenAiOAuthClient {
 
 impl OpenAiOAuthClient {
     pub fn from_env() -> Self {
+        Self::from_env_with_outbound_proxy_runtime(Arc::new(
+            crate::outbound_proxy_runtime::OutboundProxyRuntime::new(),
+        ))
+    }
+
+    pub fn from_env_with_outbound_proxy_runtime(
+        outbound_proxy_runtime: Arc<crate::outbound_proxy_runtime::OutboundProxyRuntime>,
+    ) -> Self {
         let token_url = std::env::var("OPENAI_OAUTH_TOKEN_URL")
             .unwrap_or_else(|_| DEFAULT_OPENAI_OAUTH_TOKEN_URL.to_string());
         let authorize_url = std::env::var("OPENAI_OAUTH_AUTHORIZE_URL")
@@ -157,6 +168,8 @@ impl OpenAiOAuthClient {
 
         Self {
             http_client,
+            request_timeout: std::time::Duration::from_secs(timeout_sec),
+            outbound_proxy_runtime: Some(outbound_proxy_runtime),
             token_url,
             authorize_url,
             client_id: std::env::var("OPENAI_OAUTH_CLIENT_ID").ok(),
@@ -169,19 +182,59 @@ impl OpenAiOAuthClient {
         client_id: Option<String>,
         timeout_sec: Option<u64>,
     ) -> Self {
+        Self::from_parts_with_outbound_proxy_runtime(
+            token_url,
+            authorize_url,
+            client_id,
+            timeout_sec,
+            None,
+        )
+    }
+
+    pub fn from_parts_with_outbound_proxy_runtime(
+        token_url: impl Into<String>,
+        authorize_url: impl Into<String>,
+        client_id: Option<String>,
+        timeout_sec: Option<u64>,
+        outbound_proxy_runtime: Option<Arc<crate::outbound_proxy_runtime::OutboundProxyRuntime>>,
+    ) -> Self {
+        let request_timeout =
+            std::time::Duration::from_secs(timeout_sec.unwrap_or(DEFAULT_OPENAI_OAUTH_TIMEOUT_SEC));
         let http_client = reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(
-                timeout_sec.unwrap_or(DEFAULT_OPENAI_OAUTH_TIMEOUT_SEC),
-            ))
+            .timeout(request_timeout)
             .build()
             .unwrap_or_else(|_| reqwest::Client::new());
 
         Self {
             http_client,
+            request_timeout,
+            outbound_proxy_runtime,
             token_url: token_url.into(),
             authorize_url: authorize_url.into(),
             client_id,
         }
+    }
+
+    async fn select_http_client(
+        &self,
+    ) -> Result<
+        (
+            reqwest::Client,
+            Option<crate::outbound_proxy_runtime::SelectedHttpClient>,
+        ),
+        OAuthTokenClientError,
+    > {
+        let Some(runtime) = self.outbound_proxy_runtime.as_ref() else {
+            return Ok((self.http_client.clone(), None));
+        };
+        let selection = runtime
+            .select_http_client(self.request_timeout)
+            .await
+            .map_err(|err| OAuthTokenClientError::Upstream {
+                code: OAuthRefreshErrorCode::UpstreamUnavailable,
+                message: err.to_string(),
+            })?;
+        Ok((selection.client.clone(), Some(selection)))
     }
 
     pub fn build_authorize_url(
@@ -244,17 +297,36 @@ impl OpenAiOAuthClient {
             ("redirect_uri", redirect_uri.trim().to_string()),
             ("code_verifier", code_verifier.trim().to_string()),
         ];
+        let (http_client, selection) = self.select_http_client().await?;
 
-        let response = self
-            .http_client
+        let response = http_client
             .post(&self.token_url)
             .form(&form)
             .send()
-            .await
-            .map_err(|err| OAuthTokenClientError::Upstream {
-                code: OAuthRefreshErrorCode::UpstreamUnavailable,
-                message: err.to_string(),
-            })?;
+            .await;
+        let response = match response {
+            Ok(response) => {
+                if let (Some(runtime), Some(selection)) =
+                    (self.outbound_proxy_runtime.as_ref(), selection.as_ref())
+                {
+                    runtime
+                        .mark_proxy_http_status(selection, response.status())
+                        .await;
+                }
+                response
+            }
+            Err(err) => {
+                if let (Some(runtime), Some(selection)) =
+                    (self.outbound_proxy_runtime.as_ref(), selection.as_ref())
+                {
+                    runtime.mark_proxy_transport_failure(selection).await;
+                }
+                return Err(OAuthTokenClientError::Upstream {
+                    code: OAuthRefreshErrorCode::UpstreamUnavailable,
+                    message: err.to_string(),
+                });
+            }
+        };
 
         if !response.status().is_success() {
             let status = response.status();
@@ -429,17 +501,35 @@ impl OAuthTokenClient for OpenAiOAuthClient {
         if let Some(client_id) = self.client_id.as_deref() {
             form.push(("client_id", client_id.to_string()));
         }
-
-        let response = self
-            .http_client
+        let (http_client, selection) = self.select_http_client().await?;
+        let response = http_client
             .post(&self.token_url)
             .form(&form)
             .send()
-            .await
-            .map_err(|err| OAuthTokenClientError::Upstream {
-                code: OAuthRefreshErrorCode::UpstreamUnavailable,
-                message: err.to_string(),
-            })?;
+            .await;
+        let response = match response {
+            Ok(response) => {
+                if let (Some(runtime), Some(selection)) =
+                    (self.outbound_proxy_runtime.as_ref(), selection.as_ref())
+                {
+                    runtime
+                        .mark_proxy_http_status(selection, response.status())
+                        .await;
+                }
+                response
+            }
+            Err(err) => {
+                if let (Some(runtime), Some(selection)) =
+                    (self.outbound_proxy_runtime.as_ref(), selection.as_ref())
+                {
+                    runtime.mark_proxy_transport_failure(selection).await;
+                }
+                return Err(OAuthTokenClientError::Upstream {
+                    code: OAuthRefreshErrorCode::UpstreamUnavailable,
+                    message: err.to_string(),
+                });
+            }
+        };
 
         if !response.status().is_success() {
             let status = response.status();
@@ -606,8 +696,8 @@ impl OAuthTokenClient for OpenAiOAuthClient {
         }
 
         let usage_url = resolve_usage_endpoint(base_url);
-        let mut request = self
-            .http_client
+        let (http_client, selection) = self.select_http_client().await?;
+        let mut request = http_client
             .get(&usage_url)
             .bearer_auth(trimmed_access_token)
             .header(reqwest::header::USER_AGENT, CODEX_DEFAULT_USER_AGENT);
@@ -618,13 +708,30 @@ impl OAuthTokenClient for OpenAiOAuthClient {
             request = request.header(CHATGPT_ACCOUNT_ID_HEADER, account_id);
         }
 
-        let response = request
-            .send()
-            .await
-            .map_err(|err| OAuthTokenClientError::Upstream {
-                code: OAuthRefreshErrorCode::UpstreamUnavailable,
-                message: err.to_string(),
-            })?;
+        let response = request.send().await;
+        let response = match response {
+            Ok(response) => {
+                if let (Some(runtime), Some(selection)) =
+                    (self.outbound_proxy_runtime.as_ref(), selection.as_ref())
+                {
+                    runtime
+                        .mark_proxy_http_status(selection, response.status())
+                        .await;
+                }
+                response
+            }
+            Err(err) => {
+                if let (Some(runtime), Some(selection)) =
+                    (self.outbound_proxy_runtime.as_ref(), selection.as_ref())
+                {
+                    runtime.mark_proxy_transport_failure(selection).await;
+                }
+                return Err(OAuthTokenClientError::Upstream {
+                    code: OAuthRefreshErrorCode::UpstreamUnavailable,
+                    message: err.to_string(),
+                });
+            }
+        };
 
         if !response.status().is_success() {
             let status = response.status();
@@ -682,18 +789,37 @@ impl OpenAiOAuthClient {
             return Ok(None);
         };
 
-        let response = self
-            .http_client
+        let (http_client, selection) = self.select_http_client().await?;
+        let response = http_client
             .get(endpoint)
             .bearer_auth(trimmed_access_token)
             .header(reqwest::header::USER_AGENT, CODEX_DEFAULT_USER_AGENT)
             .header(CHATGPT_ACCOUNT_ID_HEADER, trimmed_account_id.unwrap())
             .send()
-            .await
-            .map_err(|err| OAuthTokenClientError::Upstream {
-                code: OAuthRefreshErrorCode::UpstreamUnavailable,
-                message: err.to_string(),
-            })?;
+            .await;
+        let response = match response {
+            Ok(response) => {
+                if let (Some(runtime), Some(selection)) =
+                    (self.outbound_proxy_runtime.as_ref(), selection.as_ref())
+                {
+                    runtime
+                        .mark_proxy_http_status(selection, response.status())
+                        .await;
+                }
+                response
+            }
+            Err(err) => {
+                if let (Some(runtime), Some(selection)) =
+                    (self.outbound_proxy_runtime.as_ref(), selection.as_ref())
+                {
+                    runtime.mark_proxy_transport_failure(selection).await;
+                }
+                return Err(OAuthTokenClientError::Upstream {
+                    code: OAuthRefreshErrorCode::UpstreamUnavailable,
+                    message: err.to_string(),
+                });
+            }
+        };
 
         if !response.status().is_success() {
             let status = response.status();

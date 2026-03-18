@@ -21,7 +21,6 @@ use futures_util::{SinkExt, Stream, StreamExt};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
-use tokio::net::TcpStream;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
@@ -33,12 +32,12 @@ use tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode;
 use tokio_tungstenite::tungstenite::protocol::{
     CloseFrame as TungsteniteCloseFrame, Message as TungsteniteMessage,
 };
-use tokio_tungstenite::{connect_async, MaybeTlsStream, WebSocketStream};
 use tracing::warn;
 use uuid::Uuid;
 
 use crate::app::{AppState, CachedModelsResponse};
 use crate::auth::ApiPrincipal;
+use crate::outbound_proxy_runtime::UpstreamWebSocket;
 use crate::upstream_health::{
     LiveResultReportRequest, LiveResultReportSource, LiveResultReportStatus,
 };
@@ -75,7 +74,6 @@ const MODELS_CACHE_TTL_SEC: u64 = 60;
 const STREAM_PROXY_BUFFER_SIZE: usize = 16;
 const STREAM_USAGE_ESTIMATE_FALLBACK_ENABLED: bool = true;
 
-type UpstreamWebSocket = WebSocketStream<MaybeTlsStream<TcpStream>>;
 type UpstreamByteStream = Pin<Box<dyn Stream<Item = Result<bytes::Bytes, reqwest::Error>> + Send>>;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -653,8 +651,79 @@ pub async fn proxy_handler(
                 }
             }
 
-            let mut upstream_request = state
-                .http_client
+            let selected_upstream_client = match state.outbound_proxy_runtime.select_http_client(None).await
+            {
+                Ok(selection) => selection,
+                Err(err) => {
+                    warn!(
+                        error = %err,
+                        account_id = %account.id,
+                        "failed to select outbound proxy route for upstream request"
+                    );
+                    if state.enable_request_failover
+                        && should_retry_same_account_on_transport(
+                            same_account_retry_attempt,
+                            &state,
+                        )
+                        && Instant::now() < failover_deadline
+                    {
+                        log_failover_decision(
+                            UpstreamErrorSource::Http,
+                            Some(account.id),
+                            Some(StatusCode::SERVICE_UNAVAILABLE),
+                            None,
+                            "proxy_unavailable",
+                            "none",
+                            "none",
+                            "retry_same_account",
+                        );
+                        same_account_retry_attempt += 1;
+                        record_same_account_retry(&state);
+                        tokio::time::sleep(state.retry_poll_interval).await;
+                        continue;
+                    }
+
+                    let response = localized_json_error_with_state(
+                        state.as_ref(),
+                        parsed_policy_context.detected_locale.as_str(),
+                        StatusCode::SERVICE_UNAVAILABLE,
+                        "upstream_transport_error",
+                        "upstream request failed",
+                    );
+                    emit_request_log_event(
+                        &state,
+                        account.id,
+                        principal.as_ref(),
+                        &path,
+                        method.as_str(),
+                        StatusCode::SERVICE_UNAVAILABLE,
+                        started,
+                        false,
+                        parsed_policy_context.request_id.as_deref(),
+                        parsed_policy_context.model.as_deref(),
+                        parsed_policy_context.requested_service_tier.as_deref(),
+                    )
+                    .await;
+                    record_failover_exhausted_if_needed(&state, did_cross_account_failover);
+                    release_billing_hold_best_effort(
+                        state.clone(),
+                        billing_session.take(),
+                        Some(BillingReleaseFailureContext {
+                            release_reason: Some("proxy_unavailable".to_string()),
+                            upstream_status_code: Some(StatusCode::SERVICE_UNAVAILABLE.as_u16()),
+                            failover_action: Some("return_failure".to_string()),
+                            failover_reason_class: Some("proxy_unavailable".to_string()),
+                            cross_account_failover_attempted: Some(did_cross_account_failover),
+                            ..Default::default()
+                        }),
+                    )
+                    .await;
+                    return response;
+                }
+            };
+
+            let mut upstream_request = selected_upstream_client
+                .client
                 .request(method.clone(), upstream_url.clone());
             upstream_request = apply_passthrough_headers(
                 upstream_request,
@@ -688,9 +757,26 @@ pub async fn proxy_handler(
             upstream_request = upstream_request.body(upstream_request_body.clone());
 
             let upstream_response = match upstream_request.send().await {
-                Ok(resp) => resp,
+                Ok(resp) => {
+                    state
+                        .outbound_proxy_runtime
+                        .mark_proxy_http_status(&selected_upstream_client, resp.status())
+                        .await;
+                    resp
+                }
                 Err(err) => {
-                    warn!(error = %err, account_id = %account.id, "upstream request failed");
+                    state
+                        .outbound_proxy_runtime
+                        .mark_proxy_transport_failure(&selected_upstream_client)
+                        .await;
+                    warn!(
+                        error = %err,
+                        account_id = %account.id,
+                        selected_proxy_id = ?selected_upstream_client.proxy_id,
+                        selected_proxy_label = selected_upstream_client.proxy_label.as_deref(),
+                        used_direct_fallback = selected_upstream_client.used_direct_fallback,
+                        "upstream request failed"
+                    );
                     if state.enable_request_failover
                         && should_retry_same_account_on_transport(
                             same_account_retry_attempt,
@@ -2114,8 +2200,14 @@ pub async fn proxy_websocket_handler(
                 }
             };
 
-            let (upstream_socket, upstream_response) = match connect_async(upstream_request).await {
-                Ok((upstream_socket, upstream_response)) => (upstream_socket, upstream_response),
+            let (_selected_route, upstream_socket, upstream_response) = match state
+                .outbound_proxy_runtime
+                .connect_websocket(upstream_request)
+                .await
+            {
+                Ok((selected_route, upstream_socket, upstream_response)) => {
+                    (selected_route, upstream_socket, upstream_response)
+                }
                 Err(err) => {
                     if !omit_upstream_subprotocol
                         && requested_subprotocol.is_some()
@@ -2127,6 +2219,44 @@ pub async fn proxy_websocket_handler(
                         );
                         omit_upstream_subprotocol = true;
                         continue;
+                    }
+
+                    if is_outbound_proxy_selection_ws_error(&err) {
+                        warn!(
+                            error = %err,
+                            account_id = %account.id,
+                            "failed to select outbound proxy route for upstream websocket"
+                        );
+                        if state.enable_request_failover
+                            && should_retry_same_account_on_transport(
+                                same_account_retry_attempt,
+                                &state,
+                            )
+                            && Instant::now() < failover_deadline
+                        {
+                            log_failover_decision(
+                                UpstreamErrorSource::WsHandshake,
+                                Some(account.id),
+                                Some(StatusCode::SERVICE_UNAVAILABLE),
+                                None,
+                                "proxy_unavailable",
+                                "none",
+                                "none",
+                                "retry_same_account",
+                            );
+                            same_account_retry_attempt += 1;
+                            record_same_account_retry(&state);
+                            tokio::time::sleep(state.retry_poll_interval).await;
+                            continue;
+                        }
+                        record_failover_exhausted_if_needed(&state, did_cross_account_failover);
+                        return localized_json_error_with_state(
+                            state.as_ref(),
+                            detected_locale.as_str(),
+                            StatusCode::SERVICE_UNAVAILABLE,
+                            "upstream_websocket_connect_error",
+                            "failed to connect upstream websocket",
+                        );
                     }
 
                     let mut status = StatusCode::BAD_GATEWAY;
@@ -2386,6 +2516,17 @@ pub async fn proxy_websocket_handler(
             });
         }
     }
+}
+
+fn is_outbound_proxy_selection_ws_error(err: &TungsteniteError) -> bool {
+    matches!(
+        err,
+        TungsteniteError::Io(io_err)
+            if io_err.kind() == io::ErrorKind::NotConnected
+                && io_err
+                    .to_string()
+                    .contains("outbound proxy pool has no available proxy")
+    )
 }
 
 fn spawn_seen_ok_reports(state: &Arc<AppState>, account_id: Uuid, model_id: Option<String>) {
@@ -2651,6 +2792,7 @@ mod entry_route_selection_tests {
         Arc::new(AppState {
             router: RoundRobinRouter::new(accounts),
             http_client: reqwest::Client::new(),
+            outbound_proxy_runtime: Arc::new(crate::outbound_proxy_runtime::OutboundProxyRuntime::new()),
             control_plane_base_url: Some("http://127.0.0.1:8090".to_string()),
             routing_strategy: RoutingStrategy::RoundRobin,
             account_ejection_ttl: Duration::from_secs(30),

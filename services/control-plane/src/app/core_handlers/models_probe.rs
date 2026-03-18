@@ -736,14 +736,19 @@ async fn run_model_probe_cycle(
         return Ok(());
     }
 
-    let tenant_auth = state
-        .tenant_auth_service
-        .as_ref()
-        .ok_or_else(|| anyhow::anyhow!("tenant auth service is not available"))?;
-    let official_catalog = tenant_auth
-        .admin_list_openai_model_catalog()
-        .await
-        .context("failed to load official models catalog for probing")?;
+    let official_catalog = if let Some(tenant_auth) = state.tenant_auth_service.as_ref() {
+        tenant_auth
+            .admin_list_openai_model_catalog()
+            .await
+            .context("failed to load official models catalog for probing")?
+    } else if let Some(sqlite_repo) = state.sqlite_usage_repo.as_ref() {
+        sqlite_repo
+            .list_openai_model_catalog()
+            .await
+            .context("failed to load sqlite official models catalog for probing")?
+    } else {
+        return Err(anyhow::anyhow!("tenant auth service is not available"));
+    };
     if official_catalog.is_empty() {
         return Err(anyhow::anyhow!(
             "official models catalog is empty; sync OpenAI catalog first"
@@ -772,9 +777,11 @@ async fn run_model_probe_cycle(
         anyhow::bail!("no enabled upstream account is available for probe");
     }
 
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(MODEL_PROBE_REQUEST_TIMEOUT_SEC))
-        .build()?;
+    let client = state
+        .outbound_proxy_runtime
+        .select_http_client(Duration::from_secs(MODEL_PROBE_REQUEST_TIMEOUT_SEC))
+        .await?
+        .client;
     let account_results = fetch_upstream_models_for_accounts(&client, accounts).await?;
     if account_results.is_empty() {
         anyhow::bail!("no enabled upstream account is available for probe");
@@ -1347,6 +1354,9 @@ mod models_probe_tests {
             std::sync::Arc::new(crate::store::InMemoryStore::default());
         let admin_auth =
             crate::admin_auth::AdminAuthService::from_env().expect("admin auth env must be set");
+        let outbound_proxy_runtime =
+            std::sync::Arc::new(crate::outbound_proxy_runtime::OutboundProxyRuntime::new());
+        outbound_proxy_runtime.attach_store(store.clone());
         crate::test_support::set_env("ADMIN_USERNAME", old_username.as_deref());
         crate::test_support::set_env("ADMIN_PASSWORD", old_password.as_deref());
         crate::test_support::set_env("ADMIN_JWT_SECRET", old_secret.as_deref());
@@ -1356,6 +1366,7 @@ mod models_probe_tests {
             usage_repo: Some(std::sync::Arc::new(TestUsageRepo { rows })),
             usage_ingest_repo: None,
             tenant_auth_service: None,
+            sqlite_usage_repo: None,
             auth_validate_cache_ttl_sec: DEFAULT_AUTH_VALIDATE_CACHE_TTL_SEC,
             system_capabilities: system_capabilities_from_env(),
             admin_auth,
@@ -1373,7 +1384,6 @@ mod models_probe_tests {
             admin_logs: std::sync::Arc::new(std::sync::RwLock::new(
                 std::collections::VecDeque::new(),
             )),
-            admin_proxies: std::sync::Arc::new(std::sync::RwLock::new(Vec::new())),
             model_catalog_last_error: std::sync::Arc::new(std::sync::RwLock::new(None)),
             model_probe_cache: std::sync::Arc::new(std::sync::RwLock::new(
                 ModelProbeCache::default(),
@@ -1387,9 +1397,11 @@ mod models_probe_tests {
             codex_oauth_callback_listen_mode: CodexOAuthCallbackListenMode::Off,
             codex_oauth_callback_listen_addr: None,
             codex_oauth_callback_listener: std::sync::Arc::new(tokio::sync::Mutex::new(None)),
+            outbound_proxy_runtime: outbound_proxy_runtime.clone(),
             upstream_error_learning_runtime: std::sync::Arc::new(
-                crate::upstream_error_learning::UpstreamErrorLearningRuntime::from_env(
+                crate::upstream_error_learning::UpstreamErrorLearningRuntime::from_env_with_outbound_proxy_runtime(
                     "http://127.0.0.1:8091",
+                    outbound_proxy_runtime,
                 ),
             ),
             model_probe_interval_sec: MODEL_PROBE_DEFAULT_INTERVAL_SEC,

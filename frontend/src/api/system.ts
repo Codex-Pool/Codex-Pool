@@ -1,18 +1,8 @@
 import { apiClient } from './client'
+import { DEFAULT_SYSTEM_CAPABILITIES } from './system.defaults'
 import type { SystemCapabilitiesResponse } from './types'
 
-export const DEFAULT_SYSTEM_CAPABILITIES: SystemCapabilitiesResponse = {
-  edition: 'business',
-  billing_mode: 'credit_enforced',
-  features: {
-    multi_tenant: true,
-    tenant_portal: true,
-    tenant_self_service: true,
-    tenant_recharge: true,
-    credit_billing: true,
-    cost_reports: true,
-  },
-}
+export { DEFAULT_SYSTEM_CAPABILITIES }
 
 export const systemApi = {
   async getCapabilities(): Promise<SystemCapabilitiesResponse> {

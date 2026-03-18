@@ -41,6 +41,8 @@ mod internal_debug_unhealthy_accounts;
 mod internal_metrics;
 #[path = "liveness_api.rs"]
 mod liveness_api;
+#[path = "outbound_proxy_runtime.rs"]
+mod outbound_proxy_runtime;
 #[path = "readiness_api.rs"]
 mod readiness_api;
 #[path = "router_health.rs"]

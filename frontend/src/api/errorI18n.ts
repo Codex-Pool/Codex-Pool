@@ -37,6 +37,8 @@ function apiErrorCodeToLabel(t: TFunction, code: string | null): string | null {
       return t('errors.api.unauthorized')
     case 'invalid_request':
       return t('errors.api.invalidRequest')
+    case 'invalid_proxy_url':
+      return t('errors.api.invalidProxyUrl')
     case 'not_found':
       return t('errors.api.notFound')
     case 'service_unavailable':

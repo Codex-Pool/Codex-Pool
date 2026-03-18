@@ -9,12 +9,14 @@ use codex_pool_core::api::{
 };
 use codex_pool_core::model::{
     AccountRoutingTraits, AiErrorLearningSettings, CompiledModelRoutingPolicy, CompiledRoutingPlan,
-    CompiledRoutingProfile, LocalizedErrorTemplates, RoutingStrategy, UpstreamAccount,
+    CompiledRoutingProfile, LocalizedErrorTemplates, OutboundProxyNode,
+    OutboundProxyPoolSettings, ProxyFailMode, RoutingStrategy, UpstreamAccount,
     UpstreamErrorAction, UpstreamErrorRetryScope, UpstreamErrorTemplateRecord,
     UpstreamErrorTemplateStatus, UpstreamMode,
 };
 use data_plane::app::AppState;
 use data_plane::event::NoopEventSink;
+use data_plane::outbound_proxy_runtime::OutboundProxyRuntime;
 use data_plane::router::RoundRobinRouter;
 use data_plane::routing_cache::InMemoryRoutingCache;
 use uuid::Uuid;
@@ -57,6 +59,8 @@ fn snapshot_with_revision(revision: u64, accounts: Vec<UpstreamAccount>) -> Data
         ai_error_learning_settings: AiErrorLearningSettings::default(),
         approved_upstream_error_templates: Vec::new(),
         builtin_error_templates: Vec::new(),
+        outbound_proxy_pool_settings: Default::default(),
+        outbound_proxy_nodes: Vec::new(),
         issued_at: chrono::Utc::now(),
     }
 }
@@ -94,6 +98,8 @@ fn upsert_event(account: UpstreamAccount, id: u64) -> DataPlaneSnapshotEvent {
         ai_error_learning_settings: None,
         approved_upstream_error_templates: None,
         builtin_error_templates: None,
+        outbound_proxy_pool_settings: None,
+        outbound_proxy_nodes: None,
         created_at: chrono::Utc::now(),
     }
 }
@@ -108,6 +114,8 @@ fn delete_event(account_id: Uuid, id: u64) -> DataPlaneSnapshotEvent {
         ai_error_learning_settings: None,
         approved_upstream_error_templates: None,
         builtin_error_templates: None,
+        outbound_proxy_pool_settings: None,
+        outbound_proxy_nodes: None,
         created_at: chrono::Utc::now(),
     }
 }
@@ -139,6 +147,8 @@ fn routing_plan_refresh_event(model: &str, account_id: Uuid, id: u64) -> DataPla
         ai_error_learning_settings: None,
         approved_upstream_error_templates: None,
         builtin_error_templates: None,
+        outbound_proxy_pool_settings: None,
+        outbound_proxy_nodes: None,
         created_at: chrono::Utc::now(),
     }
 }
@@ -157,6 +167,8 @@ fn ai_error_learning_refresh_event(
         ai_error_learning_settings: Some(settings),
         approved_upstream_error_templates: Some(templates),
         builtin_error_templates: Some(Vec::new()),
+        outbound_proxy_pool_settings: None,
+        outbound_proxy_nodes: None,
         created_at: chrono::Utc::now(),
     }
 }
@@ -188,6 +200,7 @@ fn test_state() -> AppState {
         billing_capture_retry_backoff: Duration::from_millis(200),
         billing_pricing_cache: std::sync::RwLock::new(std::collections::HashMap::new()),
         models_cache: std::sync::RwLock::new(std::collections::HashMap::new()),
+        outbound_proxy_runtime: Arc::new(OutboundProxyRuntime::new()),
         routing_cache: Arc::new(InMemoryRoutingCache::new()),
         alive_ring_router: None,
         seen_ok_reporter: None,
@@ -246,6 +259,22 @@ fn test_state() -> AppState {
     }
 }
 
+fn proxy_node() -> OutboundProxyNode {
+    OutboundProxyNode {
+        id: Uuid::new_v4(),
+        label: "proxy-a".to_string(),
+        proxy_url: "http://127.0.0.1:19082".to_string(),
+        enabled: true,
+        weight: 1,
+        last_test_status: None,
+        last_latency_ms: None,
+        last_error: None,
+        last_tested_at: None,
+        created_at: chrono::Utc::now(),
+        updated_at: chrono::Utc::now(),
+    }
+}
+
 #[tokio::test]
 async fn applies_new_snapshot_revision_and_replaces_accounts() {
     let state = test_state();
@@ -254,6 +283,42 @@ async fn applies_new_snapshot_revision_and_replaces_accounts() {
 
     assert_eq!(state.router.total(), 1);
     assert_eq!(state.router.pick().unwrap().label, "account-b");
+}
+
+#[tokio::test]
+async fn applies_outbound_proxy_settings_from_snapshot() {
+    let state = test_state();
+    let node = proxy_node();
+    state.apply_snapshot(DataPlaneSnapshot {
+        revision: 9,
+        cursor: 3,
+        accounts: vec![account_a()],
+        account_traits: Vec::new(),
+        compiled_routing_plan: None,
+        ai_error_learning_settings: AiErrorLearningSettings::default(),
+        approved_upstream_error_templates: Vec::new(),
+        builtin_error_templates: Vec::new(),
+        outbound_proxy_pool_settings: OutboundProxyPoolSettings {
+            enabled: true,
+            fail_mode: ProxyFailMode::StrictProxy,
+            updated_at: chrono::Utc::now(),
+        },
+        outbound_proxy_nodes: vec![node.clone()],
+        issued_at: chrono::Utc::now(),
+    });
+
+    let selected = state
+        .outbound_proxy_runtime
+        .select_http_client(None)
+        .await
+        .expect("proxy selection should succeed");
+    assert_eq!(selected.proxy_id, Some(node.id));
+
+    state
+        .outbound_proxy_runtime
+        .mark_proxy_transport_failure(&selected)
+        .await;
+    assert!(state.outbound_proxy_runtime.select_http_client(None).await.is_err());
 }
 
 #[tokio::test]

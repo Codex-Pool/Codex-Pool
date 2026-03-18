@@ -2,25 +2,27 @@ use anyhow::{anyhow, Context, Result};
 use async_trait::async_trait;
 use chrono::{DateTime, Duration, Utc};
 use codex_pool_core::api::{
-    CreateApiKeyRequest, CreateApiKeyResponse, CreateTenantRequest, CreateUpstreamAccountRequest,
-    DataPlaneSnapshot, DataPlaneSnapshotEvent, DataPlaneSnapshotEventType,
-    DataPlaneSnapshotEventsResponse, ImportOAuthRefreshTokenRequest, OAuthAccountStatusResponse,
-    OAuthFamilyActionResponse, OAuthRateLimitRefreshErrorSummary, OAuthRateLimitRefreshJobStatus,
-    OAuthRateLimitRefreshJobSummary, OAuthRateLimitSnapshot, OAuthRefreshStatus,
-    SessionCredentialKind, UpdateAiErrorLearningSettingsRequest,
-    UpsertModelRoutingPolicyRequest, UpsertRetryPolicyRequest, UpsertRoutingPolicyRequest,
-    UpsertRoutingProfileRequest, UpsertStreamRetryPolicyRequest,
-    UpdateModelRoutingSettingsRequest, ValidateOAuthRefreshTokenRequest,
+    CreateApiKeyRequest, CreateApiKeyResponse, CreateOutboundProxyNodeRequest, CreateTenantRequest,
+    CreateUpstreamAccountRequest, DataPlaneSnapshot, DataPlaneSnapshotEvent,
+    DataPlaneSnapshotEventType, DataPlaneSnapshotEventsResponse, ImportOAuthRefreshTokenRequest,
+    OAuthAccountStatusResponse, OAuthFamilyActionResponse, OAuthRateLimitRefreshErrorSummary,
+    OAuthRateLimitRefreshJobStatus, OAuthRateLimitRefreshJobSummary, OAuthRateLimitSnapshot,
+    OAuthRefreshStatus, SessionCredentialKind, UpdateAiErrorLearningSettingsRequest,
+    UpdateModelRoutingSettingsRequest, UpdateOutboundProxyNodeRequest,
+    UpdateOutboundProxyPoolSettingsRequest, UpsertModelRoutingPolicyRequest,
+    UpsertRetryPolicyRequest, UpsertRoutingPolicyRequest, UpsertRoutingProfileRequest,
+    UpsertStreamRetryPolicyRequest, ValidateOAuthRefreshTokenRequest,
     ValidateOAuthRefreshTokenResponse,
 };
 use codex_pool_core::model::{
     AccountRoutingTraits, AiErrorLearningSettings, ApiKey, BuiltinErrorTemplateKind,
     BuiltinErrorTemplateOverrideRecord, CompiledModelRoutingPolicy, CompiledRoutingPlan,
     CompiledRoutingProfile, LocalizedErrorTemplates, ModelRoutingPolicy, ModelRoutingSettings,
-    ModelRoutingTriggerMode, RoutingPlanVersion, RoutingPolicy, RoutingProfile,
-    RoutingProfileSelector, RoutingStrategy, Tenant, UpstreamAccount, UpstreamAuthProvider,
-    UpstreamErrorAction, UpstreamErrorRetryScope, UpstreamErrorTemplateRecord,
-    UpstreamErrorTemplateStatus, UpstreamMode,
+    ModelRoutingTriggerMode, OutboundProxyNode, OutboundProxyPoolSettings, ProxyFailMode,
+    RoutingPlanVersion, RoutingPolicy, RoutingProfile, RoutingProfileSelector, RoutingStrategy,
+    Tenant, UpstreamAccount, UpstreamAuthProvider, UpstreamErrorAction,
+    UpstreamErrorRetryScope, UpstreamErrorTemplateRecord, UpstreamErrorTemplateStatus,
+    UpstreamMode,
 };
 use futures_util::StreamExt;
 use sha2::{Digest, Sha256};

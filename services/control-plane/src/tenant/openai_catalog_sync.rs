@@ -1,6 +1,6 @@
 use futures_util::StreamExt;
 
-const OPENAI_MODELS_INDEX_URL: &str = "https://developers.openai.com/api/docs/models";
+pub(crate) const OPENAI_MODELS_INDEX_URL: &str = "https://developers.openai.com/api/docs/models";
 
 fn strip_html_to_text(raw_html: &str) -> String {
     let mut text = raw_html.to_string();
@@ -128,7 +128,7 @@ fn parse_endpoints(text: &str) -> Vec<String> {
     endpoints
 }
 
-fn build_catalog_item_from_model_page(
+pub(crate) fn build_catalog_item_from_model_page(
     model_id: &str,
     raw_html: &str,
     synced_at: DateTime<Utc>,
@@ -201,7 +201,7 @@ fn build_catalog_item_from_model_page(
     })
 }
 
-fn parse_model_ids_from_models_index(raw_html: &str) -> Vec<String> {
+pub(crate) fn parse_model_ids_from_models_index(raw_html: &str) -> Vec<String> {
     let regex = regex::Regex::new(r#"/api/docs/models/([A-Za-z0-9_.-]+)"#)
         .expect("valid model link regex");
     let mut ids = regex
@@ -227,106 +227,58 @@ async fn fetch_openai_docs_html(client: &reqwest::Client, url: &str) -> Result<S
         .with_context(|| format!("failed to decode html from {url}"))
 }
 
-impl TenantAuthService {
-    pub async fn admin_list_openai_model_catalog(&self) -> Result<Vec<OpenAiModelCatalogItem>> {
-        let rows = sqlx::query(
-            r#"
-            SELECT
-                model_id,
-                owned_by,
-                title,
-                description,
-                context_window_tokens,
-                max_output_tokens,
-                knowledge_cutoff,
-                reasoning_token_support,
-                input_price_microcredits,
-                cached_input_price_microcredits,
-                output_price_microcredits,
-                pricing_notes,
-                input_modalities_json,
-                output_modalities_json,
-                endpoints_json,
-                source_url,
-                raw_text,
-                synced_at
-            FROM openai_models_catalog
-            ORDER BY model_id ASC
-            "#,
-        )
-        .fetch_all(&self.pool)
-        .await
-        .context("failed to list openai models catalog")?;
-
-        rows.into_iter()
-            .map(|row| -> Result<OpenAiModelCatalogItem> {
-                Ok(OpenAiModelCatalogItem {
-                    model_id: row.try_get("model_id")?,
-                    owned_by: row.try_get("owned_by")?,
-                    title: row.try_get("title")?,
-                    description: row.try_get("description")?,
-                    context_window_tokens: row.try_get("context_window_tokens")?,
-                    max_output_tokens: row.try_get("max_output_tokens")?,
-                    knowledge_cutoff: row.try_get("knowledge_cutoff")?,
-                    reasoning_token_support: row.try_get("reasoning_token_support")?,
-                    input_price_microcredits: row.try_get("input_price_microcredits")?,
-                    cached_input_price_microcredits: row.try_get("cached_input_price_microcredits")?,
-                    output_price_microcredits: row.try_get("output_price_microcredits")?,
-                    pricing_notes: row.try_get("pricing_notes")?,
-                    input_modalities: row
-                        .try_get::<sqlx_core::types::Json<Vec<String>>, _>("input_modalities_json")?
-                        .0,
-                    output_modalities: row
-                        .try_get::<sqlx_core::types::Json<Vec<String>>, _>("output_modalities_json")?
-                        .0,
-                    endpoints: row
-                        .try_get::<sqlx_core::types::Json<Vec<String>>, _>("endpoints_json")?
-                        .0,
-                    source_url: row.try_get("source_url")?,
-                    raw_text: row.try_get("raw_text")?,
-                    synced_at: row.try_get("synced_at")?,
-                })
-            })
-            .collect()
+pub(crate) async fn fetch_openai_model_catalog_items_with_client(
+    client: reqwest::Client,
+) -> Result<(DateTime<Utc>, Vec<OpenAiModelCatalogItem>)> {
+    let synced_at = Utc::now();
+    let index_html = fetch_openai_docs_html(&client, OPENAI_MODELS_INDEX_URL).await?;
+    let model_ids = parse_model_ids_from_models_index(&index_html);
+    if model_ids.is_empty() {
+        return Err(anyhow!("official models index returned no model ids"));
     }
 
-    pub async fn admin_sync_openai_models_catalog(&self) -> Result<OpenAiModelsSyncResponse> {
-        let synced_at = Utc::now();
-        let client = reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(20))
-            .build()
-            .context("failed to build openai catalog sync client")?;
-        let index_html = fetch_openai_docs_html(&client, OPENAI_MODELS_INDEX_URL).await?;
-        let model_ids = parse_model_ids_from_models_index(&index_html);
-        if model_ids.is_empty() {
-            return Err(anyhow!("official models index returned no model ids"));
+    let pages = futures_util::stream::iter(model_ids.into_iter().map(|model_id| {
+        let client = client.clone();
+        async move {
+            let url = format!("{OPENAI_MODELS_INDEX_URL}/{model_id}");
+            let html = fetch_openai_docs_html(&client, &url).await?;
+            build_catalog_item_from_model_page(&model_id, &html, synced_at)
         }
+    }))
+    .buffer_unordered(8)
+    .collect::<Vec<_>>()
+    .await;
 
-        let pages = futures_util::stream::iter(model_ids.into_iter().map(|model_id| {
-            let client = client.clone();
-            async move {
-                let url = format!("{OPENAI_MODELS_INDEX_URL}/{model_id}");
-                let html = fetch_openai_docs_html(&client, &url).await?;
-                build_catalog_item_from_model_page(&model_id, &html, synced_at)
-            }
-        }))
-        .buffer_unordered(8)
-        .collect::<Vec<_>>()
-        .await;
+    let mut items = Vec::new();
+    for page in pages {
+        items.push(page?);
+    }
+    items.sort_by(|left, right| left.model_id.cmp(&right.model_id));
+    Ok((synced_at, items))
+}
 
-        let mut items = Vec::new();
-        for page in pages {
-            items.push(page?);
-        }
-        items.sort_by(|left, right| left.model_id.cmp(&right.model_id));
+pub(crate) async fn fetch_openai_model_catalog_items(
+) -> Result<(DateTime<Utc>, Vec<OpenAiModelCatalogItem>)> {
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(20))
+        .build()
+        .context("failed to build openai catalog sync client")?;
+    fetch_openai_model_catalog_items_with_client(client).await
+}
 
+impl TenantAuthService {
+    async fn apply_openai_model_catalog_items(
+        &self,
+        synced_at: DateTime<Utc>,
+        items: &[OpenAiModelCatalogItem],
+    ) -> Result<OpenAiModelsSyncResponse> {
         let mut tx = self
             .pool
             .begin()
             .await
             .context("failed to start openai catalog sync transaction")?;
 
-        for item in &items {
+        for item in items {
             sqlx::query(
                 r#"
                 INSERT INTO openai_models_catalog (
@@ -443,6 +395,83 @@ impl TenantAuthService {
             deleted_legacy_pricing_rows,
             synced_at,
         })
+    }
+
+    pub async fn admin_list_openai_model_catalog(&self) -> Result<Vec<OpenAiModelCatalogItem>> {
+        let rows = sqlx::query(
+            r#"
+            SELECT
+                model_id,
+                owned_by,
+                title,
+                description,
+                context_window_tokens,
+                max_output_tokens,
+                knowledge_cutoff,
+                reasoning_token_support,
+                input_price_microcredits,
+                cached_input_price_microcredits,
+                output_price_microcredits,
+                pricing_notes,
+                input_modalities_json,
+                output_modalities_json,
+                endpoints_json,
+                source_url,
+                raw_text,
+                synced_at
+            FROM openai_models_catalog
+            ORDER BY model_id ASC
+            "#,
+        )
+        .fetch_all(&self.pool)
+        .await
+        .context("failed to list openai models catalog")?;
+
+        rows.into_iter()
+            .map(|row| -> Result<OpenAiModelCatalogItem> {
+                Ok(OpenAiModelCatalogItem {
+                    model_id: row.try_get("model_id")?,
+                    owned_by: row.try_get("owned_by")?,
+                    title: row.try_get("title")?,
+                    description: row.try_get("description")?,
+                    context_window_tokens: row.try_get("context_window_tokens")?,
+                    max_output_tokens: row.try_get("max_output_tokens")?,
+                    knowledge_cutoff: row.try_get("knowledge_cutoff")?,
+                    reasoning_token_support: row.try_get("reasoning_token_support")?,
+                    input_price_microcredits: row.try_get("input_price_microcredits")?,
+                    cached_input_price_microcredits: row.try_get("cached_input_price_microcredits")?,
+                    output_price_microcredits: row.try_get("output_price_microcredits")?,
+                    pricing_notes: row.try_get("pricing_notes")?,
+                    input_modalities: row
+                        .try_get::<sqlx_core::types::Json<Vec<String>>, _>("input_modalities_json")?
+                        .0,
+                    output_modalities: row
+                        .try_get::<sqlx_core::types::Json<Vec<String>>, _>("output_modalities_json")?
+                        .0,
+                    endpoints: row
+                        .try_get::<sqlx_core::types::Json<Vec<String>>, _>("endpoints_json")?
+                        .0,
+                    source_url: row.try_get("source_url")?,
+                    raw_text: row.try_get("raw_text")?,
+                    synced_at: row.try_get("synced_at")?,
+                })
+            })
+            .collect()
+    }
+
+    pub async fn admin_sync_openai_models_catalog(&self) -> Result<OpenAiModelsSyncResponse> {
+        self.admin_sync_openai_models_catalog_with_client(None).await
+    }
+
+    pub async fn admin_sync_openai_models_catalog_with_client(
+        &self,
+        client: Option<reqwest::Client>,
+    ) -> Result<OpenAiModelsSyncResponse> {
+        let (synced_at, items) = match client {
+            Some(client) => fetch_openai_model_catalog_items_with_client(client).await?,
+            None => fetch_openai_model_catalog_items().await?,
+        };
+        self.apply_openai_model_catalog_items(synced_at, &items).await
     }
 }
 

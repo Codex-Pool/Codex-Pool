@@ -30,6 +30,7 @@ use crate::config::DataPlaneConfig;
 use crate::event::http_sink::ControlPlaneHttpEventSink;
 use crate::event::redis_sink::RedisStreamEventSink;
 use crate::event::{EventSink, NoopEventSink};
+use crate::outbound_proxy_runtime::OutboundProxyRuntime;
 use crate::proxy::{proxy_handler, proxy_websocket_handler};
 use crate::router::RoundRobinRouter;
 use crate::routing_cache::{
@@ -91,6 +92,7 @@ pub struct CachedModelsResponse {
 pub struct AppState {
     pub router: RoundRobinRouter,
     pub http_client: reqwest::Client,
+    pub outbound_proxy_runtime: Arc<OutboundProxyRuntime>,
     pub control_plane_base_url: Option<String>,
     pub routing_strategy: RoutingStrategy,
     pub account_ejection_ttl: Duration,
@@ -436,6 +438,7 @@ async fn build_app_with_options(
     let state = Arc::new(AppState {
         router: RoundRobinRouter::new(config.upstream_accounts),
         http_client: reqwest::Client::new(),
+        outbound_proxy_runtime: Arc::new(OutboundProxyRuntime::new()),
         control_plane_base_url,
         routing_strategy: config.routing_strategy,
         account_ejection_ttl: Duration::from_secs(config.account_ejection_ttl_sec),

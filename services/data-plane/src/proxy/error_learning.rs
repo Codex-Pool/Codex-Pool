@@ -628,6 +628,7 @@ mod ai_error_learning_tests {
         Arc::new(AppState {
             router: RoundRobinRouter::new(vec![account]),
             http_client: reqwest::Client::new(),
+            outbound_proxy_runtime: Arc::new(crate::outbound_proxy_runtime::OutboundProxyRuntime::new()),
             control_plane_base_url,
             routing_strategy: RoutingStrategy::RoundRobin,
             account_ejection_ttl: Duration::from_secs(30),

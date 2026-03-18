@@ -14,6 +14,7 @@ pub mod crypto;
 pub mod edition_migration;
 pub mod import_jobs;
 pub mod oauth;
+pub mod outbound_proxy_runtime;
 pub mod security;
 pub mod single_binary;
 pub mod store;

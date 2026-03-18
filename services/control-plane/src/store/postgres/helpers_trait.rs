@@ -360,6 +360,58 @@ impl ControlPlaneStore for PostgresStore {
         self.set_api_key_enabled_inner(api_key_id, enabled).await
     }
 
+    async fn outbound_proxy_pool_settings(&self) -> Result<OutboundProxyPoolSettings> {
+        self.load_outbound_proxy_pool_settings_inner().await
+    }
+
+    async fn update_outbound_proxy_pool_settings(
+        &self,
+        req: UpdateOutboundProxyPoolSettingsRequest,
+    ) -> Result<OutboundProxyPoolSettings> {
+        self.update_outbound_proxy_pool_settings_inner(req).await
+    }
+
+    async fn list_outbound_proxy_nodes(&self) -> Result<Vec<OutboundProxyNode>> {
+        self.list_outbound_proxy_nodes_inner().await
+    }
+
+    async fn create_outbound_proxy_node(
+        &self,
+        req: CreateOutboundProxyNodeRequest,
+    ) -> Result<OutboundProxyNode> {
+        self.create_outbound_proxy_node_inner(req).await
+    }
+
+    async fn update_outbound_proxy_node(
+        &self,
+        node_id: Uuid,
+        req: UpdateOutboundProxyNodeRequest,
+    ) -> Result<OutboundProxyNode> {
+        self.update_outbound_proxy_node_inner(node_id, req).await
+    }
+
+    async fn delete_outbound_proxy_node(&self, node_id: Uuid) -> Result<()> {
+        self.delete_outbound_proxy_node_inner(node_id).await
+    }
+
+    async fn record_outbound_proxy_test_result(
+        &self,
+        node_id: Uuid,
+        last_test_status: Option<String>,
+        last_latency_ms: Option<u64>,
+        last_error: Option<String>,
+        last_tested_at: Option<DateTime<Utc>>,
+    ) -> Result<OutboundProxyNode> {
+        self.record_outbound_proxy_test_result_inner(
+            node_id,
+            last_test_status,
+            last_latency_ms,
+            last_error,
+            last_tested_at,
+        )
+        .await
+    }
+
     async fn validate_api_key(&self, token: &str) -> Result<Option<ValidatedPrincipal>> {
         self.fetch_validated_principal_by_token(token).await
     }

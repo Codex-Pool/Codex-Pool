@@ -1068,9 +1068,9 @@ async fn connect_failover_upstream_for_ws_session(
             }
         };
 
-        let connect_result = connect_async(upstream_request).await;
+        let connect_result = state.outbound_proxy_runtime.connect_websocket(upstream_request).await;
         match connect_result {
-            Ok((upstream_socket, _)) => {
+            Ok((_selected_route, upstream_socket, _)) => {
                 if let Some(sticky_key) = ws_usage_context.sticky_key.as_deref() {
                     let _ = state.router.bind_sticky(sticky_key, account.id);
                     let _ = state
@@ -1085,6 +1085,9 @@ async fn connect_failover_upstream_for_ws_session(
                 return Some((account, upstream_socket));
             }
             Err(err) => {
+                if is_outbound_proxy_selection_ws_error(&err) {
+                    return None;
+                }
                 let (status, error_context, is_http_handshake_error) = match &err {
                     TungsteniteError::Http(upstream_response) => {
                         let status = upstream_response.status();

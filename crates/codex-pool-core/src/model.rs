@@ -52,6 +52,50 @@ pub struct UpstreamAccount {
     pub created_at: DateTime<Utc>,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum ProxyFailMode {
+    #[default]
+    StrictProxy,
+    AllowDirectFallback,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct OutboundProxyPoolSettings {
+    pub enabled: bool,
+    pub fail_mode: ProxyFailMode,
+    pub updated_at: DateTime<Utc>,
+}
+
+impl Default for OutboundProxyPoolSettings {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            fail_mode: ProxyFailMode::StrictProxy,
+            updated_at: Utc::now(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct OutboundProxyNode {
+    pub id: Uuid,
+    pub label: String,
+    pub proxy_url: String,
+    pub enabled: bool,
+    pub weight: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_test_status: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_latency_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_error: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_tested_at: Option<DateTime<Utc>>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub struct RoutingProfileSelector {
     #[serde(default)]

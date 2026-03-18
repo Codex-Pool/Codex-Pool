@@ -206,6 +206,7 @@ fn sort_bundle(bundle: &mut ControlPlaneMigrationBundle) {
     bundle.routing_policies.sort_by_key(|item| item.tenant_id);
     bundle.routing_profiles.sort_by_key(|item| item.id);
     bundle.model_routing_policies.sort_by_key(|item| item.id);
+    bundle.outbound_proxy_nodes.sort_by_key(|item| item.id);
     bundle
         .upstream_error_templates
         .sort_by_key(|item| (item.provider.clone(), item.fingerprint.clone()));
@@ -299,6 +300,8 @@ fn sqlite_state_to_bundle(state: SqlitePersistedStoreState) -> ControlPlaneMigra
         routing_profiles: state.routing_profiles.into_values().collect(),
         model_routing_policies: state.model_routing_policies.into_values().collect(),
         model_routing_settings: Some(state.model_routing_settings),
+        outbound_proxy_pool_settings: Some(state.outbound_proxy_pool_settings),
+        outbound_proxy_nodes: state.outbound_proxy_nodes.into_values().collect(),
         upstream_error_learning_settings: Some(state.upstream_error_learning_settings),
         upstream_error_templates: state.upstream_error_templates,
         builtin_error_template_overrides: state.builtin_error_template_overrides,
@@ -440,6 +443,16 @@ fn bundle_to_sqlite_state(bundle: &ControlPlaneMigrationBundle) -> SqlitePersist
             .model_routing_settings
             .clone()
             .unwrap_or_else(crate::edition_migration::default_model_routing_settings),
+        outbound_proxy_pool_settings: bundle
+            .outbound_proxy_pool_settings
+            .clone()
+            .unwrap_or_default(),
+        outbound_proxy_nodes: bundle
+            .outbound_proxy_nodes
+            .iter()
+            .cloned()
+            .map(|item| (item.id, item))
+            .collect(),
         upstream_error_learning_settings: bundle
             .upstream_error_learning_settings
             .clone()
@@ -470,6 +483,7 @@ async fn ensure_postgres_target_empty(pool: &sqlx_postgres::PgPool) -> Result<()
         ("upstream_accounts", "upstream_accounts"),
         ("routing_profiles", "routing_profiles"),
         ("model_routing_policies", "model_routing_policies"),
+        ("outbound_proxy_nodes", "outbound_proxy_nodes"),
     ] {
         let sql = format!("SELECT COUNT(*) FROM {table_name}");
         let count: i64 = sqlx::query_scalar(&sql)
@@ -558,6 +572,8 @@ impl postgres::PostgresStore {
         let routing_profiles = self.list_routing_profiles().await?;
         let model_routing_policies = self.list_model_routing_policies().await?;
         let model_routing_settings = Some(self.model_routing_settings().await?);
+        let outbound_proxy_pool_settings = Some(self.outbound_proxy_pool_settings().await?);
+        let outbound_proxy_nodes = self.list_outbound_proxy_nodes().await?;
         let upstream_error_learning_settings = Some(self.upstream_error_learning_settings().await?);
         let upstream_error_templates = self.list_upstream_error_templates(None).await?;
         let builtin_error_template_overrides =
@@ -771,6 +787,8 @@ impl postgres::PostgresStore {
             routing_profiles,
             model_routing_policies,
             model_routing_settings,
+            outbound_proxy_pool_settings,
+            outbound_proxy_nodes,
             upstream_error_learning_settings,
             upstream_error_templates,
             builtin_error_template_overrides,
@@ -1198,6 +1216,66 @@ impl postgres::PostgresStore {
             .execute(tx.as_mut())
             .await
             .context("failed to import ai_routing_settings")?;
+        }
+
+        if let Some(settings) = &bundle.outbound_proxy_pool_settings {
+            sqlx::query(
+                r#"
+                UPDATE outbound_proxy_pool_settings
+                SET
+                    enabled = $2,
+                    fail_mode = $3,
+                    updated_at = $4
+                WHERE singleton = $1
+                "#,
+            )
+            .bind(true)
+            .bind(settings.enabled)
+            .bind(enum_string(&settings.fail_mode, "outbound proxy fail mode")?)
+            .bind(settings.updated_at)
+            .execute(tx.as_mut())
+            .await
+            .context("failed to import outbound_proxy_pool_settings")?;
+        }
+
+        for node in &bundle.outbound_proxy_nodes {
+            sqlx::query(
+                r#"
+                INSERT INTO outbound_proxy_nodes (
+                    id,
+                    label,
+                    proxy_url,
+                    enabled,
+                    weight,
+                    last_test_status,
+                    last_latency_ms,
+                    last_error,
+                    last_tested_at,
+                    created_at,
+                    updated_at
+                )
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+                "#,
+            )
+            .bind(node.id)
+            .bind(&node.label)
+            .bind(&node.proxy_url)
+            .bind(node.enabled)
+            .bind(i64::from(node.weight))
+            .bind(&node.last_test_status)
+            .bind(
+                node.last_latency_ms
+                    .map(|value| i64::try_from(value))
+                    .transpose()
+                    .context("outbound proxy last_latency_ms overflow")?,
+            )
+            .bind(&node.last_error)
+            .bind(node.last_tested_at)
+            .bind(node.created_at)
+            .bind(node.updated_at)
+            .execute(tx.as_mut())
+            .await
+            .context("failed to import outbound proxy node")?;
         }
 
         if let Some(settings) = &bundle.upstream_error_learning_settings {

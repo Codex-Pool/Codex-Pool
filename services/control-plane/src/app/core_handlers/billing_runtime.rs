@@ -292,97 +292,385 @@ async fn list_admin_logs(
     Ok(Json(AdminLogsResponse { items }))
 }
 
+const ADMIN_PROXY_TEST_TARGET_URL: &str = "https://api.openai.com/v1/models";
+
+fn invalid_proxy_url_error(message: impl Into<String>) -> (StatusCode, Json<ErrorEnvelope>) {
+    (
+        StatusCode::BAD_REQUEST,
+        Json(ErrorEnvelope::new("invalid_proxy_url", message)),
+    )
+}
+
+fn outbound_proxy_not_found_error() -> (StatusCode, Json<ErrorEnvelope>) {
+    (
+        StatusCode::NOT_FOUND,
+        Json(ErrorEnvelope::new("not_found", "resource not found")),
+    )
+}
+
+fn map_outbound_proxy_store_error(err: anyhow::Error) -> (StatusCode, Json<ErrorEnvelope>) {
+    if err
+        .to_string()
+        .to_ascii_lowercase()
+        .contains("outbound proxy node not found")
+    {
+        return outbound_proxy_not_found_error();
+    }
+    internal_error(err)
+}
+
+fn normalize_proxy_url(raw: &str) -> Result<String, (StatusCode, Json<ErrorEnvelope>)> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return Err(invalid_proxy_url_error(
+            "proxy_url must use http/https/socks5 and include host:port",
+        ));
+    }
+
+    let parsed = reqwest::Url::parse(trimmed).map_err(|_| {
+        invalid_proxy_url_error("proxy_url must use http/https/socks5 and include host:port")
+    })?;
+    match parsed.scheme() {
+        "http" | "https" | "socks5" => {}
+        _ => {
+            return Err(invalid_proxy_url_error(
+                "proxy_url must use http/https/socks5 and include host:port",
+            ));
+        }
+    }
+    if parsed.host_str().is_none() || parsed.port().is_none() {
+        return Err(invalid_proxy_url_error(
+            "proxy_url must use http/https/socks5 and include host:port",
+        ));
+    }
+
+    Ok(trimmed.to_string())
+}
+
+fn mask_proxy_url(raw: &str) -> String {
+    let Ok(parsed) = reqwest::Url::parse(raw) else {
+        return raw.to_string();
+    };
+    let mut masked = format!("{}://", parsed.scheme());
+    let username = parsed.username();
+    let has_password = parsed.password().is_some();
+    if !username.is_empty() {
+        masked.push_str(username);
+        if has_password {
+            masked.push_str(":***");
+        }
+        masked.push('@');
+    } else if has_password {
+        masked.push_str("***@");
+    }
+    if let Some(host) = parsed.host_str() {
+        masked.push_str(host);
+    }
+    if let Some(port) = parsed.port() {
+        masked.push(':');
+        masked.push_str(&port.to_string());
+    }
+    if parsed.path() != "/" || raw.ends_with('/') {
+        masked.push_str(parsed.path());
+    }
+    if let Some(query) = parsed.query() {
+        masked.push('?');
+        masked.push_str(query);
+    }
+    if let Some(fragment) = parsed.fragment() {
+        masked.push('#');
+        masked.push_str(fragment);
+    }
+    masked
+}
+
+fn outbound_proxy_node_to_view(
+    node: codex_pool_core::model::OutboundProxyNode,
+) -> codex_pool_core::api::AdminOutboundProxyNodeView {
+    let parsed = reqwest::Url::parse(&node.proxy_url).ok();
+    let scheme = parsed
+        .as_ref()
+        .map(|url| url.scheme().to_string())
+        .unwrap_or_else(|| "invalid".to_string());
+    let has_auth = parsed.as_ref().is_some_and(|url| {
+        !url.username().is_empty() || url.password().is_some()
+    });
+
+    codex_pool_core::api::AdminOutboundProxyNodeView {
+        id: node.id,
+        label: node.label,
+        proxy_url_masked: mask_proxy_url(&node.proxy_url),
+        scheme,
+        has_auth,
+        enabled: node.enabled,
+        weight: node.weight,
+        last_test_status: node.last_test_status,
+        last_latency_ms: node.last_latency_ms,
+        last_error: node.last_error,
+        last_tested_at: node.last_tested_at,
+        updated_at: node.updated_at,
+    }
+}
+
+fn validate_outbound_proxy_mutation(
+    label: &str,
+    weight: Option<u32>,
+) -> Result<(), (StatusCode, Json<ErrorEnvelope>)> {
+    if label.trim().is_empty() {
+        return Err(invalid_request_error("label is required"));
+    }
+    if weight.is_some_and(|value| value == 0) {
+        return Err(invalid_request_error("weight must be greater than zero"));
+    }
+    Ok(())
+}
+
 async fn list_admin_proxies(
     State(state): State<AppState>,
     headers: HeaderMap,
-) -> Result<Json<Vec<AdminProxyItem>>, (StatusCode, Json<ErrorEnvelope>)> {
+) -> Result<Json<codex_pool_core::api::AdminOutboundProxyPoolResponse>, (StatusCode, Json<ErrorEnvelope>)>
+{
     let _principal = require_admin_principal(&state, &headers)?;
-    let proxies = state
-        .admin_proxies
-        .read()
-        .expect("admin_proxies lock poisoned")
-        .clone();
-    Ok(Json(proxies))
+    let settings = state
+        .store
+        .outbound_proxy_pool_settings()
+        .await
+        .map_err(map_outbound_proxy_store_error)?;
+    let nodes = state
+        .store
+        .list_outbound_proxy_nodes()
+        .await
+        .map_err(map_outbound_proxy_store_error)?
+        .into_iter()
+        .map(outbound_proxy_node_to_view)
+        .collect();
+    Ok(Json(codex_pool_core::api::AdminOutboundProxyPoolResponse {
+        settings,
+        nodes,
+    }))
+}
+
+async fn create_admin_outbound_proxy_node(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(mut req): Json<codex_pool_core::api::CreateOutboundProxyNodeRequest>,
+) -> Result<Json<codex_pool_core::api::AdminOutboundProxyNodeMutationResponse>, (StatusCode, Json<ErrorEnvelope>)>
+{
+    let _principal = require_admin_principal(&state, &headers)?;
+    validate_outbound_proxy_mutation(&req.label, req.weight)?;
+    req.proxy_url = normalize_proxy_url(&req.proxy_url)?;
+    let node = state
+        .store
+        .create_outbound_proxy_node(req)
+        .await
+        .map_err(map_outbound_proxy_store_error)?;
+    push_admin_log(
+        &state,
+        "info",
+        "admin.proxies.create",
+        format!("created outbound proxy node {}", node.id),
+    );
+    Ok(Json(
+        codex_pool_core::api::AdminOutboundProxyNodeMutationResponse {
+            node: outbound_proxy_node_to_view(node),
+        },
+    ))
+}
+
+async fn update_admin_outbound_proxy_settings(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(req): Json<codex_pool_core::api::UpdateOutboundProxyPoolSettingsRequest>,
+) -> Result<Json<codex_pool_core::api::AdminOutboundProxyPoolSettingsResponse>, (StatusCode, Json<ErrorEnvelope>)>
+{
+    let _principal = require_admin_principal(&state, &headers)?;
+    let settings = state
+        .store
+        .update_outbound_proxy_pool_settings(req)
+        .await
+        .map_err(map_outbound_proxy_store_error)?;
+    push_admin_log(
+        &state,
+        "info",
+        "admin.proxies.settings.update",
+        format!("updated outbound proxy settings enabled={}", settings.enabled),
+    );
+    Ok(Json(
+        codex_pool_core::api::AdminOutboundProxyPoolSettingsResponse { settings },
+    ))
+}
+
+async fn update_admin_outbound_proxy_node(
+    Path(proxy_id): Path<Uuid>,
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(mut req): Json<codex_pool_core::api::UpdateOutboundProxyNodeRequest>,
+) -> Result<Json<codex_pool_core::api::AdminOutboundProxyNodeMutationResponse>, (StatusCode, Json<ErrorEnvelope>)>
+{
+    let _principal = require_admin_principal(&state, &headers)?;
+    if let Some(label) = req.label.as_ref() {
+        validate_outbound_proxy_mutation(label, req.weight)?;
+    } else if req.weight.is_some_and(|value| value == 0) {
+        return Err(invalid_request_error("weight must be greater than zero"));
+    }
+    if let Some(proxy_url) = req.proxy_url.as_ref() {
+        req.proxy_url = Some(normalize_proxy_url(proxy_url)?);
+    }
+    let node = state
+        .store
+        .update_outbound_proxy_node(proxy_id, req)
+        .await
+        .map_err(map_outbound_proxy_store_error)?;
+    push_admin_log(
+        &state,
+        "info",
+        "admin.proxies.update",
+        format!("updated outbound proxy node {}", node.id),
+    );
+    Ok(Json(
+        codex_pool_core::api::AdminOutboundProxyNodeMutationResponse {
+            node: outbound_proxy_node_to_view(node),
+        },
+    ))
+}
+
+async fn delete_admin_outbound_proxy_node(
+    Path(proxy_id): Path<Uuid>,
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<StatusCode, (StatusCode, Json<ErrorEnvelope>)> {
+    let _principal = require_admin_principal(&state, &headers)?;
+    state
+        .store
+        .delete_outbound_proxy_node(proxy_id)
+        .await
+        .map_err(map_outbound_proxy_store_error)?;
+    push_admin_log(
+        &state,
+        "info",
+        "admin.proxies.delete",
+        format!("deleted outbound proxy node {proxy_id}"),
+    );
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn run_outbound_proxy_connectivity_test(
+    node: &codex_pool_core::model::OutboundProxyNode,
+) -> (Option<String>, Option<u64>, Option<String>, Option<DateTime<Utc>>) {
+    if !node.enabled {
+        return (
+            Some("skipped".to_string()),
+            None,
+            Some("proxy disabled".to_string()),
+            Some(Utc::now()),
+        );
+    }
+
+    let started = std::time::Instant::now();
+    let client = match reqwest::Client::builder()
+        .timeout(Duration::from_secs(5))
+        .proxy(match reqwest::Proxy::all(&node.proxy_url) {
+            Ok(proxy) => proxy,
+            Err(err) => {
+                return (
+                    Some("error".to_string()),
+                    None,
+                    Some(err.to_string()),
+                    Some(Utc::now()),
+                )
+            }
+        })
+        .build()
+    {
+        Ok(client) => client,
+        Err(err) => {
+            return (
+                Some("error".to_string()),
+                None,
+                Some(err.to_string()),
+                Some(Utc::now()),
+            )
+        }
+    };
+
+    match client.get(ADMIN_PROXY_TEST_TARGET_URL).send().await {
+        Ok(response) => {
+            let latency_ms = Some(started.elapsed().as_millis() as u64);
+            if response.status().as_u16() == 407 || response.status().is_server_error() {
+                (
+                    Some("error".to_string()),
+                    latency_ms,
+                    Some(format!("http {}", response.status())),
+                    Some(Utc::now()),
+                )
+            } else {
+                (Some("ok".to_string()), latency_ms, None, Some(Utc::now()))
+            }
+        }
+        Err(err) => (
+            Some("error".to_string()),
+            Some(started.elapsed().as_millis() as u64),
+            Some(err.to_string()),
+            Some(Utc::now()),
+        ),
+    }
 }
 
 async fn test_admin_proxies(
     State(state): State<AppState>,
     headers: HeaderMap,
     Query(query): Query<AdminProxyTestRequest>,
-) -> Result<Json<AdminProxyTestResponse>, (StatusCode, Json<ErrorEnvelope>)> {
+) -> Result<Json<codex_pool_core::api::AdminOutboundProxyTestResponse>, (StatusCode, Json<ErrorEnvelope>)>
+{
     let _principal = require_admin_principal(&state, &headers)?;
-    let requested_id = query.proxy_id;
-
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(3))
-        .build()
-        .map_err(|err| internal_error(err.into()))?;
-
-    let mut tested = 0_usize;
-    let mut next_proxies = {
-        state
-            .admin_proxies
-            .read()
-            .expect("admin_proxies lock poisoned")
-            .clone()
-    };
-    for proxy in next_proxies.iter_mut() {
-        if let Some(proxy_id) = requested_id.as_deref() {
-            if proxy.id != proxy_id {
-                continue;
-            }
-        }
-        tested = tested.saturating_add(1);
-
-        if !proxy.enabled {
-            proxy.last_test_status = Some("skipped".to_string());
-            proxy.last_error = Some("proxy disabled".to_string());
-            proxy.last_latency_ms = None;
-            proxy.updated_at = Utc::now();
-            continue;
-        }
-
-        let test_url = format!("{}/health", proxy.base_url.trim_end_matches('/'));
-        let started = std::time::Instant::now();
-        match client.get(&test_url).send().await {
-            Ok(response) if response.status().is_success() => {
-                proxy.last_test_status = Some("ok".to_string());
-                proxy.last_error = None;
-                proxy.last_latency_ms = Some(started.elapsed().as_millis() as u64);
-                proxy.updated_at = Utc::now();
-            }
-            Ok(response) => {
-                proxy.last_test_status = Some("error".to_string());
-                proxy.last_error = Some(format!("http {}", response.status()));
-                proxy.last_latency_ms = Some(started.elapsed().as_millis() as u64);
-                proxy.updated_at = Utc::now();
-            }
-            Err(err) => {
-                proxy.last_test_status = Some("error".to_string());
-                proxy.last_error = Some(err.to_string());
-                proxy.last_latency_ms = Some(started.elapsed().as_millis() as u64);
-                proxy.updated_at = Utc::now();
-            }
+    let requested_id = query
+        .proxy_id
+        .as_deref()
+        .map(Uuid::parse_str)
+        .transpose()
+        .map_err(|_| invalid_request_error("proxy_id is invalid"))?;
+    let mut candidates = state
+        .store
+        .list_outbound_proxy_nodes()
+        .await
+        .map_err(map_outbound_proxy_store_error)?;
+    if let Some(proxy_id) = requested_id {
+        candidates.retain(|node| node.id == proxy_id);
+        if candidates.is_empty() {
+            return Err(outbound_proxy_not_found_error());
         }
     }
 
-    {
-        let mut proxies = state
-            .admin_proxies
-            .write()
-            .expect("admin_proxies lock poisoned");
-        *proxies = next_proxies.clone();
+    let tested = candidates.len();
+    let mut results = Vec::with_capacity(candidates.len());
+    for node in candidates {
+        let (last_test_status, last_latency_ms, last_error, last_tested_at) =
+            run_outbound_proxy_connectivity_test(&node).await;
+        let updated = state
+            .store
+            .record_outbound_proxy_test_result(
+                node.id,
+                last_test_status,
+                last_latency_ms,
+                last_error,
+                last_tested_at,
+            )
+            .await
+            .map_err(map_outbound_proxy_store_error)?;
+        results.push(outbound_proxy_node_to_view(updated));
     }
-    let results = next_proxies;
 
     push_admin_log(
         &state,
         "info",
         "admin.proxies.test",
-        format!("tested {tested} proxy nodes"),
+        format!("tested {tested} outbound proxy nodes"),
     );
 
-    Ok(Json(AdminProxyTestResponse { tested, results }))
+    Ok(Json(codex_pool_core::api::AdminOutboundProxyTestResponse {
+        tested,
+        results,
+    }))
 }
 
 async fn list_admin_api_keys(
@@ -505,15 +793,28 @@ async fn list_admin_models(
     headers: HeaderMap,
 ) -> Result<Json<AdminModelsResponse>, (StatusCode, Json<ErrorEnvelope>)> {
     let _principal = require_admin_principal(&state, &headers)?;
-    let tenant_auth = require_tenant_auth_service(&state)?;
-    let official_catalog = tenant_auth
-        .admin_list_openai_model_catalog()
-        .await
-        .map_err(map_tenant_error)?;
-    let pricing_overrides = tenant_auth
-        .admin_list_model_pricing()
-        .await
-        .map_err(map_tenant_error)?;
+    let (official_catalog, pricing_overrides) = if let Some(tenant_auth) =
+        state.tenant_auth_service.as_ref()
+    {
+        let official_catalog = tenant_auth
+            .admin_list_openai_model_catalog()
+            .await
+            .map_err(map_tenant_error)?;
+        let pricing_overrides = tenant_auth
+            .admin_list_model_pricing()
+            .await
+            .map_err(map_tenant_error)?;
+        (official_catalog, pricing_overrides)
+    } else if let Some(sqlite_repo) = state.sqlite_usage_repo.as_ref() {
+        let official_catalog = sqlite_repo
+            .list_openai_model_catalog()
+            .await
+            .map_err(internal_error)?;
+        let pricing_overrides = sqlite_repo.list_model_pricing().await.map_err(internal_error)?;
+        (official_catalog, pricing_overrides)
+    } else {
+        return Err(tenant_service_unavailable_error());
+    };
     Ok(Json(
         build_admin_models_response(&state, official_catalog, pricing_overrides).await,
     ))
@@ -525,7 +826,6 @@ async fn probe_admin_models(
     Json(req): Json<AdminModelsProbeRequest>,
 ) -> Result<Json<AdminModelsResponse>, (StatusCode, Json<ErrorEnvelope>)> {
     let _principal = require_admin_principal(&state, &headers)?;
-    let tenant_auth = require_tenant_auth_service(&state)?;
     run_model_probe_cycle(&state, req.models, req.force, "manual")
         .await
         .map_err(|err| {
@@ -540,14 +840,28 @@ async fn probe_admin_models(
                 Json(ErrorEnvelope::new(code, "model probe failed")),
             )
         })?;
-    let official_catalog = tenant_auth
-        .admin_list_openai_model_catalog()
-        .await
-        .map_err(map_tenant_error)?;
-    let pricing_overrides = tenant_auth
-        .admin_list_model_pricing()
-        .await
-        .map_err(map_tenant_error)?;
+    let (official_catalog, pricing_overrides) = if let Some(tenant_auth) =
+        state.tenant_auth_service.as_ref()
+    {
+        let official_catalog = tenant_auth
+            .admin_list_openai_model_catalog()
+            .await
+            .map_err(map_tenant_error)?;
+        let pricing_overrides = tenant_auth
+            .admin_list_model_pricing()
+            .await
+            .map_err(map_tenant_error)?;
+        (official_catalog, pricing_overrides)
+    } else if let Some(sqlite_repo) = state.sqlite_usage_repo.as_ref() {
+        let official_catalog = sqlite_repo
+            .list_openai_model_catalog()
+            .await
+            .map_err(internal_error)?;
+        let pricing_overrides = sqlite_repo.list_model_pricing().await.map_err(internal_error)?;
+        (official_catalog, pricing_overrides)
+    } else {
+        return Err(tenant_service_unavailable_error());
+    };
     Ok(Json(
         build_admin_models_response(&state, official_catalog, pricing_overrides).await,
     ))
@@ -558,19 +872,15 @@ async fn sync_openai_admin_models_catalog(
     headers: HeaderMap,
 ) -> Result<Json<crate::tenant::OpenAiModelsSyncResponse>, (StatusCode, Json<ErrorEnvelope>)> {
     let principal = require_admin_principal(&state, &headers)?;
-    let tenant_auth = require_tenant_auth_service(&state)?;
-    let response = tenant_auth
-        .admin_sync_openai_models_catalog()
+    let selection = state
+        .outbound_proxy_runtime
+        .select_http_client(Duration::from_secs(20))
         .await
         .map_err(|err| {
-            tracing::warn!(error = %err, "openai catalog sync failed");
-            {
-                let mut last_error = state
-                    .model_catalog_last_error
-                    .write()
-                    .expect("model_catalog_last_error lock poisoned");
-                *last_error = Some(err.to_string());
-            }
+            tracing::warn!(
+                error = %err,
+                "failed to select outbound proxy client for openai catalog sync"
+            );
             (
                 StatusCode::BAD_GATEWAY,
                 Json(ErrorEnvelope::new(
@@ -579,6 +889,51 @@ async fn sync_openai_admin_models_catalog(
                 )),
             )
         })?;
+    let response = if let Some(tenant_auth) = state.tenant_auth_service.as_ref() {
+        tenant_auth
+            .admin_sync_openai_models_catalog_with_client(Some(selection.client.clone()))
+            .await
+            .map_err(|err| {
+                tracing::warn!(error = %err, "openai catalog sync failed");
+                {
+                    let mut last_error = state
+                        .model_catalog_last_error
+                        .write()
+                        .expect("model_catalog_last_error lock poisoned");
+                    *last_error = Some(err.to_string());
+                }
+                (
+                    StatusCode::BAD_GATEWAY,
+                    Json(ErrorEnvelope::new(
+                        "openai_catalog_sync_failed",
+                        "openai catalog sync failed",
+                    )),
+                )
+            })?
+    } else if let Some(sqlite_repo) = state.sqlite_usage_repo.as_ref() {
+        sqlite_repo
+            .sync_openai_model_catalog_with_client(Some(selection.client.clone()))
+            .await
+            .map_err(|err| {
+                tracing::warn!(error = %err, "sqlite openai catalog sync failed");
+                {
+                    let mut last_error = state
+                        .model_catalog_last_error
+                        .write()
+                        .expect("model_catalog_last_error lock poisoned");
+                    *last_error = Some(err.to_string());
+                }
+                (
+                    StatusCode::BAD_GATEWAY,
+                    Json(ErrorEnvelope::new(
+                        "openai_catalog_sync_failed",
+                        "openai catalog sync failed",
+                    )),
+                )
+            })?
+    } else {
+        return Err(tenant_service_unavailable_error());
+    };
     {
         let mut last_error = state
             .model_catalog_last_error

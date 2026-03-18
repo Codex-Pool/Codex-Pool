@@ -6,23 +6,26 @@ use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use chrono::{DateTime, Duration, Utc};
 use codex_pool_core::api::{
-    CreateApiKeyRequest, CreateApiKeyResponse, CreateTenantRequest, CreateUpstreamAccountRequest,
-    DataPlaneSnapshot, DataPlaneSnapshotEventsResponse, ImportOAuthRefreshTokenRequest,
-    OAuthAccountStatusResponse, OAuthFamilyActionResponse, OAuthRateLimitRefreshErrorSummary,
-    OAuthRateLimitRefreshJobStatus, OAuthRateLimitRefreshJobSummary, OAuthRateLimitSnapshot,
-    OAuthRefreshStatus, SessionCredentialKind, UpdateAiErrorLearningSettingsRequest,
-    UpsertModelRoutingPolicyRequest, UpsertRetryPolicyRequest, UpsertRoutingPolicyRequest,
-    UpsertRoutingProfileRequest, UpsertStreamRetryPolicyRequest,
-    UpdateModelRoutingSettingsRequest, ValidateOAuthRefreshTokenRequest,
+    CreateApiKeyRequest, CreateApiKeyResponse, CreateOutboundProxyNodeRequest, CreateTenantRequest,
+    CreateUpstreamAccountRequest, DataPlaneSnapshot, DataPlaneSnapshotEventsResponse,
+    ImportOAuthRefreshTokenRequest, OAuthAccountStatusResponse, OAuthFamilyActionResponse,
+    OAuthRateLimitRefreshErrorSummary, OAuthRateLimitRefreshJobStatus,
+    OAuthRateLimitRefreshJobSummary, OAuthRateLimitSnapshot, OAuthRefreshStatus,
+    SessionCredentialKind, UpdateAiErrorLearningSettingsRequest,
+    UpdateModelRoutingSettingsRequest, UpdateOutboundProxyNodeRequest,
+    UpdateOutboundProxyPoolSettingsRequest, UpsertModelRoutingPolicyRequest,
+    UpsertRetryPolicyRequest, UpsertRoutingPolicyRequest, UpsertRoutingProfileRequest,
+    UpsertStreamRetryPolicyRequest, ValidateOAuthRefreshTokenRequest,
     ValidateOAuthRefreshTokenResponse,
 };
 use codex_pool_core::model::{
     default_builtin_error_templates, AccountRoutingTraits, AiErrorLearningSettings, ApiKey,
     BuiltinErrorTemplateKind, BuiltinErrorTemplateOverrideRecord, BuiltinErrorTemplateRecord,
-    ModelRoutingSettings, ModelRoutingTriggerMode, CompiledModelRoutingPolicy,
-    CompiledRoutingPlan, CompiledRoutingProfile, LocalizedErrorTemplates, ModelRoutingPolicy,
-    RoutingPlanVersion, RoutingPolicy, RoutingProfile, RoutingStrategy, Tenant, UpstreamAccount,
-    UpstreamAuthProvider, UpstreamErrorTemplateRecord, UpstreamErrorTemplateStatus, UpstreamMode,
+    CompiledModelRoutingPolicy, CompiledRoutingPlan, CompiledRoutingProfile,
+    LocalizedErrorTemplates, ModelRoutingPolicy, ModelRoutingSettings, ModelRoutingTriggerMode,
+    OutboundProxyNode, OutboundProxyPoolSettings, RoutingPlanVersion, RoutingPolicy,
+    RoutingProfile, RoutingStrategy, Tenant, UpstreamAccount, UpstreamAuthProvider,
+    UpstreamErrorTemplateRecord, UpstreamErrorTemplateStatus, UpstreamMode,
 };
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
@@ -460,6 +463,44 @@ pub trait ControlPlaneStore: Send + Sync {
     async fn list_api_keys(&self) -> Result<Vec<ApiKey>>;
     async fn set_api_key_enabled(&self, _api_key_id: Uuid, _enabled: bool) -> Result<ApiKey> {
         Err(anyhow!("api key update is not implemented"))
+    }
+    async fn outbound_proxy_pool_settings(&self) -> Result<OutboundProxyPoolSettings> {
+        Err(anyhow!("outbound proxy pool settings repository is not implemented"))
+    }
+    async fn update_outbound_proxy_pool_settings(
+        &self,
+        _req: UpdateOutboundProxyPoolSettingsRequest,
+    ) -> Result<OutboundProxyPoolSettings> {
+        Err(anyhow!("outbound proxy pool settings repository is not implemented"))
+    }
+    async fn list_outbound_proxy_nodes(&self) -> Result<Vec<OutboundProxyNode>> {
+        Err(anyhow!("outbound proxy node repository is not implemented"))
+    }
+    async fn create_outbound_proxy_node(
+        &self,
+        _req: CreateOutboundProxyNodeRequest,
+    ) -> Result<OutboundProxyNode> {
+        Err(anyhow!("outbound proxy node repository is not implemented"))
+    }
+    async fn update_outbound_proxy_node(
+        &self,
+        _node_id: Uuid,
+        _req: UpdateOutboundProxyNodeRequest,
+    ) -> Result<OutboundProxyNode> {
+        Err(anyhow!("outbound proxy node repository is not implemented"))
+    }
+    async fn delete_outbound_proxy_node(&self, _node_id: Uuid) -> Result<()> {
+        Err(anyhow!("outbound proxy node repository is not implemented"))
+    }
+    async fn record_outbound_proxy_test_result(
+        &self,
+        _node_id: Uuid,
+        _last_test_status: Option<String>,
+        _last_latency_ms: Option<u64>,
+        _last_error: Option<String>,
+        _last_tested_at: Option<DateTime<Utc>>,
+    ) -> Result<OutboundProxyNode> {
+        Err(anyhow!("outbound proxy node repository is not implemented"))
     }
     async fn validate_api_key(&self, token: &str) -> Result<Option<ValidatedPrincipal>>;
     async fn create_upstream_account(
@@ -976,6 +1017,8 @@ pub struct InMemoryStore {
     account_model_support: Arc<RwLock<HashMap<Uuid, AccountModelSupportRecord>>>,
     oauth_rate_limit_caches: Arc<RwLock<HashMap<Uuid, OAuthRateLimitCacheRecord>>>,
     oauth_rate_limit_refresh_jobs: Arc<RwLock<HashMap<Uuid, OAuthRateLimitRefreshJobSummary>>>,
+    outbound_proxy_pool_settings: Arc<RwLock<OutboundProxyPoolSettings>>,
+    outbound_proxy_nodes: Arc<RwLock<HashMap<Uuid, OutboundProxyNode>>>,
     policies: Arc<RwLock<HashMap<Uuid, RoutingPolicy>>>,
     routing_profiles: Arc<RwLock<HashMap<Uuid, RoutingProfile>>>,
     model_routing_policies: Arc<RwLock<HashMap<Uuid, ModelRoutingPolicy>>>,

@@ -1575,6 +1575,64 @@ impl PostgresStore {
 
         sqlx::query(
             r#"
+            CREATE TABLE IF NOT EXISTS outbound_proxy_pool_settings (
+                singleton BOOLEAN PRIMARY KEY,
+                enabled BOOLEAN NOT NULL DEFAULT false,
+                fail_mode TEXT NOT NULL DEFAULT 'strict_proxy',
+                updated_at TIMESTAMPTZ NOT NULL
+            )
+            "#,
+        )
+        .execute(tx.as_mut())
+        .await
+        .context("failed to create outbound_proxy_pool_settings table")?;
+
+        sqlx::query(
+            r#"
+            INSERT INTO outbound_proxy_pool_settings (singleton, enabled, fail_mode, updated_at)
+            VALUES ($1, false, 'strict_proxy', now())
+            ON CONFLICT (singleton) DO NOTHING
+            "#,
+        )
+        .bind(SNAPSHOT_SINGLETON_ROW)
+        .execute(tx.as_mut())
+        .await
+        .context("failed to initialize outbound_proxy_pool_settings row")?;
+
+        sqlx::query(
+            r#"
+            CREATE TABLE IF NOT EXISTS outbound_proxy_nodes (
+                id UUID PRIMARY KEY,
+                label TEXT NOT NULL,
+                proxy_url TEXT NOT NULL,
+                enabled BOOLEAN NOT NULL DEFAULT true,
+                weight BIGINT NOT NULL DEFAULT 1,
+                last_test_status TEXT NULL,
+                last_latency_ms BIGINT NULL,
+                last_error TEXT NULL,
+                last_tested_at TIMESTAMPTZ NULL,
+                created_at TIMESTAMPTZ NOT NULL,
+                updated_at TIMESTAMPTZ NOT NULL,
+                CONSTRAINT chk_outbound_proxy_nodes_weight_positive CHECK (weight > 0)
+            )
+            "#,
+        )
+        .execute(tx.as_mut())
+        .await
+        .context("failed to create outbound_proxy_nodes table")?;
+
+        sqlx::query(
+            r#"
+            CREATE INDEX IF NOT EXISTS idx_outbound_proxy_nodes_created_at
+            ON outbound_proxy_nodes (created_at ASC, id ASC)
+            "#,
+        )
+        .execute(tx.as_mut())
+        .await
+        .context("failed to create outbound_proxy_nodes created_at index")?;
+
+        sqlx::query(
+            r#"
             CREATE TABLE IF NOT EXISTS upstream_error_learning_settings (
                 singleton BOOLEAN PRIMARY KEY,
                 enabled BOOLEAN NOT NULL DEFAULT false,

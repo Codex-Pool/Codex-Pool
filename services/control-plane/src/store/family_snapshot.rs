@@ -363,6 +363,9 @@ impl InMemoryStore {
         let account_traits_map = self.build_account_routing_traits(&accounts);
         let compiled_routing_plan = self.compile_routing_plan_from_state(&accounts, &account_traits_map);
         let ai_error_learning_settings = self.upstream_error_learning_settings.read().unwrap().clone();
+        let outbound_proxy_pool_settings =
+            self.outbound_proxy_pool_settings.read().unwrap().clone();
+        let outbound_proxy_nodes = self.list_outbound_proxy_nodes_inner();
         let mut approved_upstream_error_templates = self
             .upstream_error_templates
             .read()
@@ -385,6 +388,8 @@ impl InMemoryStore {
             ai_error_learning_settings,
             approved_upstream_error_templates,
             builtin_error_templates: self.list_builtin_error_templates_inner(),
+            outbound_proxy_pool_settings,
+            outbound_proxy_nodes,
             issued_at: Utc::now(),
         })
     }

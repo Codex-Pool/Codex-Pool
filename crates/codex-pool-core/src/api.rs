@@ -6,9 +6,10 @@ use uuid::Uuid;
 use crate::model::{
     AccountRoutingTraits, AiErrorLearningSettings, ApiKey, BuiltinErrorTemplateRecord,
     CompiledRoutingPlan, LocalizedErrorTemplates, ModelRoutingPolicy, ModelRoutingSettings,
-    ModelRoutingTriggerMode, RoutingPlanVersion, RoutingPolicy, RoutingProfile,
-    RoutingProfileSelector, RoutingStrategy, UpstreamAccount, UpstreamAuthProvider,
-    UpstreamErrorAction, UpstreamErrorRetryScope, UpstreamErrorTemplateRecord, UpstreamMode,
+    ModelRoutingTriggerMode, OutboundProxyNode, OutboundProxyPoolSettings, ProxyFailMode,
+    RoutingPlanVersion, RoutingPolicy, RoutingProfile, RoutingProfileSelector, RoutingStrategy,
+    UpstreamAccount, UpstreamAuthProvider, UpstreamErrorAction, UpstreamErrorRetryScope,
+    UpstreamErrorTemplateRecord, UpstreamMode,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -33,6 +34,77 @@ pub struct CreateUpstreamAccountRequest {
     pub auth_provider: Option<UpstreamAuthProvider>,
     pub enabled: Option<bool>,
     pub priority: Option<i32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CreateOutboundProxyNodeRequest {
+    pub label: String,
+    pub proxy_url: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub enabled: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub weight: Option<u32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct UpdateOutboundProxyNodeRequest {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub proxy_url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub enabled: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub weight: Option<u32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UpdateOutboundProxyPoolSettingsRequest {
+    pub enabled: bool,
+    pub fail_mode: ProxyFailMode,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct AdminOutboundProxyNodeView {
+    pub id: Uuid,
+    pub label: String,
+    pub proxy_url_masked: String,
+    pub scheme: String,
+    pub has_auth: bool,
+    pub enabled: bool,
+    pub weight: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_test_status: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_latency_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_error: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_tested_at: Option<DateTime<Utc>>,
+    pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct AdminOutboundProxyPoolResponse {
+    pub settings: OutboundProxyPoolSettings,
+    #[serde(default)]
+    pub nodes: Vec<AdminOutboundProxyNodeView>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct AdminOutboundProxyNodeMutationResponse {
+    pub node: AdminOutboundProxyNodeView,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct AdminOutboundProxyPoolSettingsResponse {
+    pub settings: OutboundProxyPoolSettings,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct AdminOutboundProxyTestResponse {
+    pub tested: usize,
+    pub results: Vec<AdminOutboundProxyNodeView>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -205,6 +277,10 @@ pub struct DataPlaneSnapshot {
     pub approved_upstream_error_templates: Vec<UpstreamErrorTemplateRecord>,
     #[serde(default)]
     pub builtin_error_templates: Vec<BuiltinErrorTemplateRecord>,
+    #[serde(default)]
+    pub outbound_proxy_pool_settings: OutboundProxyPoolSettings,
+    #[serde(default)]
+    pub outbound_proxy_nodes: Vec<OutboundProxyNode>,
     pub issued_at: DateTime<Utc>,
 }
 
@@ -231,6 +307,10 @@ pub struct DataPlaneSnapshotEvent {
     pub approved_upstream_error_templates: Option<Vec<UpstreamErrorTemplateRecord>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub builtin_error_templates: Option<Vec<BuiltinErrorTemplateRecord>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub outbound_proxy_pool_settings: Option<OutboundProxyPoolSettings>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub outbound_proxy_nodes: Option<Vec<OutboundProxyNode>>,
     pub created_at: DateTime<Utc>,
 }
 

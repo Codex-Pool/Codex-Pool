@@ -281,6 +281,22 @@ impl PostgresStore {
             } else {
                 None
             };
+            let outbound_proxy_pool_settings = if matches!(
+                event_type,
+                DataPlaneSnapshotEventType::RoutingPlanRefresh
+            ) {
+                Some(self.load_outbound_proxy_pool_settings_inner().await?)
+            } else {
+                None
+            };
+            let outbound_proxy_nodes = if matches!(
+                event_type,
+                DataPlaneSnapshotEventType::RoutingPlanRefresh
+            ) {
+                Some(self.list_outbound_proxy_nodes_inner().await?)
+            } else {
+                None
+            };
             events.push(DataPlaneSnapshotEvent {
                 id,
                 event_type,
@@ -290,6 +306,8 @@ impl PostgresStore {
                 ai_error_learning_settings,
                 approved_upstream_error_templates,
                 builtin_error_templates,
+                outbound_proxy_pool_settings,
+                outbound_proxy_nodes,
                 created_at: row.try_get::<DateTime<Utc>, _>("created_at")?,
             });
         }

@@ -7,12 +7,15 @@ use anyhow::anyhow;
 use codex_pool_core::api::ProductEdition;
 use control_plane::admin_auth::AdminAuthService;
 use control_plane::app::{
-    build_app_with_store_ttl_usage_repos_import_store_and_admin_auth,
+    build_app_with_store_ttl_usage_repos_import_store_admin_auth_and_sqlite_repo_and_proxy_runtime,
     codex_oauth_callback_listen_mode_from_env, CodexOAuthCallbackListenMode,
     DEFAULT_AUTH_VALIDATE_CACHE_TTL_SEC,
 };
 use control_plane::config::ControlPlaneConfig;
+use control_plane::crypto::CredentialCipher;
 use control_plane::import_jobs::{InMemoryOAuthImportJobStore, PostgresOAuthImportJobStore};
+use control_plane::oauth::OpenAiOAuthClient;
+use control_plane::outbound_proxy_runtime::OutboundProxyRuntime;
 use control_plane::single_binary::{
     apply_single_binary_runtime_env_defaults, merge_personal_single_binary_app,
     merge_single_binary_app,
@@ -399,6 +402,8 @@ async fn main() -> anyhow::Result<()> {
         );
     }
 
+    let outbound_proxy_runtime = Arc::new(OutboundProxyRuntime::new());
+
     let (store, import_job_store, admin_auth, personal_runtime_store): (
         Arc<dyn ControlPlaneStore>,
         Arc<dyn control_plane::import_jobs::OAuthImportJobStore>,
@@ -407,7 +412,16 @@ async fn main() -> anyhow::Result<()> {
     ) = match (edition, config.database_url.as_deref()) {
         (ProductEdition::Personal, raw_database_url) => {
             let database_url = personal_sqlite_database_url(raw_database_url)?;
-            let sqlite_store = Arc::new(SqliteBackedStore::connect(&database_url).await?);
+            let sqlite_store = Arc::new(
+                SqliteBackedStore::connect_with_oauth(
+                    &database_url,
+                    Arc::new(OpenAiOAuthClient::from_env_with_outbound_proxy_runtime(
+                        outbound_proxy_runtime.clone(),
+                    )),
+                    CredentialCipher::from_env().unwrap_or(None),
+                )
+                .await?,
+            );
             let admin_auth = AdminAuthService::from_env()?;
             (
                 sqlite_store.clone(),
@@ -417,7 +431,14 @@ async fn main() -> anyhow::Result<()> {
             )
         }
         (_, Some(database_url)) => {
-            let postgres_store = PostgresStore::connect(database_url).await?;
+            let postgres_store = PostgresStore::connect_with_oauth(
+                database_url,
+                Arc::new(OpenAiOAuthClient::from_env_with_outbound_proxy_runtime(
+                    outbound_proxy_runtime.clone(),
+                )),
+                CredentialCipher::from_env().unwrap_or(None),
+            )
+            .await?;
             let import_store =
                 PostgresOAuthImportJobStore::new(postgres_store.clone_pool()).await?;
             let admin_auth = AdminAuthService::from_env_with_postgres(postgres_store.clone_pool())?;
@@ -429,13 +450,23 @@ async fn main() -> anyhow::Result<()> {
                 None,
             )
         }
-        (_, None) => (
-            Arc::new(InMemoryStore::default()),
-            Arc::new(InMemoryOAuthImportJobStore::default()),
-            AdminAuthService::from_env()?,
-            None,
-        ),
+        (_, None) => {
+            let in_memory_store: Arc<dyn ControlPlaneStore> = Arc::new(InMemoryStore::new_with_oauth(
+                Arc::new(OpenAiOAuthClient::from_env_with_outbound_proxy_runtime(
+                    outbound_proxy_runtime.clone(),
+                )),
+                CredentialCipher::from_env().unwrap_or(None),
+            ));
+            (
+                in_memory_store,
+                Arc::new(InMemoryOAuthImportJobStore::default()),
+                AdminAuthService::from_env()?,
+                None,
+            )
+        }
     };
+
+    outbound_proxy_runtime.attach_store(store.clone());
 
     match store.recover_oauth_rate_limit_refresh_jobs().await {
         Ok(recovered) if recovered > 0 => {
@@ -831,13 +862,15 @@ async fn main() -> anyhow::Result<()> {
         ProductEdition::Business => None,
     };
 
-    let app = build_app_with_store_ttl_usage_repos_import_store_and_admin_auth(
+    let app = build_app_with_store_ttl_usage_repos_import_store_admin_auth_and_sqlite_repo_and_proxy_runtime(
         store,
         config.auth_validate_cache_ttl_sec,
         usage_repo,
         usage_ingest_repo,
         import_job_store,
         admin_auth,
+        personal_sqlite_usage_repo.clone(),
+        outbound_proxy_runtime.clone(),
     );
     let app = match edition {
         ProductEdition::Personal => {

@@ -53,7 +53,9 @@ use crate::import_jobs::{
 };
 use crate::store::{ControlPlaneStore, InMemoryStore};
 use crate::tenant::TenantAuthService;
-use crate::usage::{clickhouse_repo::UsageQueryRepository, UsageIngestRepository};
+use crate::usage::{
+    clickhouse_repo::UsageQueryRepository, sqlite_repo::SqliteUsageRepo, UsageIngestRepository,
+};
 
 #[path = "i18n.rs"]
 mod i18n;
@@ -163,30 +165,9 @@ struct AdminLogsResponse {
     items: Vec<AdminLogEntry>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct AdminProxyItem {
-    id: String,
-    label: String,
-    base_url: String,
-    enabled: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    last_test_status: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    last_latency_ms: Option<u64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    last_error: Option<String>,
-    updated_at: DateTime<Utc>,
-}
-
 #[derive(Debug, Clone, Deserialize)]
 struct AdminProxyTestRequest {
     proxy_id: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-struct AdminProxyTestResponse {
-    tested: usize,
-    results: Vec<AdminProxyItem>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -611,6 +592,7 @@ pub struct AppState {
     pub usage_repo: Option<Arc<dyn UsageQueryRepository>>,
     pub usage_ingest_repo: Option<Arc<dyn UsageIngestRepository>>,
     pub tenant_auth_service: Option<Arc<TenantAuthService>>,
+    pub sqlite_usage_repo: Option<Arc<SqliteUsageRepo>>,
     pub auth_validate_cache_ttl_sec: u64,
     pub system_capabilities: SystemCapabilitiesResponse,
     pub admin_auth: AdminAuthService,
@@ -619,7 +601,6 @@ pub struct AppState {
     pub started_at: DateTime<Utc>,
     runtime_config: Arc<std::sync::RwLock<RuntimeConfigSnapshot>>,
     admin_logs: Arc<std::sync::RwLock<VecDeque<AdminLogEntry>>>,
-    admin_proxies: Arc<std::sync::RwLock<Vec<AdminProxyItem>>>,
     model_catalog_last_error: Arc<std::sync::RwLock<Option<String>>>,
     model_probe_cache: Arc<std::sync::RwLock<ModelProbeCache>>,
     oauth_login_sessions: Arc<std::sync::RwLock<HashMap<String, CodexOAuthLoginSessionRecord>>>,
@@ -628,6 +609,7 @@ pub struct AppState {
     codex_oauth_callback_listen_addr: Option<SocketAddr>,
     codex_oauth_callback_listener:
         Arc<tokio::sync::Mutex<Option<CodexOAuthCallbackListenerRuntime>>>,
+    outbound_proxy_runtime: Arc<crate::outbound_proxy_runtime::OutboundProxyRuntime>,
     upstream_error_learning_runtime:
         Arc<crate::upstream_error_learning::UpstreamErrorLearningRuntime>,
     #[cfg_attr(test, allow(dead_code))]
@@ -671,27 +653,6 @@ fn product_edition_from_env() -> ProductEdition {
 
 fn system_capabilities_from_env() -> SystemCapabilitiesResponse {
     SystemCapabilitiesResponse::for_edition(product_edition_from_env())
-}
-
-fn build_admin_proxies_from_env(runtime_config: &RuntimeConfigSnapshot) -> Vec<AdminProxyItem> {
-    let from_env = std::env::var("ADMIN_PROXIES_JSON")
-        .ok()
-        .and_then(|raw| serde_json::from_str::<Vec<AdminProxyItem>>(&raw).ok())
-        .unwrap_or_default();
-    if !from_env.is_empty() {
-        return from_env;
-    }
-
-    vec![AdminProxyItem {
-        id: "data-plane-default".to_string(),
-        label: "Data Plane".to_string(),
-        base_url: runtime_config.data_plane_base_url.clone(),
-        enabled: true,
-        last_test_status: None,
-        last_latency_ms: None,
-        last_error: None,
-        updated_at: Utc::now(),
-    }]
 }
 
 fn resolve_internal_auth_token() -> anyhow::Result<Arc<str>> {
@@ -863,12 +824,23 @@ mod app_env_tests {
 
 #[cfg(test)]
 mod capabilities_tests {
-    use super::build_app_with_store;
-    use crate::store::{ControlPlaneStore, InMemoryStore};
+    use super::{
+        build_app_with_store,
+        build_app_with_store_ttl_usage_repos_import_store_admin_auth_and_sqlite_repo,
+        DEFAULT_AUTH_VALIDATE_CACHE_TTL_SEC,
+    };
+    use crate::admin_auth::AdminAuthService;
+    use crate::import_jobs::InMemoryOAuthImportJobStore;
+    use crate::store::{
+        normalize_sqlite_database_url, ControlPlaneStore, InMemoryStore, SqliteBackedStore,
+    };
     use crate::test_support::{set_env, ENV_LOCK};
+    use crate::usage::sqlite_repo::SqliteUsageRepo;
     use axum::body::{to_bytes, Body};
     use axum::http::{Request, StatusCode};
     use serde_json::Value;
+    use sqlx_core::pool::PoolOptions;
+    use sqlx_sqlite::Sqlite;
     use std::sync::Arc;
     use tower::ServiceExt;
     use uuid::Uuid;
@@ -881,6 +853,65 @@ mod capabilities_tests {
     fn build_test_app() -> axum::Router {
         let store: Arc<dyn ControlPlaneStore> = Arc::new(InMemoryStore::default());
         build_app_with_store(store)
+    }
+
+    async fn build_personal_models_test_app() -> axum::Router {
+        let path = std::env::temp_dir().join(format!(
+            "codex-pool-personal-models-{}.sqlite3",
+            Uuid::new_v4()
+        ));
+        let database_url = normalize_sqlite_database_url(&path.display().to_string());
+        let pool = PoolOptions::<Sqlite>::new()
+            .max_connections(1)
+            .connect(&database_url)
+            .await
+            .expect("connect personal sqlite models db");
+        let sqlite_usage_repo = Arc::new(
+            SqliteUsageRepo::new(pool)
+                .await
+                .expect("create personal sqlite usage repo"),
+        );
+        sqlite_usage_repo
+            .apply_openai_model_catalog_items(
+                chrono::Utc::now(),
+                &[crate::tenant::OpenAiModelCatalogItem {
+                    model_id: "gpt-5.4".to_string(),
+                    owned_by: "openai".to_string(),
+                    title: "GPT-5.4".to_string(),
+                    description: Some("Latest reasoning model".to_string()),
+                    context_window_tokens: Some(400_000),
+                    max_output_tokens: Some(128_000),
+                    knowledge_cutoff: Some("Mar 1, 2025".to_string()),
+                    reasoning_token_support: Some(true),
+                    input_price_microcredits: Some(1_250_000),
+                    cached_input_price_microcredits: Some(125_000),
+                    output_price_microcredits: Some(10_000_000),
+                    pricing_notes: None,
+                    input_modalities: vec!["text".to_string()],
+                    output_modalities: vec!["text".to_string()],
+                    endpoints: vec!["v1/responses".to_string()],
+                    source_url: "https://developers.openai.com/api/docs/models/gpt-5.4".to_string(),
+                    raw_text: Some("model page".to_string()),
+                    synced_at: chrono::Utc::now(),
+                }],
+            )
+            .await
+            .expect("seed personal sqlite catalog");
+        let store: Arc<dyn ControlPlaneStore> = Arc::new(
+            SqliteBackedStore::connect(&database_url)
+                .await
+                .expect("connect personal sqlite store"),
+        );
+        let admin_auth = AdminAuthService::from_env().expect("admin auth");
+        build_app_with_store_ttl_usage_repos_import_store_admin_auth_and_sqlite_repo(
+            store,
+            DEFAULT_AUTH_VALIDATE_CACHE_TTL_SEC,
+            Some(sqlite_usage_repo.clone()),
+            Some(sqlite_usage_repo.clone()),
+            Arc::new(InMemoryOAuthImportJobStore::default()),
+            admin_auth,
+            Some(sqlite_usage_repo),
+        )
     }
 
     fn configure_test_env(edition: Option<&str>) -> [Option<String>; 5] {
@@ -912,6 +943,35 @@ mod capabilities_tests {
             .header("content-type", "application/json")
             .body(Body::from(body.to_owned()))
             .unwrap()
+    }
+
+    async fn login_and_get_admin_token(app: &axum::Router) -> String {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/admin/auth/login")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        serde_json::json!({
+                            "username": TEST_ADMIN_USERNAME,
+                            "password": TEST_ADMIN_PASSWORD,
+                        })
+                        .to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .expect("admin login response");
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let payload: Value = serde_json::from_slice(&body).unwrap();
+        payload["access_token"]
+            .as_str()
+            .expect("access token present")
+            .to_string()
     }
 
     #[tokio::test]
@@ -1104,6 +1164,58 @@ mod capabilities_tests {
         restore_test_env(old_values);
 
         assert_ne!(authorize_response.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn personal_edition_models_and_pricing_routes_use_sqlite_repo_instead_of_503() {
+        let _guard = ENV_LOCK.lock().expect("lock env");
+        let old_values = configure_test_env(Some("personal"));
+        let app = build_personal_models_test_app().await;
+        let access_token = login_and_get_admin_token(&app).await;
+
+        let list_models_response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/api/v1/admin/models")
+                    .header("authorization", format!("Bearer {access_token}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let upsert_pricing_response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/admin/model-pricing")
+                    .header("authorization", format!("Bearer {access_token}"))
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        serde_json::json!({
+                            "model": "gpt-5.4",
+                            "input_price_microcredits": 2000000,
+                            "cached_input_price_microcredits": 200000,
+                            "output_price_microcredits": 8000000,
+                            "enabled": true,
+                        })
+                        .to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        restore_test_env(old_values);
+
+        assert_eq!(list_models_response.status(), StatusCode::OK);
+        let list_models_body = to_bytes(list_models_response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let list_models_payload: Value = serde_json::from_slice(&list_models_body).unwrap();
+        assert_eq!(list_models_payload["data"][0]["id"], "gpt-5.4");
+        assert_eq!(upsert_pricing_response.status(), StatusCode::OK);
     }
 }
 
@@ -1866,6 +1978,50 @@ pub fn build_app_with_store_ttl_usage_repos_import_store_and_admin_auth(
     import_job_store: Arc<dyn OAuthImportJobStore>,
     admin_auth: AdminAuthService,
 ) -> Router {
+    build_app_with_store_ttl_usage_repos_import_store_admin_auth_and_sqlite_repo(
+        store,
+        auth_validate_cache_ttl_sec,
+        usage_repo,
+        usage_ingest_repo,
+        import_job_store,
+        admin_auth,
+        None,
+    )
+}
+
+pub fn build_app_with_store_ttl_usage_repos_import_store_admin_auth_and_sqlite_repo(
+    store: Arc<dyn ControlPlaneStore>,
+    auth_validate_cache_ttl_sec: u64,
+    usage_repo: Option<Arc<dyn UsageQueryRepository>>,
+    usage_ingest_repo: Option<Arc<dyn UsageIngestRepository>>,
+    import_job_store: Arc<dyn OAuthImportJobStore>,
+    admin_auth: AdminAuthService,
+    sqlite_usage_repo: Option<Arc<SqliteUsageRepo>>,
+) -> Router {
+    let outbound_proxy_runtime = Arc::new(crate::outbound_proxy_runtime::OutboundProxyRuntime::new());
+    outbound_proxy_runtime.attach_store(store.clone());
+    build_app_with_store_ttl_usage_repos_import_store_admin_auth_and_sqlite_repo_and_proxy_runtime(
+        store,
+        auth_validate_cache_ttl_sec,
+        usage_repo,
+        usage_ingest_repo,
+        import_job_store,
+        admin_auth,
+        sqlite_usage_repo,
+        outbound_proxy_runtime,
+    )
+}
+
+pub fn build_app_with_store_ttl_usage_repos_import_store_admin_auth_and_sqlite_repo_and_proxy_runtime(
+    store: Arc<dyn ControlPlaneStore>,
+    auth_validate_cache_ttl_sec: u64,
+    usage_repo: Option<Arc<dyn UsageQueryRepository>>,
+    usage_ingest_repo: Option<Arc<dyn UsageIngestRepository>>,
+    import_job_store: Arc<dyn OAuthImportJobStore>,
+    admin_auth: AdminAuthService,
+    sqlite_usage_repo: Option<Arc<SqliteUsageRepo>>,
+    outbound_proxy_runtime: Arc<crate::outbound_proxy_runtime::OutboundProxyRuntime>,
+) -> Router {
     let import_job_manager = OAuthImportJobManager::new(
         store.clone(),
         import_job_store,
@@ -1874,7 +2030,6 @@ pub fn build_app_with_store_ttl_usage_repos_import_store_and_admin_auth(
     );
     import_job_manager.resume_recoverable_jobs();
     let runtime_config = build_runtime_config_from_env(auth_validate_cache_ttl_sec);
-    let admin_proxies = build_admin_proxies_from_env(&runtime_config);
     let upstream_error_learning_base_url = runtime_config.data_plane_base_url.clone();
     let model_probe_interval_sec = parse_model_probe_interval_sec();
     let oauth_import_max_body_bytes = oauth_import_multipart_max_bytes();
@@ -1893,6 +2048,7 @@ pub fn build_app_with_store_ttl_usage_repos_import_store_and_admin_auth(
         usage_repo,
         usage_ingest_repo,
         tenant_auth_service,
+        sqlite_usage_repo,
         auth_validate_cache_ttl_sec,
         system_capabilities: edition_capabilities.clone(),
         admin_auth,
@@ -1902,7 +2058,6 @@ pub fn build_app_with_store_ttl_usage_repos_import_store_and_admin_auth(
         started_at: Utc::now(),
         runtime_config: Arc::new(std::sync::RwLock::new(runtime_config)),
         admin_logs: Arc::new(std::sync::RwLock::new(VecDeque::new())),
-        admin_proxies: Arc::new(std::sync::RwLock::new(admin_proxies)),
         model_catalog_last_error: Arc::new(std::sync::RwLock::new(None)),
         model_probe_cache: Arc::new(std::sync::RwLock::new(ModelProbeCache::default())),
         oauth_login_sessions: Arc::new(std::sync::RwLock::new(HashMap::new())),
@@ -1910,9 +2065,11 @@ pub fn build_app_with_store_ttl_usage_repos_import_store_and_admin_auth(
         codex_oauth_callback_listen_mode,
         codex_oauth_callback_listen_addr,
         codex_oauth_callback_listener: Arc::new(tokio::sync::Mutex::new(None)),
+        outbound_proxy_runtime: outbound_proxy_runtime.clone(),
         upstream_error_learning_runtime: Arc::new(
-            crate::upstream_error_learning::UpstreamErrorLearningRuntime::from_env(
+            crate::upstream_error_learning::UpstreamErrorLearningRuntime::from_env_with_outbound_proxy_runtime(
                 &upstream_error_learning_base_url,
+                outbound_proxy_runtime,
             ),
         ),
         model_probe_interval_sec,
@@ -2025,7 +2182,18 @@ pub fn build_app_with_store_ttl_usage_repos_import_store_and_admin_auth(
             get(get_admin_runtime_config).put(update_admin_runtime_config),
         )
         .route("/api/v1/admin/logs", get(list_admin_logs))
-        .route("/api/v1/admin/proxies", get(list_admin_proxies))
+        .route(
+            "/api/v1/admin/proxies",
+            get(list_admin_proxies).post(create_admin_outbound_proxy_node),
+        )
+        .route(
+            "/api/v1/admin/proxies/settings",
+            put(update_admin_outbound_proxy_settings),
+        )
+        .route(
+            "/api/v1/admin/proxies/{proxy_id}",
+            put(update_admin_outbound_proxy_node).delete(delete_admin_outbound_proxy_node),
+        )
         .route("/api/v1/admin/proxies/test", post(test_admin_proxies))
         .route("/api/v1/admin/models", get(list_admin_models))
         .route(

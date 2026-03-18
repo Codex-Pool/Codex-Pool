@@ -4,5 +4,6 @@ include!("impl_oauth_snapshot/upstream_health.rs");
 include!("impl_oauth_snapshot/rate_limit_jobs.rs");
 include!("impl_oauth_snapshot/model_routing.rs");
 include!("impl_oauth_snapshot/ai_error_learning.rs");
+include!("impl_oauth_snapshot/outbound_proxies.rs");
 include!("impl_oauth_snapshot/snapshot_and_policies.rs");
 include!("impl_oauth_snapshot/vault_activation.rs");

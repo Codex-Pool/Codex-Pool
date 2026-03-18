@@ -51,6 +51,8 @@ impl AppState {
             ai_error_learning_settings,
             approved_upstream_error_templates,
             builtin_error_templates,
+            outbound_proxy_pool_settings,
+            outbound_proxy_nodes,
             ..
         } = snapshot;
 
@@ -81,6 +83,8 @@ impl AppState {
                 template,
             )
         }));
+        self.outbound_proxy_runtime
+            .replace_config(outbound_proxy_pool_settings, outbound_proxy_nodes);
         self.snapshot_revision
             .store(revision, Ordering::Relaxed);
         self.snapshot_cursor.store(cursor, Ordering::Relaxed);
@@ -130,6 +134,17 @@ impl AppState {
                         template,
                     )
                 }));
+                routing_changed = true;
+            }
+            if let Some(settings) = event.outbound_proxy_pool_settings {
+                let nodes = event.outbound_proxy_nodes.unwrap_or_else(|| {
+                    self.outbound_proxy_runtime.current_nodes()
+                });
+                self.outbound_proxy_runtime.replace_config(settings, nodes);
+                routing_changed = true;
+            } else if let Some(nodes) = event.outbound_proxy_nodes {
+                let settings = self.outbound_proxy_runtime.current_settings();
+                self.outbound_proxy_runtime.replace_config(settings, nodes);
                 routing_changed = true;
             }
             match event.event_type {

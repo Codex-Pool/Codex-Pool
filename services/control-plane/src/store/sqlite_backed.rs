@@ -37,6 +37,10 @@ struct SqlitePersistedStoreState {
     oauth_rate_limit_caches: HashMap<Uuid, OAuthRateLimitCacheRecord>,
     #[serde(default)]
     oauth_rate_limit_refresh_jobs: HashMap<Uuid, OAuthRateLimitRefreshJobSummary>,
+    #[serde(default)]
+    outbound_proxy_pool_settings: OutboundProxyPoolSettings,
+    #[serde(default)]
+    outbound_proxy_nodes: HashMap<Uuid, OutboundProxyNode>,
     policies: HashMap<Uuid, RoutingPolicy>,
     routing_profiles: HashMap<Uuid, RoutingProfile>,
     model_routing_policies: HashMap<Uuid, ModelRoutingPolicy>,
@@ -66,6 +70,8 @@ impl InMemoryStore {
                 .read()
                 .unwrap()
                 .clone(),
+            outbound_proxy_pool_settings: self.outbound_proxy_pool_settings.read().unwrap().clone(),
+            outbound_proxy_nodes: self.outbound_proxy_nodes.read().unwrap().clone(),
             policies: self.policies.read().unwrap().clone(),
             routing_profiles: self.routing_profiles.read().unwrap().clone(),
             model_routing_policies: self.model_routing_policies.read().unwrap().clone(),
@@ -129,6 +135,10 @@ impl InMemoryStore {
             oauth_rate_limit_refresh_jobs: Arc::new(RwLock::new(
                 state.oauth_rate_limit_refresh_jobs,
             )),
+            outbound_proxy_pool_settings: Arc::new(RwLock::new(
+                state.outbound_proxy_pool_settings,
+            )),
+            outbound_proxy_nodes: Arc::new(RwLock::new(state.outbound_proxy_nodes)),
             policies: Arc::new(RwLock::new(state.policies)),
             routing_profiles: Arc::new(RwLock::new(state.routing_profiles)),
             model_routing_policies: Arc::new(RwLock::new(state.model_routing_policies)),
@@ -157,6 +167,16 @@ pub struct SqliteBackedStore {
 
 impl SqliteBackedStore {
     pub async fn connect(database_url: &str) -> Result<Self> {
+        let oauth_client: Arc<dyn OAuthTokenClient> = Arc::new(OpenAiOAuthClient::from_env());
+        let credential_cipher = CredentialCipher::from_env().unwrap_or(None);
+        Self::connect_with_oauth(database_url, oauth_client, credential_cipher).await
+    }
+
+    pub async fn connect_with_oauth(
+        database_url: &str,
+        oauth_client: Arc<dyn OAuthTokenClient>,
+        credential_cipher: Option<CredentialCipher>,
+    ) -> Result<Self> {
         let normalized = normalize_sqlite_database_url(database_url);
         let pool = PoolOptions::new()
             .max_connections(1)
@@ -165,8 +185,6 @@ impl SqliteBackedStore {
             .with_context(|| format!("failed to connect sqlite store at {normalized}"))?;
 
         Self::initialize_schema(&pool).await?;
-        let oauth_client: Arc<dyn OAuthTokenClient> = Arc::new(OpenAiOAuthClient::from_env());
-        let credential_cipher = CredentialCipher::from_env().unwrap_or(None);
         let inner = match Self::load_state(&pool).await? {
             Some(state) => InMemoryStore::from_sqlite_state(state, oauth_client, credential_cipher),
             None => InMemoryStore::new_with_oauth(oauth_client, credential_cipher),
@@ -302,6 +320,69 @@ impl ControlPlaneStore for SqliteBackedStore {
         let key = self.inner.set_api_key_enabled(api_key_id, enabled).await?;
         self.persist_state().await?;
         Ok(key)
+    }
+
+    async fn outbound_proxy_pool_settings(&self) -> Result<OutboundProxyPoolSettings> {
+        self.inner.outbound_proxy_pool_settings().await
+    }
+
+    async fn update_outbound_proxy_pool_settings(
+        &self,
+        req: UpdateOutboundProxyPoolSettingsRequest,
+    ) -> Result<OutboundProxyPoolSettings> {
+        let settings = self.inner.update_outbound_proxy_pool_settings(req).await?;
+        self.persist_state().await?;
+        Ok(settings)
+    }
+
+    async fn list_outbound_proxy_nodes(&self) -> Result<Vec<OutboundProxyNode>> {
+        self.inner.list_outbound_proxy_nodes().await
+    }
+
+    async fn create_outbound_proxy_node(
+        &self,
+        req: CreateOutboundProxyNodeRequest,
+    ) -> Result<OutboundProxyNode> {
+        let node = self.inner.create_outbound_proxy_node(req).await?;
+        self.persist_state().await?;
+        Ok(node)
+    }
+
+    async fn update_outbound_proxy_node(
+        &self,
+        node_id: Uuid,
+        req: UpdateOutboundProxyNodeRequest,
+    ) -> Result<OutboundProxyNode> {
+        let node = self.inner.update_outbound_proxy_node(node_id, req).await?;
+        self.persist_state().await?;
+        Ok(node)
+    }
+
+    async fn delete_outbound_proxy_node(&self, node_id: Uuid) -> Result<()> {
+        self.inner.delete_outbound_proxy_node(node_id).await?;
+        self.persist_state().await
+    }
+
+    async fn record_outbound_proxy_test_result(
+        &self,
+        node_id: Uuid,
+        last_test_status: Option<String>,
+        last_latency_ms: Option<u64>,
+        last_error: Option<String>,
+        last_tested_at: Option<DateTime<Utc>>,
+    ) -> Result<OutboundProxyNode> {
+        let node = self
+            .inner
+            .record_outbound_proxy_test_result(
+                node_id,
+                last_test_status,
+                last_latency_ms,
+                last_error,
+                last_tested_at,
+            )
+            .await?;
+        self.persist_state().await?;
+        Ok(node)
     }
 
     async fn validate_api_key(&self, token: &str) -> Result<Option<ValidatedPrincipal>> {

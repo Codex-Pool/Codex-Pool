@@ -690,6 +690,8 @@ impl PostgresStore {
             )
             .await?;
         let ai_error_learning_settings = self.load_upstream_error_learning_settings_inner().await?;
+        let outbound_proxy_pool_settings = self.load_outbound_proxy_pool_settings_inner().await?;
+        let outbound_proxy_nodes = self.list_outbound_proxy_nodes_inner().await?;
         let approved_upstream_error_templates =
             self.load_approved_upstream_error_templates_inner().await?;
         let builtin_error_templates = self.list_builtin_error_templates().await?;
@@ -706,6 +708,8 @@ impl PostgresStore {
             ai_error_learning_settings,
             approved_upstream_error_templates,
             builtin_error_templates,
+            outbound_proxy_pool_settings,
+            outbound_proxy_nodes,
             issued_at: Utc::now(),
         })
     }

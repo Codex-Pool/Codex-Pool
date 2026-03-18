@@ -237,18 +237,62 @@ export interface AdminLogsResponse {
   items: AdminLogEntry[]
 }
 
-export interface AdminProxyItem {
+export type ProxyFailMode = 'strict_proxy' | 'allow_direct_fallback'
+
+export interface AdminProxyPoolSettings {
+  enabled: boolean
+  fail_mode: ProxyFailMode
+  updated_at: string
+}
+
+export interface AdminProxyNode {
   id: string
   label: string
-  base_url: string
+  proxy_url_masked: string
+  scheme: string
+  has_auth: boolean
   enabled: boolean
+  weight: number
   last_test_status?: string
   last_latency_ms?: number
   last_error?: string
+  last_tested_at?: string
   updated_at: string
+}
+
+export interface AdminProxyPoolResponse {
+  settings: AdminProxyPoolSettings
+  nodes: AdminProxyNode[]
+}
+
+export interface CreateAdminProxyNodeRequest {
+  label: string
+  proxy_url: string
+  enabled?: boolean
+  weight?: number
+}
+
+export interface UpdateAdminProxyNodeRequest {
+  label?: string
+  proxy_url?: string
+  enabled?: boolean
+  weight?: number
+}
+
+export interface UpdateAdminProxyPoolSettingsRequest {
+  enabled: boolean
+  fail_mode: ProxyFailMode
+}
+
+export interface AdminProxyNodeMutationResponse {
+  node: AdminProxyNode
+}
+
+export interface AdminProxyPoolSettingsResponse {
+  settings: AdminProxyPoolSettings
 }
 
 export interface AdminProxyTestResponse {
   tested: number
-  results: AdminProxyItem[]
+  results: AdminProxyNode[]
 }

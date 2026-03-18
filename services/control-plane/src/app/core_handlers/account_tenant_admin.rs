@@ -297,12 +297,21 @@ async fn list_admin_model_pricing(
     headers: HeaderMap,
 ) -> Result<Json<Vec<crate::tenant::ModelPricingItem>>, (StatusCode, Json<ErrorEnvelope>)> {
     let _principal = require_admin_principal(&state, &headers)?;
-    let tenant_auth = require_tenant_auth_service(&state)?;
-    tenant_auth
-        .admin_list_model_pricing()
-        .await
-        .map(Json)
-        .map_err(map_tenant_error)
+    if let Some(tenant_auth) = state.tenant_auth_service.as_ref() {
+        tenant_auth
+            .admin_list_model_pricing()
+            .await
+            .map(Json)
+            .map_err(map_tenant_error)
+    } else if let Some(sqlite_repo) = state.sqlite_usage_repo.as_ref() {
+        sqlite_repo
+            .list_model_pricing()
+            .await
+            .map(Json)
+            .map_err(internal_error)
+    } else {
+        Err(tenant_service_unavailable_error())
+    }
 }
 
 async fn upsert_admin_model_pricing(
@@ -311,12 +320,20 @@ async fn upsert_admin_model_pricing(
     Json(req): Json<crate::tenant::ModelPricingUpsertRequest>,
 ) -> Result<Json<crate::tenant::ModelPricingItem>, (StatusCode, Json<ErrorEnvelope>)> {
     let principal = require_admin_principal(&state, &headers)?;
-    let tenant_auth = require_tenant_auth_service(&state)?;
     let request_model = req.model.clone();
-    let response = tenant_auth
-        .admin_upsert_model_pricing(req)
-        .await
-        .map_err(map_tenant_error)?;
+    let response = if let Some(tenant_auth) = state.tenant_auth_service.as_ref() {
+        tenant_auth
+            .admin_upsert_model_pricing(req)
+            .await
+            .map_err(map_tenant_error)?
+    } else if let Some(sqlite_repo) = state.sqlite_usage_repo.as_ref() {
+        sqlite_repo
+            .upsert_model_pricing(req)
+            .await
+            .map_err(internal_error)?
+    } else {
+        return Err(tenant_service_unavailable_error());
+    };
     write_audit_log_best_effort(
         &state,
         crate::tenant::AuditLogWriteRequest {
@@ -349,11 +366,19 @@ async fn delete_admin_model_pricing(
     headers: HeaderMap,
 ) -> Result<impl IntoResponse, (StatusCode, Json<ErrorEnvelope>)> {
     let principal = require_admin_principal(&state, &headers)?;
-    let tenant_auth = require_tenant_auth_service(&state)?;
-    tenant_auth
-        .admin_delete_model_pricing(pricing_id)
-        .await
-        .map_err(map_tenant_error)?;
+    if let Some(tenant_auth) = state.tenant_auth_service.as_ref() {
+        tenant_auth
+            .admin_delete_model_pricing(pricing_id)
+            .await
+            .map_err(map_tenant_error)?;
+    } else if let Some(sqlite_repo) = state.sqlite_usage_repo.as_ref() {
+        sqlite_repo
+            .delete_model_pricing(pricing_id)
+            .await
+            .map_err(internal_error)?;
+    } else {
+        return Err(tenant_service_unavailable_error());
+    }
     write_audit_log_best_effort(
         &state,
         crate::tenant::AuditLogWriteRequest {

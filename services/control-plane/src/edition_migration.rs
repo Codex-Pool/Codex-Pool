@@ -7,8 +7,9 @@ use chrono::{DateTime, Duration, Utc};
 use codex_pool_core::api::{OAuthRefreshStatus, ProductEdition, SessionCredentialKind};
 use codex_pool_core::model::{
     AiErrorLearningSettings, ApiKey, BuiltinErrorTemplateOverrideRecord, ModelRoutingPolicy,
-    ModelRoutingSettings, ModelRoutingTriggerMode, RoutingPlanVersion, RoutingPolicy,
-    RoutingProfile, Tenant, UpstreamAccount, UpstreamAuthProvider, UpstreamErrorTemplateRecord,
+    ModelRoutingSettings, ModelRoutingTriggerMode, OutboundProxyNode,
+    OutboundProxyPoolSettings, RoutingPlanVersion, RoutingPolicy, RoutingProfile, Tenant,
+    UpstreamAccount, UpstreamAuthProvider, UpstreamErrorTemplateRecord,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -102,6 +103,8 @@ pub struct ControlPlaneMigrationBundle {
     pub routing_profiles: Vec<RoutingProfile>,
     pub model_routing_policies: Vec<ModelRoutingPolicy>,
     pub model_routing_settings: Option<ModelRoutingSettings>,
+    pub outbound_proxy_pool_settings: Option<OutboundProxyPoolSettings>,
+    pub outbound_proxy_nodes: Vec<OutboundProxyNode>,
     pub upstream_error_learning_settings: Option<AiErrorLearningSettings>,
     pub upstream_error_templates: Vec<UpstreamErrorTemplateRecord>,
     pub builtin_error_template_overrides: Vec<BuiltinErrorTemplateOverrideRecord>,

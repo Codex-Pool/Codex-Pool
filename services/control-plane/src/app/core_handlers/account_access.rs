@@ -603,7 +603,17 @@ async fn process_codex_oauth_callback_flow(
     let (session_id, code, callback_url, code_verifier, base_url, label, enabled, priority) =
         prepared_session.ok_or_else(codex_oauth_not_found_error)?;
 
-    let oauth_client = crate::oauth::OpenAiOAuthClient::from_env();
+    let oauth_client = crate::oauth::OpenAiOAuthClient::from_parts_with_outbound_proxy_runtime(
+        std::env::var("OPENAI_OAUTH_TOKEN_URL")
+            .unwrap_or_else(|_| "https://auth.openai.com/oauth/token".to_string()),
+        std::env::var("OPENAI_OAUTH_AUTHORIZE_URL")
+            .unwrap_or_else(|_| "https://auth.openai.com/oauth/authorize".to_string()),
+        std::env::var("OPENAI_OAUTH_CLIENT_ID").ok(),
+        std::env::var("OPENAI_OAUTH_TIMEOUT_SEC")
+            .ok()
+            .and_then(|value| value.parse::<u64>().ok()),
+        Some(state.outbound_proxy_runtime.clone()),
+    );
     let exchange = match oauth_client
         .exchange_authorization_code(&code, &callback_url, &code_verifier)
         .await
@@ -832,7 +842,17 @@ async fn process_codex_oauth_probe_callback_flow(
     let (session_id, code, callback_url, code_verifier, base_url) =
         prepared_session.ok_or_else(codex_oauth_not_found_error)?;
 
-    let oauth_client = crate::oauth::OpenAiOAuthClient::from_env();
+    let oauth_client = crate::oauth::OpenAiOAuthClient::from_parts_with_outbound_proxy_runtime(
+        std::env::var("OPENAI_OAUTH_TOKEN_URL")
+            .unwrap_or_else(|_| "https://auth.openai.com/oauth/token".to_string()),
+        std::env::var("OPENAI_OAUTH_AUTHORIZE_URL")
+            .unwrap_or_else(|_| "https://auth.openai.com/oauth/authorize".to_string()),
+        std::env::var("OPENAI_OAUTH_CLIENT_ID").ok(),
+        std::env::var("OPENAI_OAUTH_TIMEOUT_SEC")
+            .ok()
+            .and_then(|value| value.parse::<u64>().ok()),
+        Some(state.outbound_proxy_runtime.clone()),
+    );
     let exchange = match oauth_client
         .exchange_authorization_code(&code, &callback_url, &code_verifier)
         .await
@@ -1216,7 +1236,17 @@ async fn create_codex_oauth_login_session(
     let enabled = req.enabled.unwrap_or(DEFAULT_CODEX_IMPORT_ENABLED);
     let priority = req.priority.unwrap_or(DEFAULT_CODEX_IMPORT_PRIORITY);
 
-    let oauth_client = crate::oauth::OpenAiOAuthClient::from_env();
+    let oauth_client = crate::oauth::OpenAiOAuthClient::from_parts_with_outbound_proxy_runtime(
+        std::env::var("OPENAI_OAUTH_TOKEN_URL")
+            .unwrap_or_else(|_| "https://auth.openai.com/oauth/token".to_string()),
+        std::env::var("OPENAI_OAUTH_AUTHORIZE_URL")
+            .unwrap_or_else(|_| "https://auth.openai.com/oauth/authorize".to_string()),
+        std::env::var("OPENAI_OAUTH_CLIENT_ID").ok(),
+        std::env::var("OPENAI_OAUTH_TIMEOUT_SEC")
+            .ok()
+            .and_then(|value| value.parse::<u64>().ok()),
+        Some(state.outbound_proxy_runtime.clone()),
+    );
     let authorize_url = oauth_client
         .build_authorize_url(
             &callback_url,
@@ -1276,7 +1306,17 @@ async fn create_codex_oauth_probe_session(
     let state_token = random_urlsafe_token();
     let base_url = normalize_codex_import_base_url(req.base_url);
 
-    let oauth_client = crate::oauth::OpenAiOAuthClient::from_env();
+    let oauth_client = crate::oauth::OpenAiOAuthClient::from_parts_with_outbound_proxy_runtime(
+        std::env::var("OPENAI_OAUTH_TOKEN_URL")
+            .unwrap_or_else(|_| "https://auth.openai.com/oauth/token".to_string()),
+        std::env::var("OPENAI_OAUTH_AUTHORIZE_URL")
+            .unwrap_or_else(|_| "https://auth.openai.com/oauth/authorize".to_string()),
+        std::env::var("OPENAI_OAUTH_CLIENT_ID").ok(),
+        std::env::var("OPENAI_OAUTH_TIMEOUT_SEC")
+            .ok()
+            .and_then(|value| value.parse::<u64>().ok()),
+        Some(state.outbound_proxy_runtime.clone()),
+    );
     let authorize_url = oauth_client
         .build_authorize_url(
             &callback_url,

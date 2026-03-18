@@ -17,6 +17,13 @@ use crate::usage::{
     request_log_row_from_event, RequestLogQuery, RequestLogRow, UsageIngestRepository,
 };
 use crate::Row;
+use crate::{
+    tenant::{
+        fetch_openai_model_catalog_items, fetch_openai_model_catalog_items_with_client,
+        ModelPricingItem, ModelPricingUpsertRequest, OpenAiModelCatalogItem,
+        OpenAiModelsSyncResponse, OPENAI_MODELS_INDEX_URL,
+    },
+};
 
 #[derive(Clone)]
 pub struct SqliteUsageRepo {
@@ -118,9 +125,23 @@ impl SqliteUsageRepo {
             r#"
             CREATE TABLE IF NOT EXISTS openai_models_catalog (
                 model_id TEXT PRIMARY KEY,
+                owned_by TEXT NULL,
+                title TEXT NULL,
+                description TEXT NULL,
+                context_window_tokens INTEGER NULL,
+                max_output_tokens INTEGER NULL,
+                knowledge_cutoff TEXT NULL,
+                reasoning_token_support INTEGER NULL,
                 input_price_microcredits INTEGER NULL,
                 cached_input_price_microcredits INTEGER NULL,
-                output_price_microcredits INTEGER NULL
+                output_price_microcredits INTEGER NULL,
+                pricing_notes TEXT NULL,
+                input_modalities_json TEXT NULL,
+                output_modalities_json TEXT NULL,
+                endpoints_json TEXT NULL,
+                source_url TEXT NULL,
+                raw_text TEXT NULL,
+                synced_at TEXT NULL
             )
             "#,
         )
@@ -131,12 +152,15 @@ impl SqliteUsageRepo {
         sqlx::query(
             r#"
             CREATE TABLE IF NOT EXISTS model_pricing_overrides (
+                id TEXT NULL,
                 model TEXT NOT NULL,
                 service_tier TEXT NOT NULL DEFAULT 'default',
                 input_price_microcredits INTEGER NOT NULL,
                 cached_input_price_microcredits INTEGER NOT NULL,
                 output_price_microcredits INTEGER NOT NULL,
                 enabled INTEGER NOT NULL DEFAULT 1,
+                created_at TEXT NULL,
+                updated_at TEXT NULL,
                 PRIMARY KEY (model, service_tier)
             )
             "#,
@@ -144,6 +168,205 @@ impl SqliteUsageRepo {
         .execute(pool)
         .await
         .context("failed to create sqlite model_pricing_overrides table")?;
+
+        Self::ensure_column_exists(pool, "openai_models_catalog", "owned_by", "TEXT NULL").await?;
+        Self::ensure_column_exists(pool, "openai_models_catalog", "title", "TEXT NULL").await?;
+        Self::ensure_column_exists(pool, "openai_models_catalog", "description", "TEXT NULL")
+            .await?;
+        Self::ensure_column_exists(
+            pool,
+            "openai_models_catalog",
+            "context_window_tokens",
+            "INTEGER NULL",
+        )
+        .await?;
+        Self::ensure_column_exists(
+            pool,
+            "openai_models_catalog",
+            "max_output_tokens",
+            "INTEGER NULL",
+        )
+        .await?;
+        Self::ensure_column_exists(
+            pool,
+            "openai_models_catalog",
+            "knowledge_cutoff",
+            "TEXT NULL",
+        )
+        .await?;
+        Self::ensure_column_exists(
+            pool,
+            "openai_models_catalog",
+            "reasoning_token_support",
+            "INTEGER NULL",
+        )
+        .await?;
+        Self::ensure_column_exists(pool, "openai_models_catalog", "pricing_notes", "TEXT NULL")
+            .await?;
+        Self::ensure_column_exists(
+            pool,
+            "openai_models_catalog",
+            "input_modalities_json",
+            "TEXT NULL",
+        )
+        .await?;
+        Self::ensure_column_exists(
+            pool,
+            "openai_models_catalog",
+            "output_modalities_json",
+            "TEXT NULL",
+        )
+        .await?;
+        Self::ensure_column_exists(pool, "openai_models_catalog", "endpoints_json", "TEXT NULL")
+            .await?;
+        Self::ensure_column_exists(pool, "openai_models_catalog", "source_url", "TEXT NULL")
+            .await?;
+        Self::ensure_column_exists(pool, "openai_models_catalog", "raw_text", "TEXT NULL")
+            .await?;
+        Self::ensure_column_exists(pool, "openai_models_catalog", "synced_at", "TEXT NULL")
+            .await?;
+        Self::ensure_column_exists(pool, "model_pricing_overrides", "id", "TEXT NULL").await?;
+        Self::ensure_column_exists(
+            pool,
+            "model_pricing_overrides",
+            "created_at",
+            "TEXT NULL",
+        )
+        .await?;
+        Self::ensure_column_exists(
+            pool,
+            "model_pricing_overrides",
+            "updated_at",
+            "TEXT NULL",
+        )
+        .await?;
+        Self::backfill_openai_catalog_metadata(pool).await?;
+        Self::backfill_model_pricing_metadata(pool).await?;
+
+        sqlx::query(
+            r#"
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_model_pricing_overrides_id
+            ON model_pricing_overrides (id)
+            "#,
+        )
+        .execute(pool)
+        .await
+        .context("failed to create sqlite model_pricing_overrides id index")?;
+
+        Ok(())
+    }
+
+    async fn ensure_column_exists(
+        pool: &SqlitePool,
+        table: &str,
+        column: &str,
+        definition: &str,
+    ) -> Result<()> {
+        let pragma = format!("PRAGMA table_info({table})");
+        let columns = sqlx::query(&pragma)
+            .fetch_all(pool)
+            .await
+            .with_context(|| format!("failed to read sqlite schema for {table}"))?;
+        let exists = columns.into_iter().any(|row| {
+            row.try_get::<String, _>("name")
+                .map(|name| name == column)
+                .unwrap_or(false)
+        });
+        if exists {
+            return Ok(());
+        }
+
+        let alter = format!("ALTER TABLE {table} ADD COLUMN {column} {definition}");
+        sqlx::query(&alter)
+            .execute(pool)
+            .await
+            .with_context(|| format!("failed to add {table}.{column} column"))?;
+        Ok(())
+    }
+
+    async fn backfill_openai_catalog_metadata(pool: &SqlitePool) -> Result<()> {
+        let rows = sqlx::query(
+            r#"
+            SELECT model_id, title, owned_by, source_url, synced_at
+            FROM openai_models_catalog
+            "#,
+        )
+        .fetch_all(pool)
+        .await
+        .context("failed to query sqlite openai catalog metadata for backfill")?;
+
+        for row in rows {
+            let model_id: String = row.try_get("model_id")?;
+            let title: Option<String> = row.try_get("title")?;
+            let owned_by: Option<String> = row.try_get("owned_by")?;
+            let source_url: Option<String> = row.try_get("source_url")?;
+            let synced_at: Option<String> = row.try_get("synced_at")?;
+
+            sqlx::query(
+                r#"
+                UPDATE openai_models_catalog
+                SET
+                    title = COALESCE(title, ?),
+                    owned_by = COALESCE(owned_by, 'openai'),
+                    source_url = COALESCE(source_url, ?),
+                    synced_at = COALESCE(synced_at, ?)
+                WHERE model_id = ?
+                "#,
+            )
+            .bind(title.unwrap_or_else(|| model_id.clone()))
+            .bind(format!("{OPENAI_MODELS_INDEX_URL}/{model_id}"))
+            .bind(synced_at.unwrap_or_else(|| Utc::now().to_rfc3339()))
+            .bind(model_id)
+            .execute(pool)
+            .await
+            .context("failed to backfill sqlite openai catalog metadata")?;
+
+            if owned_by.is_none() || source_url.is_none() {
+                continue;
+            }
+        }
+
+        Ok(())
+    }
+
+    async fn backfill_model_pricing_metadata(pool: &SqlitePool) -> Result<()> {
+        let rows = sqlx::query(
+            r#"
+            SELECT model, service_tier, id, created_at, updated_at
+            FROM model_pricing_overrides
+            "#,
+        )
+        .fetch_all(pool)
+        .await
+        .context("failed to query sqlite model_pricing_overrides metadata for backfill")?;
+
+        for row in rows {
+            let model: String = row.try_get("model")?;
+            let service_tier: String = row.try_get("service_tier")?;
+            let id: Option<String> = row.try_get("id")?;
+            let created_at: Option<String> = row.try_get("created_at")?;
+            let updated_at: Option<String> = row.try_get("updated_at")?;
+            let now = Utc::now().to_rfc3339();
+
+            sqlx::query(
+                r#"
+                UPDATE model_pricing_overrides
+                SET
+                    id = COALESCE(id, ?),
+                    created_at = COALESCE(created_at, ?),
+                    updated_at = COALESCE(updated_at, ?)
+                WHERE model = ? AND service_tier = ?
+                "#,
+            )
+            .bind(id.unwrap_or_else(|| Uuid::new_v4().to_string()))
+            .bind(created_at.unwrap_or_else(|| now.clone()))
+            .bind(updated_at.unwrap_or(now))
+            .bind(model)
+            .bind(service_tier)
+            .execute(pool)
+            .await
+            .context("failed to backfill sqlite model pricing metadata")?;
+        }
 
         Ok(())
     }
@@ -546,6 +769,386 @@ impl SqliteUsageRepo {
             model_request_distribution,
             model_token_distribution,
         })
+    }
+
+    pub async fn list_openai_model_catalog(&self) -> Result<Vec<OpenAiModelCatalogItem>> {
+        let rows = sqlx::query(
+            r#"
+            SELECT
+                model_id,
+                owned_by,
+                title,
+                description,
+                context_window_tokens,
+                max_output_tokens,
+                knowledge_cutoff,
+                reasoning_token_support,
+                input_price_microcredits,
+                cached_input_price_microcredits,
+                output_price_microcredits,
+                pricing_notes,
+                input_modalities_json,
+                output_modalities_json,
+                endpoints_json,
+                source_url,
+                raw_text,
+                synced_at
+            FROM openai_models_catalog
+            ORDER BY model_id ASC
+            "#,
+        )
+        .fetch_all(&self.pool)
+        .await
+        .context("failed to list sqlite openai models catalog")?;
+
+        rows.into_iter()
+            .map(|row| -> Result<OpenAiModelCatalogItem> {
+                Ok(OpenAiModelCatalogItem {
+                    model_id: row.try_get("model_id")?,
+                    owned_by: row
+                        .try_get::<Option<String>, _>("owned_by")?
+                        .unwrap_or_else(|| "openai".to_string()),
+                    title: row
+                        .try_get::<Option<String>, _>("title")?
+                        .unwrap_or_else(|| row.try_get("model_id").unwrap_or_default()),
+                    description: row.try_get("description")?,
+                    context_window_tokens: row.try_get("context_window_tokens")?,
+                    max_output_tokens: row.try_get("max_output_tokens")?,
+                    knowledge_cutoff: row.try_get("knowledge_cutoff")?,
+                    reasoning_token_support: row.try_get("reasoning_token_support")?,
+                    input_price_microcredits: row.try_get("input_price_microcredits")?,
+                    cached_input_price_microcredits: row.try_get("cached_input_price_microcredits")?,
+                    output_price_microcredits: row.try_get("output_price_microcredits")?,
+                    pricing_notes: row.try_get("pricing_notes")?,
+                    input_modalities: serde_json::from_str(
+                        row.try_get::<Option<String>, _>("input_modalities_json")?
+                            .as_deref()
+                            .unwrap_or("[]"),
+                    )
+                    .context("failed to decode sqlite input modalities json")?,
+                    output_modalities: serde_json::from_str(
+                        row.try_get::<Option<String>, _>("output_modalities_json")?
+                            .as_deref()
+                            .unwrap_or("[]"),
+                    )
+                    .context("failed to decode sqlite output modalities json")?,
+                    endpoints: serde_json::from_str(
+                        row.try_get::<Option<String>, _>("endpoints_json")?
+                            .as_deref()
+                            .unwrap_or("[]"),
+                    )
+                    .context("failed to decode sqlite endpoints json")?,
+                    source_url: row
+                        .try_get::<Option<String>, _>("source_url")?
+                        .unwrap_or_else(|| {
+                            format!(
+                                "{OPENAI_MODELS_INDEX_URL}/{}",
+                                row.try_get::<String, _>("model_id").unwrap_or_default()
+                            )
+                        }),
+                    raw_text: row.try_get("raw_text")?,
+                    synced_at: row
+                        .try_get::<Option<String>, _>("synced_at")?
+                        .as_deref()
+                        .map(Self::parse_created_at)
+                        .transpose()?
+                        .unwrap_or_else(Utc::now),
+                })
+            })
+            .collect()
+    }
+
+    pub async fn apply_openai_model_catalog_items(
+        &self,
+        synced_at: DateTime<Utc>,
+        items: &[OpenAiModelCatalogItem],
+    ) -> Result<OpenAiModelsSyncResponse> {
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .context("failed to start sqlite openai catalog sync transaction")?;
+
+        for item in items {
+            sqlx::query(
+                r#"
+                INSERT INTO openai_models_catalog (
+                    model_id,
+                    owned_by,
+                    title,
+                    description,
+                    context_window_tokens,
+                    max_output_tokens,
+                    knowledge_cutoff,
+                    reasoning_token_support,
+                    input_price_microcredits,
+                    cached_input_price_microcredits,
+                    output_price_microcredits,
+                    pricing_notes,
+                    input_modalities_json,
+                    output_modalities_json,
+                    endpoints_json,
+                    source_url,
+                    raw_text,
+                    synced_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(model_id) DO UPDATE SET
+                    owned_by = excluded.owned_by,
+                    title = excluded.title,
+                    description = excluded.description,
+                    context_window_tokens = excluded.context_window_tokens,
+                    max_output_tokens = excluded.max_output_tokens,
+                    knowledge_cutoff = excluded.knowledge_cutoff,
+                    reasoning_token_support = excluded.reasoning_token_support,
+                    input_price_microcredits = excluded.input_price_microcredits,
+                    cached_input_price_microcredits = excluded.cached_input_price_microcredits,
+                    output_price_microcredits = excluded.output_price_microcredits,
+                    pricing_notes = excluded.pricing_notes,
+                    input_modalities_json = excluded.input_modalities_json,
+                    output_modalities_json = excluded.output_modalities_json,
+                    endpoints_json = excluded.endpoints_json,
+                    source_url = excluded.source_url,
+                    raw_text = excluded.raw_text,
+                    synced_at = excluded.synced_at
+                "#,
+            )
+            .bind(&item.model_id)
+            .bind(&item.owned_by)
+            .bind(&item.title)
+            .bind(&item.description)
+            .bind(item.context_window_tokens)
+            .bind(item.max_output_tokens)
+            .bind(&item.knowledge_cutoff)
+            .bind(item.reasoning_token_support)
+            .bind(item.input_price_microcredits)
+            .bind(item.cached_input_price_microcredits)
+            .bind(item.output_price_microcredits)
+            .bind(&item.pricing_notes)
+            .bind(serde_json::to_string(&item.input_modalities)?)
+            .bind(serde_json::to_string(&item.output_modalities)?)
+            .bind(serde_json::to_string(&item.endpoints)?)
+            .bind(&item.source_url)
+            .bind(&item.raw_text)
+            .bind(item.synced_at.to_rfc3339())
+            .execute(tx.as_mut())
+            .await
+            .with_context(|| format!("failed to upsert sqlite official model {}", item.model_id))?;
+        }
+
+        let deleted_catalog_rows = if items.is_empty() {
+            sqlx::query("DELETE FROM openai_models_catalog")
+                .execute(tx.as_mut())
+                .await
+                .context("failed to clear sqlite openai catalog")?
+                .rows_affected() as usize
+        } else {
+            let placeholders = std::iter::repeat("?")
+                .take(items.len())
+                .collect::<Vec<_>>()
+                .join(", ");
+            let delete_sql = format!(
+                "DELETE FROM openai_models_catalog WHERE model_id NOT IN ({placeholders})"
+            );
+            let mut query = sqlx::query(&delete_sql);
+            for item in items {
+                query = query.bind(&item.model_id);
+            }
+            query
+                .execute(tx.as_mut())
+                .await
+                .context("failed to delete removed sqlite openai catalog rows")?
+                .rows_affected() as usize
+        };
+
+        tx.commit()
+            .await
+            .context("failed to commit sqlite openai catalog sync transaction")?;
+
+        Ok(OpenAiModelsSyncResponse {
+            models_total: items.len(),
+            created_or_updated: items.len(),
+            deleted_catalog_rows,
+            cleared_custom_entities: 0,
+            cleared_billing_rules: 0,
+            deleted_legacy_pricing_rows: 0,
+            synced_at,
+        })
+    }
+
+    pub async fn sync_openai_model_catalog(&self) -> Result<OpenAiModelsSyncResponse> {
+        self.sync_openai_model_catalog_with_client(None).await
+    }
+
+    pub async fn sync_openai_model_catalog_with_client(
+        &self,
+        client: Option<reqwest::Client>,
+    ) -> Result<OpenAiModelsSyncResponse> {
+        let (synced_at, items) = match client {
+            Some(client) => fetch_openai_model_catalog_items_with_client(client).await?,
+            None => fetch_openai_model_catalog_items().await?,
+        };
+        self.apply_openai_model_catalog_items(synced_at, &items).await
+    }
+
+    pub async fn list_model_pricing(&self) -> Result<Vec<ModelPricingItem>> {
+        let rows = sqlx::query(
+            r#"
+            SELECT
+                id,
+                model,
+                service_tier,
+                input_price_microcredits,
+                cached_input_price_microcredits,
+                output_price_microcredits,
+                enabled,
+                created_at,
+                updated_at
+            FROM model_pricing_overrides
+            ORDER BY model ASC, service_tier ASC
+            "#,
+        )
+        .fetch_all(&self.pool)
+        .await
+        .context("failed to list sqlite model pricing overrides")?;
+
+        rows.into_iter()
+            .map(|row| -> Result<ModelPricingItem> {
+                Ok(ModelPricingItem {
+                    id: Uuid::parse_str(&row.try_get::<String, _>("id")?)
+                        .context("failed to parse sqlite model pricing id")?,
+                    model: row.try_get("model")?,
+                    service_tier: row.try_get("service_tier")?,
+                    input_price_microcredits: row.try_get("input_price_microcredits")?,
+                    cached_input_price_microcredits: row.try_get("cached_input_price_microcredits")?,
+                    output_price_microcredits: row.try_get("output_price_microcredits")?,
+                    enabled: row.try_get("enabled")?,
+                    created_at: Self::parse_created_at(&row.try_get::<String, _>("created_at")?)?,
+                    updated_at: Self::parse_created_at(&row.try_get::<String, _>("updated_at")?)?,
+                })
+            })
+            .collect()
+    }
+
+    pub async fn upsert_model_pricing(
+        &self,
+        req: ModelPricingUpsertRequest,
+    ) -> Result<ModelPricingItem> {
+        let model = req.model.trim();
+        if model.is_empty() {
+            anyhow::bail!("model must not be empty");
+        }
+        let exists = sqlx::query_scalar::<_, i64>(
+            r#"SELECT COUNT(*) FROM openai_models_catalog WHERE model_id = ?"#,
+        )
+        .bind(model)
+        .fetch_one(&self.pool)
+        .await
+        .context("failed to validate sqlite official model id for price override")?;
+        if exists == 0 {
+            anyhow::bail!("model must exist in official catalog before creating an override");
+        }
+
+        let service_tier = Self::normalize_service_tier(Some(req.service_tier.as_str()));
+        let cached_input_price_microcredits = req
+            .cached_input_price_microcredits
+            .unwrap_or_else(|| (req.input_price_microcredits / 10).max(0));
+        if req.input_price_microcredits < 0
+            || cached_input_price_microcredits < 0
+            || req.output_price_microcredits < 0
+        {
+            anyhow::bail!(
+                "input_price_microcredits/cached_input_price_microcredits/output_price_microcredits must be >= 0"
+            );
+        }
+
+        let existing = sqlx::query(
+            r#"
+            SELECT id, created_at
+            FROM model_pricing_overrides
+            WHERE model = ? AND service_tier = ?
+            "#,
+        )
+        .bind(model)
+        .bind(&service_tier)
+        .fetch_optional(&self.pool)
+        .await
+        .context("failed to query sqlite model pricing override before upsert")?;
+        let now = Utc::now();
+        let id = existing
+            .as_ref()
+            .and_then(|row| row.try_get::<Option<String>, _>("id").ok().flatten())
+            .unwrap_or_else(|| Uuid::new_v4().to_string());
+        let created_at = existing
+            .as_ref()
+            .and_then(|row| row.try_get::<Option<String>, _>("created_at").ok().flatten())
+            .unwrap_or_else(|| now.to_rfc3339());
+        let updated_at = now.to_rfc3339();
+
+        sqlx::query(
+            r#"
+            INSERT INTO model_pricing_overrides (
+                id,
+                model,
+                service_tier,
+                input_price_microcredits,
+                cached_input_price_microcredits,
+                output_price_microcredits,
+                enabled,
+                created_at,
+                updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(model, service_tier) DO UPDATE SET
+                id = excluded.id,
+                input_price_microcredits = excluded.input_price_microcredits,
+                cached_input_price_microcredits = excluded.cached_input_price_microcredits,
+                output_price_microcredits = excluded.output_price_microcredits,
+                enabled = excluded.enabled,
+                updated_at = excluded.updated_at
+            "#,
+        )
+        .bind(&id)
+        .bind(model)
+        .bind(&service_tier)
+        .bind(req.input_price_microcredits)
+        .bind(cached_input_price_microcredits)
+        .bind(req.output_price_microcredits)
+        .bind(req.enabled)
+        .bind(&created_at)
+        .bind(&updated_at)
+        .execute(&self.pool)
+        .await
+        .context("failed to upsert sqlite model pricing override")?;
+
+        Ok(ModelPricingItem {
+            id: Uuid::parse_str(&id).context("failed to parse sqlite model pricing id")?,
+            model: model.to_string(),
+            service_tier,
+            input_price_microcredits: req.input_price_microcredits,
+            cached_input_price_microcredits,
+            output_price_microcredits: req.output_price_microcredits,
+            enabled: req.enabled,
+            created_at: Self::parse_created_at(&created_at)?,
+            updated_at: Self::parse_created_at(&updated_at)?,
+        })
+    }
+
+    pub async fn delete_model_pricing(&self, pricing_id: Uuid) -> Result<()> {
+        let result = sqlx::query(
+            r#"
+            DELETE FROM model_pricing_overrides
+            WHERE id = ?
+            "#,
+        )
+        .bind(pricing_id.to_string())
+        .execute(&self.pool)
+        .await
+        .context("failed to delete sqlite model pricing override")?;
+        if result.rows_affected() == 0 {
+            anyhow::bail!("model pricing not found");
+        }
+        Ok(())
     }
 }
 
@@ -1264,5 +1867,67 @@ mod tests {
             logs[0].estimated_cost_microusd,
             summary.estimated_cost_microusd
         );
+    }
+
+    #[tokio::test]
+    async fn sqlite_usage_repo_supports_admin_models_catalog_and_pricing_overrides() {
+        let repo = build_repo("cp-admin-models").await;
+        let synced_at = Utc::now();
+        repo.apply_openai_model_catalog_items(
+            synced_at,
+            &[crate::tenant::OpenAiModelCatalogItem {
+                model_id: "gpt-5.4".to_string(),
+                owned_by: "openai".to_string(),
+                title: "GPT-5.4".to_string(),
+                description: Some("Latest reasoning model".to_string()),
+                context_window_tokens: Some(400_000),
+                max_output_tokens: Some(128_000),
+                knowledge_cutoff: Some("Mar 1, 2025".to_string()),
+                reasoning_token_support: Some(true),
+                input_price_microcredits: Some(1_250_000),
+                cached_input_price_microcredits: Some(125_000),
+                output_price_microcredits: Some(10_000_000),
+                pricing_notes: None,
+                input_modalities: vec!["text".to_string()],
+                output_modalities: vec!["text".to_string()],
+                endpoints: vec!["v1/responses".to_string()],
+                source_url: "https://developers.openai.com/api/docs/models/gpt-5.4".to_string(),
+                raw_text: Some("model page".to_string()),
+                synced_at,
+            }],
+        )
+        .await
+        .expect("apply sqlite admin models catalog");
+
+        let catalog = repo
+            .list_openai_model_catalog()
+            .await
+            .expect("list sqlite admin models catalog");
+        assert_eq!(catalog.len(), 1);
+        assert_eq!(catalog[0].model_id, "gpt-5.4");
+        assert_eq!(catalog[0].title, "GPT-5.4");
+        assert_eq!(catalog[0].endpoints, vec!["v1/responses".to_string()]);
+
+        let pricing = repo
+            .upsert_model_pricing(crate::tenant::ModelPricingUpsertRequest {
+                model: "gpt-5.4".to_string(),
+                service_tier: "default".to_string(),
+                input_price_microcredits: 2_000_000,
+                cached_input_price_microcredits: Some(200_000),
+                output_price_microcredits: 8_000_000,
+                enabled: true,
+            })
+            .await
+            .expect("upsert sqlite model pricing");
+        let all_pricing = repo
+            .list_model_pricing()
+            .await
+            .expect("list sqlite model pricing");
+
+        assert_eq!(all_pricing.len(), 1);
+        assert_eq!(all_pricing[0].id, pricing.id);
+        assert_eq!(all_pricing[0].model, "gpt-5.4");
+        assert_eq!(all_pricing[0].service_tier, "default");
+        assert_eq!(all_pricing[0].output_price_microcredits, 8_000_000);
     }
 }
