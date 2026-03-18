@@ -903,6 +903,7 @@ async fn stream_response_with_first_chunk(
     status: StatusCode,
     headers: &HeaderMap,
     upstream_response: reqwest::Response,
+    preserve_private_rate_limit_headers: bool,
     billing_session: Option<BillingSession>,
     stream_log_context: Option<StreamRequestLogContext>,
 ) -> Result<Response, StreamPreludeError> {
@@ -920,8 +921,7 @@ async fn stream_response_with_first_chunk(
             None => return Err(StreamPreludeError::EndOfStreamBeforeCommit),
         }
 
-        if let Some(error_context) =
-            parse_stream_prelude_error_context(status, headers, &prelude_bytes)
+        if let Some(error_context) = parse_stream_prelude_error_context(status, headers, &prelude_bytes)
         {
             return Err(StreamPreludeError::UpstreamErrorResponse(error_context));
         }
@@ -938,6 +938,9 @@ async fn stream_response_with_first_chunk(
     let mut billing_session = billing_session;
     if let Some(session) = billing_session.as_mut() {
         session.first_token_latency_ms = first_token_latency_ms;
+    }
+    if let Some(stream_log_context) = stream_log_context.as_ref() {
+        spawn_observed_rate_limit_report(&state, stream_log_context.account_id, headers);
     }
 
     let (tx, rx) =
@@ -996,7 +999,12 @@ async fn stream_response_with_first_chunk(
     });
 
     let body = Body::from_stream(ReceiverStream::new(rx));
-    Ok(response_with_body(status, headers, body))
+    Ok(response_with_body_with_rate_limit_policy(
+        status,
+        headers,
+        body,
+        preserve_private_rate_limit_headers,
+    ))
 }
 
 fn should_continue_stream_prelude(buffered: &[u8]) -> bool {

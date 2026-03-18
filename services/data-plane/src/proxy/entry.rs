@@ -40,6 +40,8 @@ use crate::auth::ApiPrincipal;
 use crate::outbound_proxy_runtime::UpstreamWebSocket;
 use crate::upstream_health::{
     LiveResultReportRequest, LiveResultReportSource, LiveResultReportStatus,
+    ObservedCreditsSnapshot, ObservedRateLimitSnapshot, ObservedRateLimitWindow,
+    ObservedRateLimitReportRequest, ObservedRateLimitReportSource,
 };
 
 const CHATGPT_ACCOUNT_ID: &str = "chatgpt-account-id";
@@ -1280,6 +1282,7 @@ pub async fn proxy_handler(
                     status,
                     &response_headers,
                     upstream_response,
+                    is_codex_compat_request(&parts.headers),
                     billing_session.clone(),
                     Some(StreamRequestLogContext {
                         account_id: account.id,
@@ -2478,6 +2481,7 @@ pub async fn proxy_websocket_handler(
                     &account.mode,
                     &account.base_url,
                 ),
+                preserve_private_rate_limit_events: is_codex_compat_request(&parts.headers),
                 request_headers: parts.headers.clone(),
                 request_path: path.clone(),
                 request_query: query.clone(),
@@ -2552,6 +2556,42 @@ fn spawn_seen_ok_reports(state: &Arc<AppState>, account_id: Uuid, model_id: Opti
                     .report_model_seen_ok(account_id, model_id)
                     .await;
             }
+        });
+    }
+}
+
+fn spawn_observed_rate_limit_report(state: &Arc<AppState>, account_id: Uuid, headers: &HeaderMap) {
+    let rate_limits = observed_rate_limits_from_headers(headers);
+    spawn_observed_rate_limit_report_with_source(
+        state,
+        account_id,
+        ObservedRateLimitReportSource::SseHeaders,
+        rate_limits,
+    );
+}
+
+fn spawn_observed_rate_limit_report_with_source(
+    state: &Arc<AppState>,
+    account_id: Uuid,
+    source: ObservedRateLimitReportSource,
+    rate_limits: Vec<ObservedRateLimitSnapshot>,
+) {
+    if rate_limits.is_empty() {
+        return;
+    }
+
+    if let Some(seen_ok_reporter) = state.seen_ok_reporter.clone() {
+        tokio::spawn(async move {
+            seen_ok_reporter
+                .report_observed_rate_limits(
+                    account_id,
+                    ObservedRateLimitReportRequest {
+                        source,
+                        observed_at: chrono::Utc::now(),
+                        rate_limits,
+                    },
+                )
+                .await;
         });
     }
 }
@@ -3011,5 +3051,46 @@ mod entry_route_selection_tests {
         assert_eq!(body["status_code"], 402);
         assert_eq!(body["error_code"], "deactivated_workspace");
         assert_eq!(body["upstream_request_id"], "req-passive-failed");
+    }
+
+    #[tokio::test]
+    async fn spawn_observed_rate_limit_report_posts_snapshot_payload() {
+        let control_plane = MockServer::start().await;
+        let account = account("observed-rate-limit");
+        Mock::given(method("POST"))
+            .and(path(format!(
+                "/internal/v1/upstream-accounts/{}/rate-limits/observed",
+                account.id
+            )))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({"ok": true})))
+            .mount(&control_plane)
+            .await;
+        let reporter = SeenOkReporter::new(
+            control_plane.uri(),
+            Arc::<str>::from("cp-internal-test-token"),
+            Duration::from_millis(250),
+            Duration::from_secs(0),
+        )
+        .expect("reporter must build");
+        let state = test_state_with_reporter(vec![account.clone()], Some(Arc::new(reporter)));
+        let mut headers = HeaderMap::new();
+        headers.insert("x-codex-primary-used-percent", "91.5".parse().unwrap());
+        headers.insert("x-codex-primary-window-minutes", "300".parse().unwrap());
+        headers.insert("x-codex-primary-reset-at", "1777777777".parse().unwrap());
+
+        spawn_observed_rate_limit_report(&state, account.id, &headers);
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        let requests = control_plane.received_requests().await.unwrap();
+        let observed_request = requests
+            .iter()
+            .find(|request| request.url.path().ends_with("/rate-limits/observed"))
+            .expect("expected observed rate-limit request");
+        let body: serde_json::Value =
+            serde_json::from_slice(&observed_request.body).expect("body should be json");
+
+        assert_eq!(body["source"], "sse_headers");
+        assert_eq!(body["rate_limits"][0]["limit_id"], "codex");
+        assert_eq!(body["rate_limits"][0]["primary"]["used_percent"], 91.5);
     }
 }

@@ -290,6 +290,85 @@ fn sticky_session_key_from_headers(headers: &HeaderMap) -> Option<String> {
     None
 }
 
+fn is_codex_compat_request(headers: &HeaderMap) -> bool {
+    headers.contains_key("x-codex-turn-state")
+        || headers.contains_key("x-codex-turn-metadata")
+        || headers.contains_key("x-codex-beta-features")
+}
+
+fn observed_rate_limits_from_headers(headers: &HeaderMap) -> Vec<ObservedRateLimitSnapshot> {
+    let primary = observed_rate_limit_window_from_headers(
+        headers,
+        "x-codex-primary-used-percent",
+        "x-codex-primary-window-minutes",
+        "x-codex-primary-reset-at",
+    );
+    let secondary = observed_rate_limit_window_from_headers(
+        headers,
+        "x-codex-secondary-used-percent",
+        "x-codex-secondary-window-minutes",
+        "x-codex-secondary-reset-at",
+    );
+    if primary.is_none() && secondary.is_none() {
+        return Vec::new();
+    }
+
+    vec![ObservedRateLimitSnapshot {
+        limit_id: Some("codex".to_string()),
+        limit_name: header_string(headers, "x-codex-limit-name"),
+        primary,
+        secondary,
+        credits: observed_credits_from_headers(headers),
+        plan_type: None,
+    }]
+}
+
+fn observed_rate_limit_window_from_headers(
+    headers: &HeaderMap,
+    used_percent_header: &str,
+    window_minutes_header: &str,
+    resets_at_header: &str,
+) -> Option<ObservedRateLimitWindow> {
+    let used_percent = header_string(headers, used_percent_header)?.parse::<f64>().ok()?;
+    let window_minutes = header_string(headers, window_minutes_header)
+        .and_then(|value| value.parse::<i64>().ok());
+    let resets_at = header_string(headers, resets_at_header)
+        .and_then(|value| value.parse::<i64>().ok())
+        .and_then(|timestamp| chrono::DateTime::<chrono::Utc>::from_timestamp(timestamp, 0));
+    Some(ObservedRateLimitWindow {
+        used_percent,
+        window_minutes,
+        resets_at,
+    })
+}
+
+fn observed_credits_from_headers(headers: &HeaderMap) -> Option<ObservedCreditsSnapshot> {
+    let has_credits = header_bool(headers, "x-codex-credits-has-credits")?;
+    let unlimited = header_bool(headers, "x-codex-credits-unlimited")?;
+    Some(ObservedCreditsSnapshot {
+        has_credits,
+        unlimited,
+        balance: header_string(headers, "x-codex-credits-balance"),
+    })
+}
+
+fn header_string(headers: &HeaderMap, name: &str) -> Option<String> {
+    headers
+        .get(name)
+        .and_then(|value| value.to_str().ok())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToString::to_string)
+}
+
+fn header_bool(headers: &HeaderMap, name: &str) -> Option<bool> {
+    match header_string(headers, name)?.to_ascii_lowercase().as_str() {
+        "1" | "true" | "yes" | "on" => Some(true),
+        "0" | "false" | "no" | "off" => Some(false),
+        _ => None,
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum UpstreamErrorClass {
     TokenInvalidated,

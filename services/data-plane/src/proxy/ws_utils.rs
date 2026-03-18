@@ -15,19 +15,128 @@ fn response_with_bytes(status: StatusCode, headers: &HeaderMap, body: bytes::Byt
 }
 
 fn response_with_body(status: StatusCode, headers: &HeaderMap, body: Body) -> Response {
+    response_with_body_with_rate_limit_policy(status, headers, body, false)
+}
+
+fn response_with_body_with_rate_limit_policy(
+    status: StatusCode,
+    headers: &HeaderMap,
+    body: Body,
+    preserve_private_rate_limit_headers: bool,
+) -> Response {
     let mut response = Response::builder().status(status);
     if let Some(target_headers) = response.headers_mut() {
         for (name, value) in headers {
-            if is_hop_by_hop_header(name) || *name == CONTENT_LENGTH {
+            if is_hop_by_hop_header(name)
+                || *name == CONTENT_LENGTH
+                || is_upstream_private_rate_limit_header(name)
+            {
                 continue;
             }
             target_headers.insert(name, value.clone());
+        }
+        if preserve_private_rate_limit_headers {
+            apply_normalized_private_rate_limit_headers(target_headers, headers);
         }
     }
 
     response
         .body(body)
         .unwrap_or_else(|_| Response::new(Body::from("internal response error")))
+}
+
+fn is_upstream_private_rate_limit_header(name: &HeaderName) -> bool {
+    let header = name.as_str().to_ascii_lowercase();
+    if !header.starts_with("x-codex-") {
+        return false;
+    }
+
+    header.contains("-primary-")
+        || header.contains("-secondary-")
+        || header.starts_with("x-codex-credits-")
+        || header.ends_with("-limit-name")
+        || header == "x-codex-promo-message"
+}
+
+fn apply_normalized_private_rate_limit_headers(
+    target_headers: &mut HeaderMap,
+    source_headers: &HeaderMap,
+) {
+    let Some(snapshot) = observed_rate_limits_from_headers(source_headers).into_iter().next() else {
+        return;
+    };
+
+    let fallback_limit_name = header_string(source_headers, "x-codex-limit-name");
+    if let Some(limit_name) = snapshot
+        .limit_name
+        .as_deref()
+        .or(fallback_limit_name.as_deref())
+    {
+        insert_private_rate_limit_header(target_headers, "x-codex-limit-name", limit_name);
+    }
+    if let Some(primary) = snapshot.primary.as_ref() {
+        insert_private_rate_limit_header(
+            target_headers,
+            "x-codex-primary-used-percent",
+            &primary.used_percent.to_string(),
+        );
+        if let Some(window_minutes) = primary.window_minutes {
+            insert_private_rate_limit_header(
+                target_headers,
+                "x-codex-primary-window-minutes",
+                &window_minutes.to_string(),
+            );
+        }
+        if let Some(resets_at) = primary.resets_at {
+            insert_private_rate_limit_header(
+                target_headers,
+                "x-codex-primary-reset-at",
+                &resets_at.timestamp().to_string(),
+            );
+        }
+    }
+    if let Some(secondary) = snapshot.secondary.as_ref() {
+        insert_private_rate_limit_header(
+            target_headers,
+            "x-codex-secondary-used-percent",
+            &secondary.used_percent.to_string(),
+        );
+        if let Some(window_minutes) = secondary.window_minutes {
+            insert_private_rate_limit_header(
+                target_headers,
+                "x-codex-secondary-window-minutes",
+                &window_minutes.to_string(),
+            );
+        }
+        if let Some(resets_at) = secondary.resets_at {
+            insert_private_rate_limit_header(
+                target_headers,
+                "x-codex-secondary-reset-at",
+                &resets_at.timestamp().to_string(),
+            );
+        }
+    }
+    if let Some(credits) = snapshot.credits.as_ref() {
+        insert_private_rate_limit_header(
+            target_headers,
+            "x-codex-credits-has-credits",
+            if credits.has_credits { "true" } else { "false" },
+        );
+        insert_private_rate_limit_header(
+            target_headers,
+            "x-codex-credits-unlimited",
+            if credits.unlimited { "true" } else { "false" },
+        );
+        if let Some(balance) = credits.balance.as_deref() {
+            insert_private_rate_limit_header(target_headers, "x-codex-credits-balance", balance);
+        }
+    }
+}
+
+fn insert_private_rate_limit_header(target_headers: &mut HeaderMap, name: &'static str, value: &str) {
+    if let Ok(parsed) = HeaderValue::from_str(value) {
+        target_headers.insert(HeaderName::from_static(name), parsed);
+    }
 }
 
 #[derive(Debug)]
@@ -62,6 +171,7 @@ struct WsLogicalUsageConnectionContext {
     api_key_id: Option<Uuid>,
     principal: Option<ApiPrincipal>,
     adapt_codex_responses_request: bool,
+    preserve_private_rate_limit_events: bool,
     request_headers: HeaderMap,
     request_path: String,
     request_query: Option<String>,
@@ -813,6 +923,14 @@ async fn proxy_websocket_streams(
                 }
 
                 let pending_events = tracker.observe_upstream_message(&message, &ws_usage_context);
+                if let Some(rate_limits) = extract_observed_rate_limits_from_ws_message(&message) {
+                    spawn_observed_rate_limit_report_with_source(
+                        &state,
+                        ws_usage_context.account_id,
+                        ObservedRateLimitReportSource::WebsocketEvent,
+                        rate_limits,
+                    );
+                }
                 let pending_billing_actions = tracker.drain_pending_billing_actions();
                 for event in pending_events {
                     state.event_sink.emit_request_log(event).await;
@@ -834,9 +952,14 @@ async fn proxy_websocket_streams(
                     None
                 };
 
-                if let Some(mapped) = tungstenite_message_to_axum(message) {
-                    if downstream_sender.send(mapped).await.is_err() {
-                        break WS_RELEASE_REASON_CONNECTION_CLOSED;
+                if let Some(message) = maybe_rewrite_upstream_ws_rate_limit_message(
+                    message,
+                    ws_usage_context.preserve_private_rate_limit_events,
+                ) {
+                    if let Some(mapped) = tungstenite_message_to_axum(message) {
+                        if downstream_sender.send(mapped).await.is_err() {
+                            break WS_RELEASE_REASON_CONNECTION_CLOSED;
+                        }
                     }
                 }
 
@@ -962,6 +1085,171 @@ async fn build_retried_ws_tracked_request(
 
 fn parse_ws_json_text(text: &str) -> Option<Value> {
     serde_json::from_str::<Value>(text).ok()
+}
+
+fn extract_observed_rate_limits_from_ws_message(
+    message: &TungsteniteMessage,
+) -> Option<Vec<ObservedRateLimitSnapshot>> {
+    let TungsteniteMessage::Text(text) = message else {
+        return None;
+    };
+    let value = parse_ws_json_text(text.as_ref())?;
+    if !is_ws_rate_limit_event(&value) {
+        return None;
+    }
+
+    let rate_limits = value.get("rate_limits")?;
+    let primary = observed_rate_limit_window_from_ws_value(rate_limits.get("primary"));
+    let secondary = observed_rate_limit_window_from_ws_value(rate_limits.get("secondary"));
+    if primary.is_none() && secondary.is_none() {
+        return None;
+    }
+
+    Some(vec![ObservedRateLimitSnapshot {
+        limit_id: Some("codex".to_string()),
+        limit_name: None,
+        primary,
+        secondary,
+        credits: observed_credits_from_ws_value(value.get("credits")),
+        plan_type: ws_string_at_path(&value, &["plan_type"]).map(ToString::to_string),
+    }])
+}
+
+fn maybe_rewrite_upstream_ws_rate_limit_message(
+    message: TungsteniteMessage,
+    preserve_private_rate_limit_events: bool,
+) -> Option<TungsteniteMessage> {
+    let text = match message {
+        TungsteniteMessage::Text(text) => text,
+        other => return Some(other),
+    };
+    let Some(value) = parse_ws_json_text(text.as_ref()) else {
+        return Some(TungsteniteMessage::Text(text));
+    };
+    if !is_ws_rate_limit_event(&value) {
+        return Some(TungsteniteMessage::Text(text));
+    }
+    if !preserve_private_rate_limit_events {
+        return None;
+    }
+
+    let Some(rewritten) = build_rewritten_ws_rate_limit_event(&value) else {
+        return None;
+    };
+    Some(TungsteniteMessage::Text(rewritten.to_string().into()))
+}
+
+fn build_rewritten_ws_rate_limit_event(value: &Value) -> Option<Value> {
+    let snapshots = extract_observed_rate_limits_from_ws_message(&TungsteniteMessage::Text(
+        value.to_string().into(),
+    ))?;
+    let snapshot = snapshots.first()?;
+    let limit_reached = snapshot
+        .primary
+        .as_ref()
+        .is_some_and(|window| window.used_percent >= 100.0)
+        || snapshot
+            .secondary
+            .as_ref()
+            .is_some_and(|window| window.used_percent >= 100.0);
+
+    let mut rate_limits = serde_json::Map::new();
+    rate_limits.insert("allowed".to_string(), Value::Bool(!limit_reached));
+    rate_limits.insert("limit_reached".to_string(), Value::Bool(limit_reached));
+    rate_limits.insert(
+        "primary".to_string(),
+        snapshot
+            .primary
+            .as_ref()
+            .map(serialize_ws_rate_limit_window)
+            .unwrap_or(Value::Null),
+    );
+    rate_limits.insert(
+        "secondary".to_string(),
+        snapshot
+            .secondary
+            .as_ref()
+            .map(serialize_ws_rate_limit_window)
+            .unwrap_or(Value::Null),
+    );
+
+    let mut event = serde_json::Map::new();
+    event.insert("type".to_string(), Value::String("codex.rate_limits".to_string()));
+    if let Some(plan_type) = snapshot.plan_type.as_ref() {
+        event.insert("plan_type".to_string(), Value::String(plan_type.clone()));
+    }
+    event.insert("rate_limits".to_string(), Value::Object(rate_limits));
+    event.insert("code_review_rate_limits".to_string(), Value::Null);
+    event.insert(
+        "credits".to_string(),
+        snapshot
+            .credits
+            .as_ref()
+            .map(serialize_ws_credits_snapshot)
+            .unwrap_or(Value::Null),
+    );
+    Some(Value::Object(event))
+}
+
+fn observed_rate_limit_window_from_ws_value(value: Option<&Value>) -> Option<ObservedRateLimitWindow> {
+    let value = value?;
+    Some(ObservedRateLimitWindow {
+        used_percent: value.get("used_percent")?.as_f64()?,
+        window_minutes: value.get("window_minutes").and_then(Value::as_i64),
+        resets_at: value
+            .get("reset_at")
+            .and_then(Value::as_i64)
+            .and_then(|timestamp| chrono::DateTime::<chrono::Utc>::from_timestamp(timestamp, 0)),
+    })
+}
+
+fn observed_credits_from_ws_value(value: Option<&Value>) -> Option<ObservedCreditsSnapshot> {
+    let value = value?;
+    Some(ObservedCreditsSnapshot {
+        has_credits: value.get("has_credits")?.as_bool()?,
+        unlimited: value.get("unlimited")?.as_bool()?,
+        balance: value
+            .get("balance")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|item| !item.is_empty())
+            .map(ToString::to_string),
+    })
+}
+
+fn serialize_ws_rate_limit_window(window: &ObservedRateLimitWindow) -> Value {
+    let mut value = serde_json::Map::new();
+    value.insert("used_percent".to_string(), serde_json::json!(window.used_percent));
+    value.insert(
+        "window_minutes".to_string(),
+        window
+            .window_minutes
+            .map(serde_json::Value::from)
+            .unwrap_or(Value::Null),
+    );
+    value.insert(
+        "reset_at".to_string(),
+        window
+            .resets_at
+            .map(|reset_at| Value::from(reset_at.timestamp()))
+            .unwrap_or(Value::Null),
+    );
+    Value::Object(value)
+}
+
+fn serialize_ws_credits_snapshot(credits: &ObservedCreditsSnapshot) -> Value {
+    let mut value = serde_json::Map::new();
+    value.insert("has_credits".to_string(), Value::Bool(credits.has_credits));
+    value.insert("unlimited".to_string(), Value::Bool(credits.unlimited));
+    value.insert(
+        "balance".to_string(),
+        credits
+            .balance
+            .as_ref()
+            .map(|balance| Value::String(balance.clone()))
+            .unwrap_or(Value::Null),
+    );
+    Value::Object(value)
 }
 
 fn maybe_adapt_ws_downstream_message_for_codex_profile(
@@ -1390,6 +1678,10 @@ fn is_ws_error_event(value: &Value) -> bool {
     matches!(extract_ws_event_type(value), Some("error"))
 }
 
+fn is_ws_rate_limit_event(value: &Value) -> bool {
+    matches!(extract_ws_event_type(value), Some("codex.rate_limits"))
+}
+
 fn axum_message_to_tungstenite(message: AxumWsMessage) -> TungsteniteMessage {
     match message {
         AxumWsMessage::Text(text) => TungsteniteMessage::Text(text.to_string().into()),
@@ -1461,11 +1753,13 @@ mod tests {
     use codex_pool_core::model::UpstreamMode;
     use serde_json::Value;
     use std::time::Duration;
+    use tokio_tungstenite::tungstenite::Message as TungsteniteMessage;
 
     use super::{
         build_upstream_url, build_upstream_ws_url, compose_upstream_path, ejection_ttl_for_status,
-        ensure_client_version_query, extract_upstream_error_code, is_body_too_large_error,
-        is_compatibility_passthrough_header, is_websocket_passthrough_header,
+        ensure_client_version_query, extract_observed_rate_limits_from_ws_message,
+        extract_upstream_error_code, is_body_too_large_error, is_compatibility_passthrough_header,
+        is_websocket_passthrough_header, maybe_rewrite_upstream_ws_rate_limit_message,
         maybe_adapt_ws_downstream_message_for_codex_profile, parse_request_policy_context,
         recovery_action_for_upstream_error_code,
         sticky_session_key_from_headers, WsLogicalResponseTracker,
@@ -1734,6 +2028,7 @@ mod tests {
             api_key_id: None,
             principal: None,
             adapt_codex_responses_request: false,
+            preserve_private_rate_limit_events: false,
             request_headers: HeaderMap::new(),
             request_path: "/v1/responses".to_string(),
             request_query: None,
@@ -1925,5 +2220,133 @@ mod tests {
         };
         let value = serde_json::from_str::<Value>(text.as_ref()).unwrap();
         assert_eq!(value["service_tier"], "priority");
+    }
+
+    #[test]
+    fn extracts_observed_rate_limits_from_codex_ws_event() {
+        let message = TungsteniteMessage::Text(
+            serde_json::json!({
+                "type": "codex.rate_limits",
+                "plan_type": "plus",
+                "rate_limits": {
+                    "allowed": true,
+                    "limit_reached": false,
+                    "primary": {
+                        "used_percent": 42.0,
+                        "window_minutes": 60,
+                        "reset_at": 1700000000
+                    },
+                    "secondary": {
+                        "used_percent": 75.0,
+                        "window_minutes": 10080,
+                        "reset_at": 1700003600
+                    }
+                },
+                "credits": {
+                    "has_credits": true,
+                    "unlimited": false,
+                    "balance": "123"
+                },
+                "promo": null
+            })
+            .to_string()
+            .into(),
+        );
+
+        let snapshots = extract_observed_rate_limits_from_ws_message(&message)
+            .expect("codex rate limit event should produce observed snapshots");
+
+        assert_eq!(snapshots.len(), 1);
+        assert_eq!(snapshots[0].limit_id.as_deref(), Some("codex"));
+        assert_eq!(snapshots[0].plan_type.as_deref(), Some("plus"));
+        assert_eq!(snapshots[0].primary.as_ref().map(|window| window.used_percent), Some(42.0));
+        assert_eq!(
+            snapshots[0]
+                .secondary
+                .as_ref()
+                .and_then(|window| window.window_minutes),
+            Some(10_080)
+        );
+        assert_eq!(
+            snapshots[0].credits.as_ref().and_then(|credits| credits.balance.as_deref()),
+            Some("123")
+        );
+    }
+
+    #[test]
+    fn plain_ws_clients_do_not_receive_codex_rate_limit_events() {
+        let message = TungsteniteMessage::Text(
+            serde_json::json!({
+                "type": "codex.rate_limits",
+                "plan_type": "plus",
+                "rate_limits": {
+                    "allowed": true,
+                    "limit_reached": false,
+                    "primary": {
+                        "used_percent": 42.0,
+                        "window_minutes": 60,
+                        "reset_at": 1700000000
+                    },
+                    "secondary": null
+                },
+                "credits": {
+                    "has_credits": true,
+                    "unlimited": false,
+                    "balance": "123"
+                }
+            })
+            .to_string()
+            .into(),
+        );
+
+        let rewritten = maybe_rewrite_upstream_ws_rate_limit_message(message, false);
+
+        assert!(
+            rewritten.is_none(),
+            "plain websocket clients should not receive private codex rate limit events"
+        );
+    }
+
+    #[test]
+    fn compat_ws_clients_receive_rewritten_codex_rate_limit_events() {
+        let message = TungsteniteMessage::Text(
+            serde_json::json!({
+                "type": "codex.rate_limits",
+                "plan_type": "plus",
+                "rate_limits": {
+                    "allowed": true,
+                    "limit_reached": false,
+                    "primary": {
+                        "used_percent": 42.0,
+                        "window_minutes": 60,
+                        "reset_at": 1700000000
+                    },
+                    "secondary": null
+                },
+                "credits": {
+                    "has_credits": true,
+                    "unlimited": false,
+                    "balance": "123"
+                },
+                "promo": {
+                    "message": "should not be raw passthrough"
+                }
+            })
+            .to_string()
+            .into(),
+        );
+
+        let rewritten = maybe_rewrite_upstream_ws_rate_limit_message(message, true)
+            .expect("compat websocket clients should receive a rewritten event");
+        let TungsteniteMessage::Text(text) = rewritten else {
+            panic!("expected rewritten websocket rate limit event to stay as text");
+        };
+        let value = serde_json::from_str::<Value>(text.as_ref()).unwrap();
+
+        assert_eq!(value["type"], "codex.rate_limits");
+        assert_eq!(value["plan_type"], "plus");
+        assert_eq!(value["rate_limits"]["primary"]["used_percent"], 42.0);
+        assert_eq!(value["credits"]["balance"], "123");
+        assert!(value.get("promo").is_none(), "rewritten event should drop raw promo payload");
     }
 }

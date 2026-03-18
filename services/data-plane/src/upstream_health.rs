@@ -3,6 +3,7 @@ use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
 
 use anyhow::Context;
+use chrono::{DateTime, Utc};
 use serde::Serialize;
 use uuid::Uuid;
 
@@ -171,6 +172,54 @@ pub struct LiveResultReportRequest {
     pub model: Option<String>,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ObservedRateLimitReportSource {
+    SseHeaders,
+    WebsocketEvent,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct ObservedRateLimitWindow {
+    pub used_percent: f64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub window_minutes: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub resets_at: Option<DateTime<Utc>>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct ObservedCreditsSnapshot {
+    pub has_credits: bool,
+    pub unlimited: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub balance: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct ObservedRateLimitSnapshot {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub limit_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub limit_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub primary: Option<ObservedRateLimitWindow>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub secondary: Option<ObservedRateLimitWindow>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub credits: Option<ObservedCreditsSnapshot>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub plan_type: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct ObservedRateLimitReportRequest {
+    pub source: ObservedRateLimitReportSource,
+    pub observed_at: DateTime<Utc>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub rate_limits: Vec<ObservedRateLimitSnapshot>,
+}
+
 #[derive(Clone)]
 pub struct SeenOkReporter {
     client: reqwest::Client,
@@ -327,6 +376,34 @@ impl SeenOkReporter {
             account_id,
             report.model.as_deref(),
             "live result",
+        )
+        .await;
+    }
+
+    pub async fn report_observed_rate_limits(
+        &self,
+        account_id: Uuid,
+        report: ObservedRateLimitReportRequest,
+    ) {
+        if report.rate_limits.is_empty() {
+            return;
+        }
+
+        let endpoint = format!(
+            "{}/internal/v1/upstream-accounts/{account_id}/rate-limits/observed",
+            self.endpoint_base
+        );
+        let request = self
+            .client
+            .post(&endpoint)
+            .bearer_auth(self.internal_auth_token.as_ref())
+            .json(&report);
+        self.log_if_report_failed(
+            request,
+            &endpoint,
+            account_id,
+            None,
+            "observed rate limits",
         )
         .await;
     }
@@ -677,6 +754,62 @@ mod tests {
         assert_eq!(body["error_code"], "deactivated_workspace");
         assert_eq!(body["error_message"], "workspace is deactivated");
         assert_eq!(body["upstream_request_id"], "req-live-failed");
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn seen_ok_reporter_posts_observed_rate_limit_payload() {
+        let control_plane = MockServer::start().await;
+        let account_id = Uuid::new_v4();
+        Mock::given(method("POST"))
+            .and(path(format!(
+                "/internal/v1/upstream-accounts/{account_id}/rate-limits/observed"
+            )))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({"ok": true})))
+            .mount(&control_plane)
+            .await;
+
+        let reporter = SeenOkReporter::new(
+            control_plane.uri(),
+            Arc::<str>::from("internal-token"),
+            Duration::from_millis(250),
+            Duration::from_secs(0),
+        )
+        .expect("reporter must build");
+
+        reporter
+            .report_observed_rate_limits(
+                account_id,
+                ObservedRateLimitReportRequest {
+                    source: ObservedRateLimitReportSource::SseHeaders,
+                    observed_at: Utc::now(),
+                    rate_limits: vec![ObservedRateLimitSnapshot {
+                        limit_id: Some("codex".to_string()),
+                        limit_name: None,
+                        primary: Some(ObservedRateLimitWindow {
+                            used_percent: 91.5,
+                            window_minutes: Some(300),
+                            resets_at: Some(Utc::now()),
+                        }),
+                        secondary: None,
+                        credits: None,
+                        plan_type: None,
+                    }],
+                },
+            )
+            .await;
+
+        let requests = control_plane.received_requests().await.unwrap();
+        let observed_request = requests
+            .iter()
+            .find(|request| request.url.path().ends_with("/rate-limits/observed"))
+            .expect("expected observed rate-limit request");
+        let body: serde_json::Value =
+            serde_json::from_slice(&observed_request.body).expect("request body should be json");
+
+        assert_eq!(body["source"], "sse_headers");
+        assert_eq!(body["rate_limits"][0]["limit_id"], "codex");
+        assert_eq!(body["rate_limits"][0]["primary"]["used_percent"], 91.5);
+        assert_eq!(body["rate_limits"][0]["primary"]["window_minutes"], 300);
     }
 }
 
