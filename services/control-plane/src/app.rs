@@ -24,7 +24,8 @@ use codex_pool_core::api::{
     ModelRoutingSettingsResponse, OAuthAccountStatusResponse, OAuthFamilyActionResponse,
     OAuthImportItemStatus, OAuthImportJobActionResponse, OAuthImportJobItemsResponse,
     OAuthImportJobSummary, OAuthRateLimitRefreshJobStatus, OAuthRateLimitRefreshJobSummary,
-    PolicyResponse, ProductEdition, ResolveUpstreamErrorTemplateRequest,
+    OAuthRateLimitSnapshot, OAuthRateLimitWindow, PolicyResponse, ProductEdition,
+    ResolveUpstreamErrorTemplateRequest,
     ResolveUpstreamErrorTemplateResponse, RoutingPlanVersionsResponse, RoutingProfilesResponse,
     SystemCapabilitiesResponse, TenantUsageLeaderboardResponse,
     UpdateAiErrorLearningSettingsRequest, UpdateBuiltinErrorTemplateRequest,
@@ -1998,7 +1999,8 @@ pub fn build_app_with_store_ttl_usage_repos_import_store_admin_auth_and_sqlite_r
     admin_auth: AdminAuthService,
     sqlite_usage_repo: Option<Arc<SqliteUsageRepo>>,
 ) -> Router {
-    let outbound_proxy_runtime = Arc::new(crate::outbound_proxy_runtime::OutboundProxyRuntime::new());
+    let outbound_proxy_runtime =
+        Arc::new(crate::outbound_proxy_runtime::OutboundProxyRuntime::new());
     outbound_proxy_runtime.attach_store(store.clone());
     build_app_with_store_ttl_usage_repos_import_store_admin_auth_and_sqlite_repo_and_proxy_runtime(
         store,
@@ -2362,6 +2364,10 @@ pub fn build_app_with_store_ttl_usage_repos_import_store_admin_auth_and_sqlite_r
         .route(
             "/internal/v1/upstream-accounts/{account_id}/models/seen-ok",
             post(internal_mark_upstream_model_seen_ok),
+        )
+        .route(
+            "/internal/v1/upstream-accounts/{account_id}/rate-limits/observed",
+            post(internal_update_observed_rate_limits),
         )
         .route(
             "/internal/v1/upstream-errors/resolve",

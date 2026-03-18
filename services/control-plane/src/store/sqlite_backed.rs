@@ -759,6 +759,18 @@ impl ControlPlaneStore for SqliteBackedStore {
             .await?;
         self.persist_if_revision_changed(before).await
     }
+
+    async fn update_oauth_rate_limit_cache_from_observation(
+        &self,
+        account_id: Uuid,
+        rate_limits: Vec<OAuthRateLimitSnapshot>,
+        observed_at: DateTime<Utc>,
+    ) -> Result<()> {
+        self.inner
+            .update_oauth_rate_limit_cache_from_observation(account_id, rate_limits, observed_at)
+            .await?;
+        self.persist_state().await
+    }
 }
 
 #[cfg(test)]

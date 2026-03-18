@@ -704,7 +704,10 @@ impl PostgresStore {
         rate_limits: Vec<OAuthRateLimitSnapshot>,
         fetched_at: DateTime<Utc>,
     ) -> Result<()> {
-        let expires_at = fetched_at + Duration::seconds(rate_limit_cache_ttl_sec_from_env());
+        let (blocked_until, block_reason) = derive_rate_limit_block(&rate_limits, fetched_at);
+        let expires_at = blocked_until
+            .unwrap_or_else(|| fetched_at + Duration::seconds(rate_limit_cache_ttl_sec_from_env()));
+        let last_error_message = block_reason.as_deref().map(rate_limit_block_message);
         let payload = serde_json::to_string(&rate_limits)
             .context("failed to encode oauth rate-limit snapshots json")?;
         let mut tx = self
@@ -724,14 +727,14 @@ impl PostgresStore {
                 last_error_message,
                 updated_at
             )
-            VALUES ($1, $2::jsonb, $3, $4, NULL, NULL, $3)
+            VALUES ($1, $2::jsonb, $3, $4, $5, $6, $3)
             ON CONFLICT (account_id) DO UPDATE
             SET
                 rate_limits_json = EXCLUDED.rate_limits_json,
                 fetched_at = EXCLUDED.fetched_at,
                 expires_at = EXCLUDED.expires_at,
-                last_error_code = NULL,
-                last_error_message = NULL,
+                last_error_code = EXCLUDED.last_error_code,
+                last_error_message = EXCLUDED.last_error_message,
                 updated_at = EXCLUDED.updated_at
             "#,
         )
@@ -739,6 +742,8 @@ impl PostgresStore {
         .bind(payload)
         .bind(fetched_at)
         .bind(expires_at)
+        .bind(block_reason)
+        .bind(last_error_message)
         .execute(tx.as_mut())
         .await
         .context("failed to upsert oauth rate-limit cache snapshot")?;

@@ -738,6 +738,16 @@ impl ControlPlaneStore for InMemoryStore {
 
         Ok(())
     }
+
+    async fn update_oauth_rate_limit_cache_from_observation(
+        &self,
+        account_id: Uuid,
+        rate_limits: Vec<OAuthRateLimitSnapshot>,
+        observed_at: DateTime<Utc>,
+    ) -> Result<()> {
+        self.persist_rate_limit_cache_success_inner(account_id, rate_limits, observed_at);
+        Ok(())
+    }
 }
 
 fn truncate_error_message(raw: String) -> String {
@@ -1224,6 +1234,70 @@ mod tests {
         let status = store.oauth_account_status(account.id).await.unwrap();
         assert_eq!(status.chatgpt_plan_type.as_deref(), Some("team"));
         assert_eq!(status.workspace_name.as_deref(), Some("OAI-03.09"));
+    }
+
+    #[tokio::test]
+    async fn in_memory_observed_rate_limits_disable_effective_account_immediately() {
+        let cipher = CredentialCipher::from_base64_key(
+            &base64::engine::general_purpose::STANDARD.encode([12_u8; 32]),
+        )
+        .unwrap();
+        let store = InMemoryStore::new_with_oauth(Arc::new(StaticOAuthTokenClient), Some(cipher));
+
+        let account = store
+            .import_oauth_refresh_token(ImportOAuthRefreshTokenRequest {
+                label: "oauth-observed-rate-limit".to_string(),
+                base_url: "https://chatgpt.com/backend-api/codex".to_string(),
+                refresh_token: "rt-observed-rate-limit".to_string(),
+                chatgpt_account_id: None,
+                mode: Some(UpstreamMode::CodexOauth),
+                enabled: Some(true),
+                priority: Some(100),
+                chatgpt_plan_type: None,
+                source_type: Some("codex".to_string()),
+            })
+            .await
+            .unwrap();
+
+        let observed_at = Utc::now();
+        store
+            .update_oauth_rate_limit_cache_from_observation(
+                account.id,
+                vec![OAuthRateLimitSnapshot {
+                    limit_id: Some("codex".to_string()),
+                    limit_name: Some("Codex".to_string()),
+                    primary: Some(OAuthRateLimitWindow {
+                        used_percent: 100.0,
+                        window_minutes: Some(300),
+                        resets_at: Some(observed_at + Duration::minutes(30)),
+                    }),
+                    secondary: None,
+                }],
+                observed_at,
+            )
+            .await
+            .unwrap();
+
+        let status = store.oauth_account_status(account.id).await.unwrap();
+        assert_eq!(status.rate_limits.len(), 1);
+        assert_eq!(status.rate_limits[0].limit_id.as_deref(), Some("codex"));
+        assert!(status.rate_limits_fetched_at.is_some());
+        assert_eq!(
+            status.rate_limits_last_error_code.as_deref(),
+            Some("primary_window_exhausted")
+        );
+        assert!(
+            status
+                .rate_limits_last_error
+                .as_deref()
+                .is_some_and(|message| message.contains("primary"))
+        );
+        assert!(
+            status
+                .rate_limits_expires_at
+                .is_some_and(|expires_at| expires_at >= observed_at + Duration::minutes(30))
+        );
+        assert!(!status.effective_enabled);
     }
 
     #[tokio::test]

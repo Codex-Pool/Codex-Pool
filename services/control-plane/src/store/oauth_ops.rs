@@ -302,16 +302,18 @@ impl InMemoryStore {
         rate_limits: Vec<OAuthRateLimitSnapshot>,
         fetched_at: DateTime<Utc>,
     ) {
+        let (blocked_until, block_reason) = derive_rate_limit_block(&rate_limits, fetched_at);
+        let expires_at = blocked_until
+            .unwrap_or_else(|| fetched_at + Duration::seconds(rate_limit_cache_ttl_sec_from_env()));
+        let last_error = block_reason.as_deref().map(rate_limit_block_message);
         self.oauth_rate_limit_caches.write().unwrap().insert(
             account_id,
             OAuthRateLimitCacheRecord {
                 rate_limits,
                 fetched_at: Some(fetched_at),
-                expires_at: Some(
-                    fetched_at + Duration::seconds(rate_limit_cache_ttl_sec_from_env()),
-                ),
-                last_error_code: None,
-                last_error: None,
+                expires_at: Some(expires_at),
+                last_error_code: block_reason,
+                last_error,
             },
         );
         self.revision.fetch_add(1, Ordering::Relaxed);

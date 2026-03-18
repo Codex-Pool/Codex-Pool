@@ -221,6 +221,10 @@ fn is_blocking_rate_limit_error(
     let error_message = rate_limits_last_error.unwrap_or_default();
     is_quota_error_signal(error_code, error_message)
         || is_auth_error_signal(error_code, error_message)
+        || matches!(
+            normalize_health_error_code(error_code).as_str(),
+            "primary_window_exhausted" | "secondary_window_exhausted"
+        )
 }
 
 fn has_active_rate_limit_block(
@@ -370,6 +374,18 @@ fn derive_rate_limit_block(
     }
 
     (None, None)
+}
+
+fn rate_limit_block_message(block_reason: &str) -> String {
+    match normalize_health_error_code(block_reason).as_str() {
+        "secondary_window_exhausted" => {
+            "secondary rate limit window is exhausted until reset".to_string()
+        }
+        "primary_window_exhausted" => {
+            "primary rate limit window is exhausted until reset".to_string()
+        }
+        _ => "rate limit window is exhausted until reset".to_string(),
+    }
 }
 
 fn find_blocked_until_for_window(
@@ -799,6 +815,14 @@ pub trait ControlPlaneStore: Send + Sync {
     async fn maybe_refresh_oauth_rate_limit_cache_on_seen_ok(
         &self,
         _account_id: Uuid,
+    ) -> Result<()> {
+        Ok(())
+    }
+    async fn update_oauth_rate_limit_cache_from_observation(
+        &self,
+        _account_id: Uuid,
+        _rate_limits: Vec<OAuthRateLimitSnapshot>,
+        _observed_at: DateTime<Utc>,
     ) -> Result<()> {
         Ok(())
     }

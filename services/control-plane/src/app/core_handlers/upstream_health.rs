@@ -99,6 +99,35 @@ struct InternalModelSeenOkRequest {
     status_code: Option<u16>,
 }
 
+#[derive(Debug, Deserialize)]
+struct InternalObservedRateLimitRequest {
+    #[serde(default)]
+    observed_at: Option<DateTime<Utc>>,
+    #[serde(default)]
+    rate_limits: Vec<InternalObservedRateLimitSnapshot>,
+}
+
+#[derive(Debug, Deserialize)]
+struct InternalObservedRateLimitSnapshot {
+    #[serde(default)]
+    limit_id: Option<String>,
+    #[serde(default)]
+    limit_name: Option<String>,
+    #[serde(default)]
+    primary: Option<InternalObservedRateLimitWindow>,
+    #[serde(default)]
+    secondary: Option<InternalObservedRateLimitWindow>,
+}
+
+#[derive(Debug, Deserialize)]
+struct InternalObservedRateLimitWindow {
+    used_percent: f64,
+    #[serde(default)]
+    window_minutes: Option<i64>,
+    #[serde(default)]
+    resets_at: Option<DateTime<Utc>>,
+}
+
 #[derive(Debug, Serialize)]
 struct InternalSeenOkResponse {
     ok: bool,
@@ -114,6 +143,14 @@ struct InternalModelSeenOkResponse {
     account_id: Uuid,
     model: String,
     seen_ok_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Serialize)]
+struct InternalObservedRateLimitResponse {
+    ok: bool,
+    account_id: Uuid,
+    observed_at: DateTime<Utc>,
+    persisted_limits: usize,
 }
 
 async fn internal_mark_upstream_account_seen_ok(
@@ -204,5 +241,48 @@ async fn internal_mark_upstream_model_seen_ok(
         account_id,
         model: model.to_string(),
         seen_ok_at,
+    }))
+}
+
+async fn internal_update_observed_rate_limits(
+    Path(account_id): Path<Uuid>,
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(req): Json<InternalObservedRateLimitRequest>,
+) -> Result<Json<InternalObservedRateLimitResponse>, (StatusCode, Json<ErrorEnvelope>)> {
+    require_internal_service_token(&state, &headers)?;
+
+    let observed_at = req.observed_at.unwrap_or_else(Utc::now);
+    let rate_limits = req
+        .rate_limits
+        .into_iter()
+        .map(|snapshot| OAuthRateLimitSnapshot {
+            limit_id: snapshot.limit_id,
+            limit_name: snapshot.limit_name,
+            primary: snapshot.primary.map(|window| OAuthRateLimitWindow {
+                used_percent: window.used_percent,
+                window_minutes: window.window_minutes,
+                resets_at: window.resets_at,
+            }),
+            secondary: snapshot.secondary.map(|window| OAuthRateLimitWindow {
+                used_percent: window.used_percent,
+                window_minutes: window.window_minutes,
+                resets_at: window.resets_at,
+            }),
+        })
+        .collect::<Vec<_>>();
+
+    let persisted_limits = rate_limits.len();
+    state
+        .store
+        .update_oauth_rate_limit_cache_from_observation(account_id, rate_limits, observed_at)
+        .await
+        .map_err(internal_error)?;
+
+    Ok(Json(InternalObservedRateLimitResponse {
+        ok: true,
+        account_id,
+        observed_at,
+        persisted_limits,
     }))
 }

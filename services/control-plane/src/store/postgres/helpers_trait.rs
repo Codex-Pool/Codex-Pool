@@ -166,7 +166,24 @@ fn is_blocking_rate_limit_error(
         return false;
     };
     let error_message = rate_limits_last_error.unwrap_or_default();
-    is_quota_error_signal(error_code, error_message) || is_auth_error_signal(error_code, error_message)
+    is_quota_error_signal(error_code, error_message)
+        || is_auth_error_signal(error_code, error_message)
+        || matches!(
+            normalize_error_code_for_health(error_code).as_str(),
+            "primary_window_exhausted" | "secondary_window_exhausted"
+        )
+}
+
+fn rate_limit_block_message(block_reason: &str) -> String {
+    match normalize_error_code_for_health(block_reason).as_str() {
+        "secondary_window_exhausted" => {
+            "secondary rate limit window is exhausted until reset".to_string()
+        }
+        "primary_window_exhausted" => {
+            "primary rate limit window is exhausted until reset".to_string()
+        }
+        _ => "rate limit window is exhausted until reset".to_string(),
+    }
 }
 
 fn has_active_rate_limit_block(
@@ -705,6 +722,16 @@ impl ControlPlaneStore for PostgresStore {
         account_id: Uuid,
     ) -> Result<()> {
         self.maybe_refresh_oauth_rate_limit_cache_on_seen_ok_inner(account_id)
+            .await
+    }
+
+    async fn update_oauth_rate_limit_cache_from_observation(
+        &self,
+        account_id: Uuid,
+        rate_limits: Vec<OAuthRateLimitSnapshot>,
+        observed_at: DateTime<Utc>,
+    ) -> Result<()> {
+        self.persist_rate_limit_cache_success(account_id, rate_limits, observed_at)
             .await
     }
 }
