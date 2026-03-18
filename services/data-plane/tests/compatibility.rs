@@ -1,9 +1,13 @@
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
+use std::{convert::Infallible, net::SocketAddr};
 
 use async_trait::async_trait;
 use axum::body::Body;
+use axum::http::header::CONTENT_TYPE;
+use axum::routing::post;
 use axum::Router;
+use bytes::Bytes;
 use codex_pool_core::api::UsageSummary;
 use codex_pool_core::events::RequestLogEvent;
 use codex_pool_core::model::{RoutingStrategy, UpstreamAccount, UpstreamMode};
@@ -18,6 +22,9 @@ use http::Request;
 use http::StatusCode;
 use http_body_util::BodyExt;
 use serde_json::{json, Value};
+use tokio::net::TcpListener;
+use tokio::sync::mpsc;
+use tokio_stream::wrappers::ReceiverStream;
 use tower::ServiceExt;
 use uuid::Uuid;
 use wiremock::matchers::{body_bytes, header, method, path, query_param};
@@ -90,6 +97,47 @@ async fn test_app(accounts: Vec<UpstreamAccount>) -> Router {
     build_app_with_event_sink(cfg, Arc::new(NoopEventSink))
         .await
         .expect("app should build")
+}
+
+async fn spawn_scripted_sse_upstream(chunks: Vec<&'static str>) -> String {
+    async fn sse_handler(
+        chunks: Arc<Vec<String>>,
+    ) -> (
+        StatusCode,
+        [(axum::http::header::HeaderName, &'static str); 1],
+        Body,
+    ) {
+        let (tx, rx) = mpsc::channel::<Result<Bytes, Infallible>>(8);
+        tokio::spawn(async move {
+            for chunk in chunks.iter() {
+                if tx.send(Ok(Bytes::from(chunk.clone()))).await.is_err() {
+                    return;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        });
+
+        (
+            StatusCode::OK,
+            [(CONTENT_TYPE, "text/event-stream")],
+            Body::from_stream(ReceiverStream::new(rx)),
+        )
+    }
+
+    let chunks = Arc::new(chunks.into_iter().map(str::to_string).collect::<Vec<_>>());
+    let app = Router::new().route(
+        "/v1/responses",
+        post({
+            let chunks = chunks.clone();
+            move || sse_handler(chunks.clone())
+        }),
+    );
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr: SocketAddr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+    format!("http://{}", addr)
 }
 
 async fn test_app_with_failover_wait_and_control_plane(
@@ -2277,6 +2325,91 @@ async fn fails_over_on_stream_prelude_quota_error_event() {
 
     let app = test_app(vec![
         test_account(upstream_a.uri(), "token-a"),
+        test_account(upstream_b.uri(), "token-b"),
+    ])
+    .await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/responses")
+                .body(Body::from("{}"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let bytes = tokio::time::timeout(Duration::from_secs(2), response.into_body().collect())
+        .await
+        .expect("stream body should complete after failover")
+        .unwrap()
+        .to_bytes();
+    assert_eq!(bytes.as_ref(), success_payload.as_bytes());
+}
+
+#[tokio::test]
+async fn fails_over_when_stream_fails_after_response_created_before_output() {
+    let upstream_a = spawn_scripted_sse_upstream(vec![
+        "event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"resp-created-only\",\"model\":\"gpt-5.4\"}}\n\n",
+        "event: response.failed\ndata: {\"type\":\"response.failed\",\"response\":{\"id\":\"resp-created-only\",\"status\":\"failed\",\"error\":{\"code\":\"rate_limit_exceeded\",\"message\":\"too many requests\"}}}\n\n",
+    ])
+    .await;
+
+    let upstream_b = MockServer::start().await;
+    let success_payload =
+        "data: {\"type\":\"response.output_text.delta\",\"delta\":\"from-b\"}\n\n";
+    Mock::given(method("POST"))
+        .and(path("/v1/responses"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(success_payload, "text/event-stream"))
+        .mount(&upstream_b)
+        .await;
+
+    let app = test_app(vec![
+        test_account(upstream_a, "token-a"),
+        test_account(upstream_b.uri(), "token-b"),
+    ])
+    .await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/responses")
+                .body(Body::from("{}"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let bytes = tokio::time::timeout(Duration::from_secs(2), response.into_body().collect())
+        .await
+        .expect("stream body should complete after failover")
+        .unwrap()
+        .to_bytes();
+    assert_eq!(bytes.as_ref(), success_payload.as_bytes());
+}
+
+#[tokio::test]
+async fn fails_over_when_stream_closes_after_response_created_before_output() {
+    let upstream_a = spawn_scripted_sse_upstream(vec![
+        "event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"resp-created-then-eof\",\"model\":\"gpt-5.4\"}}\n\n",
+    ])
+    .await;
+
+    let upstream_b = MockServer::start().await;
+    let success_payload =
+        "data: {\"type\":\"response.output_text.delta\",\"delta\":\"from-b\"}\n\n";
+    Mock::given(method("POST"))
+        .and(path("/v1/responses"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(success_payload, "text/event-stream"))
+        .mount(&upstream_b)
+        .await;
+
+    let app = test_app(vec![
+        test_account(upstream_a, "token-a"),
         test_account(upstream_b.uri(), "token-b"),
     ])
     .await;

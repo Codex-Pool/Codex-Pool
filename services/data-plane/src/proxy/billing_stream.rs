@@ -2,6 +2,8 @@ const BILLING_PREAUTH_ERROR_RATIO_RECENT_WINDOW: usize = 512;
 const BILLING_PREAUTH_ERROR_RATIO_MODEL_WINDOW: usize = 128;
 const BILLING_PREAUTH_ERROR_RATIO_MODEL_MAX: usize = 64;
 const PRICING_PER_MILLION_TOKENS_SCALE: f64 = 1_000_000.0;
+const STREAM_PRELUDE_BUFFER_MAX_BYTES: usize = 32 * 1024;
+const STREAM_PRELUDE_BUFFER_MAX_CHUNKS: usize = 16;
 
 async fn build_pending_billing_session(
     state: &AppState,
@@ -905,19 +907,31 @@ async fn stream_response_with_first_chunk(
     stream_log_context: Option<StreamRequestLogContext>,
 ) -> Result<Response, StreamPreludeError> {
     let mut upstream_stream: UpstreamByteStream = Box::pin(upstream_response.bytes_stream());
-    let first_chunk = loop {
+    let mut prelude_chunks = Vec::new();
+    let mut prelude_bytes = Vec::new();
+    loop {
         match upstream_stream.next().await {
-            Some(Ok(chunk)) if !chunk.is_empty() => break chunk,
+            Some(Ok(chunk)) if !chunk.is_empty() => {
+                prelude_bytes.extend_from_slice(chunk.as_ref());
+                prelude_chunks.push(chunk);
+            }
             Some(Ok(_)) => continue,
             Some(Err(err)) => return Err(StreamPreludeError::UpstreamReadFailed(err.to_string())),
-            None => return Err(StreamPreludeError::EndOfStreamBeforeFirstChunk),
+            None => return Err(StreamPreludeError::EndOfStreamBeforeCommit),
         }
-    };
 
-    if let Some(error_context) =
-        parse_stream_prelude_error_context(status, headers, first_chunk.as_ref())
-    {
-        return Err(StreamPreludeError::UpstreamErrorResponse(error_context));
+        if let Some(error_context) =
+            parse_stream_prelude_error_context(status, headers, &prelude_bytes)
+        {
+            return Err(StreamPreludeError::UpstreamErrorResponse(error_context));
+        }
+
+        if prelude_bytes.len() >= STREAM_PRELUDE_BUFFER_MAX_BYTES
+            || prelude_chunks.len() >= STREAM_PRELUDE_BUFFER_MAX_CHUNKS
+            || !should_continue_stream_prelude(&prelude_bytes)
+        {
+            break;
+        }
     }
 
     let first_token_latency_ms = started_first_token_latency_ms(&billing_session, &stream_log_context);
@@ -931,8 +945,14 @@ async fn stream_response_with_first_chunk(
     let state_for_task = state.clone();
     tokio::spawn(async move {
         let mut tracker = SseUsageTracker::default();
-        tracker.observe_chunk(&first_chunk);
-        let mut sender_closed = tx.send(Ok(first_chunk)).await.is_err();
+        let mut sender_closed = false;
+        for chunk in prelude_chunks {
+            tracker.observe_chunk(&chunk);
+            if tx.send(Ok(chunk)).await.is_err() {
+                sender_closed = true;
+                break;
+            }
+        }
 
         while !sender_closed {
             match upstream_stream.next().await {
@@ -977,6 +997,57 @@ async fn stream_response_with_first_chunk(
 
     let body = Body::from_stream(ReceiverStream::new(rx));
     Ok(response_with_body(status, headers, body))
+}
+
+fn should_continue_stream_prelude(buffered: &[u8]) -> bool {
+    let mut line_start = 0usize;
+
+    for (index, byte) in buffered.iter().enumerate() {
+        if *byte != b'\n' {
+            continue;
+        }
+
+        let mut line = &buffered[line_start..index];
+        if line.last() == Some(&b'\r') {
+            line = &line[..line.len() - 1];
+        }
+        let line = trim_ascii(line);
+        line_start = index + 1;
+
+        if line.is_empty()
+            || line.starts_with(b":")
+            || line.starts_with(b"event:")
+            || line.starts_with(b"id:")
+            || line.starts_with(b"retry:")
+        {
+            continue;
+        }
+
+        let Some(payload) = line.strip_prefix(b"data:") else {
+            return false;
+        };
+        let payload = trim_ascii(payload);
+        if payload.is_empty() || payload == b"[DONE]" {
+            continue;
+        }
+
+        let Ok(value) = serde_json::from_slice::<Value>(payload) else {
+            return false;
+        };
+        if !is_stream_prelude_metadata_payload(&value) {
+            return false;
+        }
+    }
+
+    !buffered.is_empty()
+}
+
+fn is_stream_prelude_metadata_payload(value: &Value) -> bool {
+    value
+        .get("type")
+        .and_then(Value::as_str)
+        .map(|kind| matches!(kind, "response.created" | "response.in_progress"))
+        .unwrap_or(false)
 }
 
 fn started_first_token_latency_ms(
@@ -1088,8 +1159,33 @@ fn parse_json_error_payload(
     if !is_stream_error_payload(&value) {
         return None;
     }
-    let normalized = serde_json::to_vec(&value).ok()?;
+    let normalized = normalize_stream_error_payload(&value);
     build_upstream_error_context(status, headers, &normalized)
+}
+
+fn normalize_stream_error_payload(value: &Value) -> Vec<u8> {
+    let mut normalized = value.clone();
+    let incomplete_reason = normalized
+        .get("response")
+        .and_then(|response| response.get("incomplete_details"))
+        .and_then(|details| details.get("reason"))
+        .and_then(Value::as_str)
+        .map(ToString::to_string);
+    if normalized.get("error").is_none() {
+        if let Some(error) = normalized
+            .get("response")
+            .and_then(|response| response.get("error"))
+            .cloned()
+        {
+            normalized["error"] = error;
+        } else if let Some(reason) = incomplete_reason {
+            normalized["code"] = Value::String(reason.clone());
+            normalized["message"] =
+                Value::String(format!("Incomplete response returned, reason: {reason}"));
+        }
+    }
+
+    serde_json::to_vec(&normalized).unwrap_or_default()
 }
 
 fn is_stream_error_payload(value: &Value) -> bool {

@@ -110,7 +110,7 @@ struct ParsedRequestPolicyContext {
 
 #[derive(Debug)]
 enum StreamPreludeError {
-    EndOfStreamBeforeFirstChunk,
+    EndOfStreamBeforeCommit,
     UpstreamReadFailed(String),
     UpstreamErrorResponse(UpstreamErrorContext),
 }
@@ -1333,8 +1333,8 @@ pub async fn proxy_handler(
                             &state,
                         );
                         let error_detail = match err {
-                            StreamPreludeError::EndOfStreamBeforeFirstChunk => {
-                                "end_of_stream_before_first_chunk".to_string()
+                            StreamPreludeError::EndOfStreamBeforeCommit => {
+                                "end_of_stream_before_stream_start".to_string()
                             }
                             StreamPreludeError::UpstreamReadFailed(message) => message,
                             StreamPreludeError::UpstreamErrorResponse(context) => {
@@ -1366,7 +1366,7 @@ pub async fn proxy_handler(
                         warn!(
                             error = %error_detail,
                             account_id = %account.id,
-                            "upstream stream ended before first chunk"
+                            "upstream stream ended before commit point"
                         );
                         spawn_failed_live_report(
                             &state,
