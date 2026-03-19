@@ -17,7 +17,7 @@ fn main() {
     }
     fs::create_dir_all(&out_dir).expect("create embedded frontend directory");
 
-    if frontend_root.is_dir() {
+    if frontend_root.is_dir() && !dist_dir.is_dir() {
         if let Err(error) = run_frontend_build(&frontend_root) {
             println!("cargo:warning=failed to build frontend bundle automatically: {error}");
         }

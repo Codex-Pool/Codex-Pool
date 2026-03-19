@@ -165,6 +165,9 @@ jobs:
       - name: Install dependencies
         run: npm ci --legacy-peer-deps
 
+      - name: Audit dependencies
+        run: npm audit --audit-level=moderate
+
       - name: i18n key parity
         run: npm run i18n:check
 
@@ -196,6 +199,9 @@ jobs:
 
       - name: Build Rust runtime image
         run: docker build -f docker/rust-runtime.Dockerfile -t codex-pool-rust:ci .
+
+      - name: Verify embedded single-binary frontend
+        run: bash scripts/verify_embedded_single_binary_frontend.sh codex-pool-rust:ci
 
       - name: Build frontend runtime image
         run: docker build -f docker/frontend.runtime.Dockerfile -t codex-pool-frontend:ci .
