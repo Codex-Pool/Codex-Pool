@@ -16,23 +16,20 @@ const SANITIZED_UPSTREAM_RAW_MAX_ITEMS: usize = 12;
 static EMAIL_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"(?i)\b[a-z0-9._%+\-]+@[a-z0-9.\-]+\.[a-z]{2,}\b").unwrap());
 static UUID_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(
-        r"(?i)\b[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\b",
-    )
-    .unwrap()
+    Regex::new(r"(?i)\b[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\b")
+        .unwrap()
 });
-static REQUEST_ID_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"\b(?:req|resp|msg|conv|chatcmpl|cmpl|file)_[a-z0-9_\-]+\b").unwrap());
+static REQUEST_ID_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"\b(?:req|resp|msg|conv|chatcmpl|cmpl|file)_[a-z0-9_\-]+\b").unwrap()
+});
 static MODEL_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(
         r"\b(?:gpt-[a-z0-9.\-]+|o\d[a-z0-9.\-]*|codex[a-z0-9.\-]+|claude-[a-z0-9.\-]+|gemini-[a-z0-9.\-]+|deepseek-[a-z0-9.\-]+)\b",
     )
     .unwrap()
 });
-static NUMBER_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"\b\d{4,}\b").unwrap());
-static WHITESPACE_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"\s+").unwrap());
+static NUMBER_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\b\d{4,}\b").unwrap());
+static WHITESPACE_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\s+").unwrap());
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct LearnedTemplateResolution {
@@ -96,10 +93,7 @@ fn sanitize_upstream_error_json_value(
                 }
             }
             if map.len() > SANITIZED_UPSTREAM_RAW_MAX_ITEMS {
-                sanitized.insert(
-                    "_truncated".to_string(),
-                    serde_json::Value::Bool(true),
-                );
+                sanitized.insert("_truncated".to_string(), serde_json::Value::Bool(true));
             }
             serde_json::Value::Object(sanitized)
         }
@@ -163,7 +157,9 @@ fn sanitize_upstream_error_text(text: &str, model: Option<&str>) -> String {
     sanitized = REQUEST_ID_RE.replace_all(&sanitized, "{id}").into_owned();
     sanitized = MODEL_RE.replace_all(&sanitized, "{model}").into_owned();
     sanitized = NUMBER_RE.replace_all(&sanitized, "{number}").into_owned();
-    WHITESPACE_RE.replace_all(sanitized.trim(), " ").into_owned()
+    WHITESPACE_RE
+        .replace_all(sanitized.trim(), " ")
+        .into_owned()
 }
 
 fn truncate_upstream_error_text(value: &str) -> String {
@@ -198,7 +194,9 @@ fn normalize_upstream_error_fingerprint(
     normalized = REQUEST_ID_RE.replace_all(&normalized, "{id}").into_owned();
     normalized = MODEL_RE.replace_all(&normalized, "{model}").into_owned();
     normalized = NUMBER_RE.replace_all(&normalized, "{number}").into_owned();
-    normalized = WHITESPACE_RE.replace_all(normalized.trim(), " ").into_owned();
+    normalized = WHITESPACE_RE
+        .replace_all(normalized.trim(), " ")
+        .into_owned();
     format!(
         "{}:{}:{}",
         provider.trim().to_ascii_lowercase(),
@@ -222,7 +220,9 @@ async fn resolve_template_via_control_plane(
     let response = http_client
         .post(endpoint)
         .bearer_auth(internal_auth_token)
-        .timeout(std::time::Duration::from_millis(timeout_ms.clamp(100, 10_000)))
+        .timeout(std::time::Duration::from_millis(
+            timeout_ms.clamp(100, 10_000),
+        ))
         .json(payload)
         .send()
         .await
@@ -300,7 +300,8 @@ async fn resolve_upstream_error_learning(
         normalized_status_code: error_context.status.as_u16(),
         normalized_upstream_message: normalized_message.to_string(),
         sanitized_upstream_raw,
-        target_locale: canonicalize_locale(locale).unwrap_or_else(|| DEFAULT_ERROR_LOCALE.to_string()),
+        target_locale: canonicalize_locale(locale)
+            .unwrap_or_else(|| DEFAULT_ERROR_LOCALE.to_string()),
         model: model.map(ToString::to_string),
     };
 
@@ -367,7 +368,10 @@ fn localized_message_from_template_like(
     template: &impl BuiltinLikeTemplate,
     locale: &str,
 ) -> Option<String> {
-    match canonicalize_locale(locale).as_deref().unwrap_or(DEFAULT_ERROR_LOCALE) {
+    match canonicalize_locale(locale)
+        .as_deref()
+        .unwrap_or(DEFAULT_ERROR_LOCALE)
+    {
         "zh-CN" => template.templates().zh_cn.clone(),
         "zh-TW" => template.templates().zh_tw.clone(),
         "ja" => template.templates().ja.clone(),
@@ -395,6 +399,7 @@ fn localized_gateway_message(code: &str, locale: &str, fallback: &str) -> String
             "no_upstream_account" => "当前没有可用的上游账号。".to_string(),
             "invalid_upstream_url" => "上游地址无效。".to_string(),
             "upstream_transport_error" => "上游请求失败。".to_string(),
+            "proxy_unavailable" => "当前配置的出口代理不可用。".to_string(),
             "invalid_websocket_upgrade" => "无效的 WebSocket 升级请求。".to_string(),
             "upstream_websocket_connect_error" => "连接上游 WebSocket 失败。".to_string(),
             "websocket_upgrade_required" => "上游要求使用 WebSocket 协议升级。".to_string(),
@@ -408,6 +413,7 @@ fn localized_gateway_message(code: &str, locale: &str, fallback: &str) -> String
             "no_upstream_account" => "目前沒有可用的上游帳號。".to_string(),
             "invalid_upstream_url" => "上游位址無效。".to_string(),
             "upstream_transport_error" => "上游請求失敗。".to_string(),
+            "proxy_unavailable" => "目前設定的出口代理不可用。".to_string(),
             "invalid_websocket_upgrade" => "無效的 WebSocket 升級請求。".to_string(),
             "upstream_websocket_connect_error" => "連接上游 WebSocket 失敗。".to_string(),
             "websocket_upgrade_required" => "上游要求使用 WebSocket 協議升級。".to_string(),
@@ -421,11 +427,22 @@ fn localized_gateway_message(code: &str, locale: &str, fallback: &str) -> String
             "no_upstream_account" => "利用可能な上流アカウントがありません。".to_string(),
             "invalid_upstream_url" => "上流 URL が無効です。".to_string(),
             "upstream_transport_error" => "上流リクエストに失敗しました。".to_string(),
+            "proxy_unavailable" => {
+                "設定されたアウトバウンドプロキシは現在利用できません。".to_string()
+            }
             "invalid_websocket_upgrade" => "無効な WebSocket アップグレード要求です。".to_string(),
-            "upstream_websocket_connect_error" => "上流 WebSocket への接続に失敗しました。".to_string(),
-            "websocket_upgrade_required" => "上流は WebSocket アップグレードを要求しています。".to_string(),
-            "websocket_handshake_error" => "上流 WebSocket ハンドシェイクに失敗しました。".to_string(),
-            "invalid_request_rate_limited" => "無効なリクエストが多すぎます。しばらくしてから再試行してください。".to_string(),
+            "upstream_websocket_connect_error" => {
+                "上流 WebSocket への接続に失敗しました。".to_string()
+            }
+            "websocket_upgrade_required" => {
+                "上流は WebSocket アップグレードを要求しています。".to_string()
+            }
+            "websocket_handshake_error" => {
+                "上流 WebSocket ハンドシェイクに失敗しました。".to_string()
+            }
+            "invalid_request_rate_limited" => {
+                "無効なリクエストが多すぎます。しばらくしてから再試行してください。".to_string()
+            }
             _ => fallback.to_string(),
         },
         "ru" => match code {
@@ -434,11 +451,18 @@ fn localized_gateway_message(code: &str, locale: &str, fallback: &str) -> String
             "no_upstream_account" => "Сейчас нет доступных upstream-аккаунтов.".to_string(),
             "invalid_upstream_url" => "Некорректный upstream URL.".to_string(),
             "upstream_transport_error" => "Ошибка запроса к upstream.".to_string(),
-            "invalid_websocket_upgrade" => "Некорректный запрос на обновление WebSocket.".to_string(),
-            "upstream_websocket_connect_error" => "Не удалось подключиться к upstream WebSocket.".to_string(),
+            "proxy_unavailable" => "Настроенный исходящий прокси сейчас недоступен.".to_string(),
+            "invalid_websocket_upgrade" => {
+                "Некорректный запрос на обновление WebSocket.".to_string()
+            }
+            "upstream_websocket_connect_error" => {
+                "Не удалось подключиться к upstream WebSocket.".to_string()
+            }
             "websocket_upgrade_required" => "Upstream требует обновления до WebSocket.".to_string(),
             "websocket_handshake_error" => "Ошибка рукопожатия upstream WebSocket.".to_string(),
-            "invalid_request_rate_limited" => "Слишком много некорректных запросов, попробуйте позже.".to_string(),
+            "invalid_request_rate_limited" => {
+                "Слишком много некорректных запросов, попробуйте позже.".to_string()
+            }
             _ => fallback.to_string(),
         },
         _ => fallback.to_string(),
@@ -470,7 +494,10 @@ fn localized_message_from_template(
     template: &UpstreamErrorTemplateRecord,
     locale: &str,
 ) -> Option<String> {
-    match canonicalize_locale(locale).as_deref().unwrap_or(DEFAULT_ERROR_LOCALE) {
+    match canonicalize_locale(locale)
+        .as_deref()
+        .unwrap_or(DEFAULT_ERROR_LOCALE)
+    {
         "zh-CN" => template.templates.zh_cn.clone(),
         "zh-TW" => template.templates.zh_tw.clone(),
         "ja" => template.templates.ja.clone(),
@@ -527,7 +554,14 @@ fn collect_request_text_sample(value: &serde_json::Value, output: &mut String, m
             }
         }
         serde_json::Value::Object(map) => {
-            for key in ["instructions", "input", "text", "content", "messages", "prompt"] {
+            for key in [
+                "instructions",
+                "input",
+                "text",
+                "content",
+                "messages",
+                "prompt",
+            ] {
                 if let Some(item) = map.get(key) {
                     collect_request_text_sample(item, output, max_chars);
                     if output.chars().count() >= max_chars {
@@ -594,8 +628,8 @@ fn canonicalize_locale(raw: &str) -> Option<String> {
 mod ai_error_learning_tests {
     use super::*;
     use crate::event::NoopEventSink;
-    use crate::routing_cache::InMemoryRoutingCache;
     use crate::router::RoundRobinRouter;
+    use crate::routing_cache::InMemoryRoutingCache;
     use codex_pool_core::model::{
         AiErrorLearningSettings, BuiltinErrorTemplateKind, BuiltinErrorTemplateRecord,
         LocalizedErrorTemplates, RoutingStrategy, UpstreamMode,
@@ -613,7 +647,9 @@ mod ai_error_learning_tests {
         test_state_with_control_plane_base_url(Some("http://127.0.0.1:8090".to_string()))
     }
 
-    fn test_state_with_control_plane_base_url(control_plane_base_url: Option<String>) -> Arc<AppState> {
+    fn test_state_with_control_plane_base_url(
+        control_plane_base_url: Option<String>,
+    ) -> Arc<AppState> {
         let account = UpstreamAccount {
             id: Uuid::new_v4(),
             label: "acc-1".to_string(),
@@ -628,7 +664,9 @@ mod ai_error_learning_tests {
         Arc::new(AppState {
             router: RoundRobinRouter::new(vec![account]),
             http_client: reqwest::Client::new(),
-            outbound_proxy_runtime: Arc::new(crate::outbound_proxy_runtime::OutboundProxyRuntime::new()),
+            outbound_proxy_runtime: Arc::new(
+                crate::outbound_proxy_runtime::OutboundProxyRuntime::new(),
+            ),
             control_plane_base_url,
             routing_strategy: RoutingStrategy::RoundRobin,
             account_ejection_ttl: Duration::from_secs(30),
@@ -716,34 +754,30 @@ mod ai_error_learning_tests {
     #[tokio::test]
     async fn localized_json_error_with_state_prefers_builtin_gateway_templates() {
         let state = test_state();
-        state
-            .builtin_error_templates
-            .write()
-            .unwrap()
-            .insert(
-                builtin_error_template_key(
-                    BuiltinErrorTemplateKind::GatewayError,
-                    "no_upstream_account",
-                ),
-                BuiltinErrorTemplateRecord {
-                    kind: BuiltinErrorTemplateKind::GatewayError,
-                    code: "no_upstream_account".to_string(),
-                    templates: LocalizedErrorTemplates {
-                        en: Some("No upstream accounts are ready right now.".to_string()),
-                        zh_cn: Some("当前没有就绪的上游账号。".to_string()),
-                        ..LocalizedErrorTemplates::default()
-                    },
-                    default_templates: LocalizedErrorTemplates {
-                        en: Some("No upstream accounts are currently available.".to_string()),
-                        zh_cn: Some("当前没有可用的上游账号。".to_string()),
-                        ..LocalizedErrorTemplates::default()
-                    },
-                    action: None,
-                    retry_scope: None,
-                    is_overridden: true,
-                    updated_at: Some(chrono::Utc::now()),
+        state.builtin_error_templates.write().unwrap().insert(
+            builtin_error_template_key(
+                BuiltinErrorTemplateKind::GatewayError,
+                "no_upstream_account",
+            ),
+            BuiltinErrorTemplateRecord {
+                kind: BuiltinErrorTemplateKind::GatewayError,
+                code: "no_upstream_account".to_string(),
+                templates: LocalizedErrorTemplates {
+                    en: Some("No upstream accounts are ready right now.".to_string()),
+                    zh_cn: Some("当前没有就绪的上游账号。".to_string()),
+                    ..LocalizedErrorTemplates::default()
                 },
-            );
+                default_templates: LocalizedErrorTemplates {
+                    en: Some("No upstream accounts are currently available.".to_string()),
+                    zh_cn: Some("当前没有可用的上游账号。".to_string()),
+                    ..LocalizedErrorTemplates::default()
+                },
+                action: None,
+                retry_scope: None,
+                is_overridden: true,
+                updated_at: Some(chrono::Utc::now()),
+            },
+        );
 
         let response = localized_json_error_with_state(
             state.as_ref(),
@@ -764,7 +798,10 @@ mod ai_error_learning_tests {
     #[test]
     fn ai_error_learning_detects_locale_from_accept_language_before_prompt_heuristic() {
         let mut headers = axum::http::HeaderMap::new();
-        headers.insert("accept-language", "zh-CN,zh;q=0.9,en;q=0.8".parse().unwrap());
+        headers.insert(
+            "accept-language",
+            "zh-CN,zh;q=0.9,en;q=0.8".parse().unwrap(),
+        );
         let body = bytes::Bytes::from_static(br#"{"input":"hello world","model":"gpt-5.4"}"#);
 
         let locale = detect_request_locale(&headers, &body);
@@ -781,7 +818,10 @@ mod ai_error_learning_tests {
             Some("gpt-5.4"),
         );
 
-        assert_eq!(fingerprint, "openai_compatible:400:model {model} does not exist for request {id} and user {email}");
+        assert_eq!(
+            fingerprint,
+            "openai_compatible:400:model {model} does not exist for request {id} and user {email}"
+        );
     }
 
     #[test]
@@ -794,7 +834,9 @@ mod ai_error_learning_tests {
         )
         .expect("sanitized raw should exist");
 
-        assert!(sanitized.contains(r#""detail":"The '{model}' model is not supported for request {id} and user {email}.""#));
+        assert!(sanitized.contains(
+            r#""detail":"The '{model}' model is not supported for request {id} and user {email}.""#
+        ));
         assert!(sanitized.contains(r#""input":"[redacted]""#));
         assert!(sanitized.contains(r#""messages":"[redacted]""#));
         assert!(!sanitized.contains("请把这段提示词原样返回"));
@@ -859,15 +901,17 @@ mod ai_error_learning_tests {
         assert_eq!(result.localized_message, "请求的模型当前不可用。");
         assert_eq!(result.action, UpstreamErrorAction::ReturnFailure);
         assert_eq!(result.retry_scope, UpstreamErrorRetryScope::None);
-        assert_eq!(result.fingerprint, "openai_compatible:400:unsupported_model");
+        assert_eq!(
+            result.fingerprint,
+            "openai_compatible:400:unsupported_model"
+        );
     }
 
     #[tokio::test]
     async fn ai_error_learning_uses_sanitized_raw_for_non_retryable_client_resolve() {
         let control_plane = MockServer::start().await;
         let state = test_state_with_control_plane_base_url(Some(control_plane.uri()));
-        let sanitized_upstream_raw =
-            r#"{"detail":"The '{model}' model is not supported when using Codex with a ChatGPT account.","input":"[redacted]"}"#;
+        let sanitized_upstream_raw = r#"{"detail":"The '{model}' model is not supported when using Codex with a ChatGPT account.","input":"[redacted]"}"#;
         Mock::given(method("POST"))
             .and(path("/internal/v1/upstream-errors/resolve"))
             .and(header("authorization", "Bearer cp-internal-test-token"))
@@ -922,7 +966,10 @@ mod ai_error_learning_tests {
         .expect("non-retryable client errors without explicit code should still resolve");
 
         assert_eq!(resolution.semantic_error_code, "unsupported_model");
-        assert_eq!(resolution.localized_message, "The requested model is not available.");
+        assert_eq!(
+            resolution.localized_message,
+            "The requested model is not available."
+        );
 
         let requests = control_plane
             .received_requests()

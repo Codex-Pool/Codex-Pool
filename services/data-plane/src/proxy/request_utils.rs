@@ -147,7 +147,10 @@ fn maybe_adapt_openai_responses_request_for_codex_profile(
         return None;
     }
     let normalized_path = normalize_input_path(path);
-    if !matches!(normalized_path.as_str(), "/v1/responses" | "/v1/responses/compact") {
+    if !matches!(
+        normalized_path.as_str(),
+        "/v1/responses" | "/v1/responses/compact"
+    ) {
         return None;
     }
     let is_compact = normalized_path == "/v1/responses/compact";
@@ -155,7 +158,10 @@ fn maybe_adapt_openai_responses_request_for_codex_profile(
     let mut value = parse_request_json_body(headers, body)?;
     let mut changed = adapt_codex_service_tier_fields_in_value(&mut value);
     let object = value.as_object_mut()?;
-    let original_stream = object.get("stream").and_then(Value::as_bool).unwrap_or(false);
+    let original_stream = object
+        .get("stream")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
 
     if !matches!(object.get("instructions"), Some(Value::String(_))) {
         object.insert("instructions".to_string(), Value::String(String::new()));
@@ -329,9 +335,11 @@ fn observed_rate_limit_window_from_headers(
     window_minutes_header: &str,
     resets_at_header: &str,
 ) -> Option<ObservedRateLimitWindow> {
-    let used_percent = header_string(headers, used_percent_header)?.parse::<f64>().ok()?;
-    let window_minutes = header_string(headers, window_minutes_header)
-        .and_then(|value| value.parse::<i64>().ok());
+    let used_percent = header_string(headers, used_percent_header)?
+        .parse::<f64>()
+        .ok()?;
+    let window_minutes =
+        header_string(headers, window_minutes_header).and_then(|value| value.parse::<i64>().ok());
     let resets_at = header_string(headers, resets_at_header)
         .and_then(|value| value.parse::<i64>().ok())
         .and_then(|timestamp| chrono::DateTime::<chrono::Utc>::from_timestamp(timestamp, 0));
@@ -431,7 +439,9 @@ fn upstream_error_source_supports_server_retries(source: UpstreamErrorSource) ->
     )
 }
 
-fn recovery_action_for_upstream_error_class(class: UpstreamErrorClass) -> Option<ProxyRecoveryAction> {
+fn recovery_action_for_upstream_error_class(
+    class: UpstreamErrorClass,
+) -> Option<ProxyRecoveryAction> {
     match class {
         UpstreamErrorClass::TokenInvalidated | UpstreamErrorClass::AuthExpired => {
             Some(ProxyRecoveryAction::RotateRefreshToken)
@@ -493,7 +503,9 @@ fn decide_upstream_status(
             None,
             "status_429_cross_account",
         ),
-        StatusCode::SERVICE_UNAVAILABLE if upstream_error_source_supports_server_retries(source) => {
+        StatusCode::SERVICE_UNAVAILABLE
+            if upstream_error_source_supports_server_retries(source) =>
+        {
             build_upstream_error_decision(
                 RetryScope::SameAccount,
                 true,
@@ -504,7 +516,10 @@ fn decide_upstream_status(
                 "status_503_same_then_cross",
             )
         }
-        status if status.is_server_error() && upstream_error_source_supports_server_retries(source) => {
+        status
+            if status.is_server_error()
+                && upstream_error_source_supports_server_retries(source) =>
+        {
             build_upstream_error_decision(
                 RetryScope::SameAccount,
                 true,
@@ -558,8 +573,8 @@ fn decide_upstream_error(
             },
         };
         let allow_cross_account_failover = !matches!(retry_scope, RetryScope::None);
-        let track_invalid_request = context.status.is_client_error()
-            && matches!(retry_scope, RetryScope::None);
+        let track_invalid_request =
+            context.status.is_client_error() && matches!(retry_scope, RetryScope::None);
         return build_upstream_error_decision(
             retry_scope,
             allow_cross_account_failover,
@@ -846,11 +861,7 @@ fn invalid_request_guard_key(principal: Option<&ApiPrincipal>) -> Option<String>
     ))
 }
 
-fn prune_invalid_request_window(
-    hits: &mut VecDeque<Instant>,
-    now: Instant,
-    window: Duration,
-) {
+fn prune_invalid_request_window(hits: &mut VecDeque<Instant>, now: Instant, window: Duration) {
     while hits
         .front()
         .is_some_and(|item| now.duration_since(*item) > window)
@@ -938,9 +949,7 @@ fn record_invalid_request_guard_failure(
         return;
     };
 
-    let (hits, blocked_until) = guard
-        .entry(key)
-        .or_insert_with(|| (VecDeque::new(), None));
+    let (hits, blocked_until) = guard.entry(key).or_insert_with(|| (VecDeque::new(), None));
     prune_invalid_request_window(hits, now, state.invalid_request_guard_window);
     if blocked_until.is_some_and(|until| until <= now) {
         *blocked_until = None;
@@ -1074,9 +1083,59 @@ async fn emit_request_log_event(
     model: Option<&str>,
     service_tier: Option<&str>,
 ) {
+    emit_request_log_event_with_error_code(
+        state,
+        account_id,
+        principal,
+        path,
+        method,
+        status,
+        started,
+        is_stream,
+        request_id,
+        model,
+        service_tier,
+        None,
+    )
+    .await;
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn emit_request_log_event_with_error_code(
+    state: &AppState,
+    account_id: Uuid,
+    principal: Option<&ApiPrincipal>,
+    path: &str,
+    method: &str,
+    status: StatusCode,
+    started: Instant,
+    is_stream: bool,
+    request_id: Option<&str>,
+    model: Option<&str>,
+    service_tier: Option<&str>,
+    error_code_override: Option<&str>,
+) {
     emit_request_log_event_with_billing(
-        state, account_id, principal, path, method, status, started, is_stream, request_id, model,
-        service_tier, None, None, None, None, None, None, None, None,
+        state,
+        account_id,
+        principal,
+        path,
+        method,
+        status,
+        started,
+        is_stream,
+        request_id,
+        model,
+        service_tier,
+        error_code_override,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
     )
     .await;
 }
@@ -1094,6 +1153,7 @@ async fn emit_request_log_event_with_billing(
     request_id: Option<&str>,
     model: Option<&str>,
     service_tier: Option<&str>,
+    error_code_override: Option<&str>,
     billing_phase: Option<&str>,
     authorization_id: Option<Uuid>,
     capture_status: Option<&str>,
@@ -1116,7 +1176,9 @@ async fn emit_request_log_event_with_billing(
             status_code: status.as_u16(),
             latency_ms: started.elapsed().as_millis() as u64,
             is_stream,
-            error_code: (status.as_u16() >= 400).then(|| status.as_str().to_string()),
+            error_code: error_code_override
+                .map(ToString::to_string)
+                .or_else(|| (status.as_u16() >= 400).then(|| status.as_str().to_string())),
             request_id: request_id.map(ToString::to_string),
             model: model.map(ToString::to_string),
             service_tier: service_tier.map(ToString::to_string),
@@ -1174,7 +1236,9 @@ fn ejection_ttl_for_response(
         UpstreamErrorClass::AuthExpired => Some(auth_expired_ejection_ttl(base_ejection_ttl)),
         UpstreamErrorClass::AccountDeactivated => Some(base_ejection_ttl),
         UpstreamErrorClass::QuotaExhausted => Some(quota_exhausted_ejection_ttl(context)),
-        UpstreamErrorClass::RateLimited => Some(rate_limited_ejection_ttl(base_ejection_ttl, context)),
+        UpstreamErrorClass::RateLimited => {
+            Some(rate_limited_ejection_ttl(base_ejection_ttl, context))
+        }
         UpstreamErrorClass::Overloaded => Some(base_ejection_ttl),
         UpstreamErrorClass::UpstreamUnavailable => Some(base_ejection_ttl),
         UpstreamErrorClass::TransientServer => Some(server_error_ejection_ttl(base_ejection_ttl)),
@@ -1213,15 +1277,30 @@ fn extract_upstream_error_details(body: &[u8]) -> (Option<String>, Option<String
             .get("error")
             .and_then(|error| error.get("code"))
             .and_then(Value::as_str)
-            .or_else(|| value.get("detail").and_then(|detail| detail.get("code")).and_then(Value::as_str))
+            .or_else(|| {
+                value
+                    .get("detail")
+                    .and_then(|detail| detail.get("code"))
+                    .and_then(Value::as_str)
+            })
             .or_else(|| value.get("code").and_then(Value::as_str))
             .map(ToString::to_string);
         let message = value
             .get("error")
             .and_then(|error| error.get("message"))
             .and_then(Value::as_str)
-            .or_else(|| value.get("detail").and_then(|detail| detail.get("message")).and_then(Value::as_str))
-            .or_else(|| value.get("error").and_then(|error| error.get("detail")).and_then(Value::as_str))
+            .or_else(|| {
+                value
+                    .get("detail")
+                    .and_then(|detail| detail.get("message"))
+                    .and_then(Value::as_str)
+            })
+            .or_else(|| {
+                value
+                    .get("error")
+                    .and_then(|error| error.get("detail"))
+                    .and_then(Value::as_str)
+            })
             .or_else(|| value.get("message").and_then(Value::as_str))
             .or_else(|| value.get("detail").and_then(Value::as_str))
             .map(ToString::to_string);
@@ -1288,7 +1367,10 @@ fn classify_upstream_error(
     if code == "token_invalidated" {
         return UpstreamErrorClass::TokenInvalidated;
     }
-    if matches!(code.as_str(), "account_deactivated" | "deactivated_workspace") {
+    if matches!(
+        code.as_str(),
+        "account_deactivated" | "deactivated_workspace"
+    ) {
         return UpstreamErrorClass::AccountDeactivated;
     }
     if matches!(
@@ -1445,7 +1527,10 @@ fn quota_exhausted_ejection_ttl(error_context: &UpstreamErrorContext) -> Duratio
         .retry_after
         .map(|value| value.as_secs())
         .unwrap_or(QUOTA_EXHAUSTED_EJECTION_MIN_SEC)
-        .clamp(QUOTA_EXHAUSTED_EJECTION_MIN_SEC, QUOTA_EXHAUSTED_EJECTION_MAX_SEC);
+        .clamp(
+            QUOTA_EXHAUSTED_EJECTION_MIN_SEC,
+            QUOTA_EXHAUSTED_EJECTION_MAX_SEC,
+        );
     Duration::from_secs(seconds)
 }
 
@@ -1758,11 +1843,7 @@ async fn buffered_response(
         }
         None => response_with_bytes(status, headers, body.clone()),
     };
-    (
-        response,
-        error_context,
-        body,
-    )
+    (response, error_context, body)
 }
 
 async fn buffered_codex_compat_response(
@@ -2045,10 +2126,7 @@ fn estimate_response_output_tokens(body: &bytes::Bytes) -> Option<i64> {
 fn collect_request_text_chars(value: &Value) -> usize {
     match value {
         Value::String(text) => text.chars().count(),
-        Value::Array(items) => items
-            .iter()
-            .map(collect_request_text_chars)
-            .sum::<usize>(),
+        Value::Array(items) => items.iter().map(collect_request_text_chars).sum::<usize>(),
         Value::Object(map) => {
             let mut total = 0usize;
             if let Some(text) = map.get("text").and_then(Value::as_str) {
@@ -2218,7 +2296,8 @@ fn usage_tokens_from_usage_object(value: &Value) -> Option<UsageTokens> {
         .get("output_tokens_details")
         .and_then(|details| details.get("reasoning_tokens"))
         .or_else(|| {
-            usage.get("completion_tokens_details")
+            usage
+                .get("completion_tokens_details")
                 .and_then(|details| details.get("reasoning_tokens"))
         })
         .and_then(Value::as_i64)
@@ -2230,7 +2309,8 @@ fn usage_tokens_from_usage_object(value: &Value) -> Option<UsageTokens> {
         .get("input_tokens_details")
         .and_then(|details| details.get("cached_tokens"))
         .or_else(|| {
-            usage.get("prompt_tokens_details")
+            usage
+                .get("prompt_tokens_details")
                 .and_then(|details| details.get("cached_tokens"))
         })
         .and_then(Value::as_i64)
@@ -2349,12 +2429,16 @@ mod request_utils_tests {
                 "The 'gpt-5.4-ai-error-e2e-invalid' model is not supported when using Codex with a ChatGPT account."
             )
         );
-        assert_eq!(context.raw_error.as_deref(), Some(std::str::from_utf8(body).unwrap()));
+        assert_eq!(
+            context.raw_error.as_deref(),
+            Some(std::str::from_utf8(body).unwrap())
+        );
     }
 
     #[test]
     fn extracts_error_code_from_nested_detail_object() {
-        let body = br#"{"detail":{"code":"deactivated_workspace","message":"workspace is deactivated"}}"#;
+        let body =
+            br#"{"detail":{"code":"deactivated_workspace","message":"workspace is deactivated"}}"#;
 
         assert_eq!(
             super::extract_upstream_error_code(body).as_deref(),
@@ -2475,7 +2559,10 @@ mod request_utils_tests {
     fn parse_request_policy_context_reads_model_from_zstd_body() {
         let mut headers = HeaderMap::new();
         headers.insert("content-encoding", HeaderValue::from_static("zstd"));
-        headers.insert("accept-language", HeaderValue::from_static("zh-CN,zh;q=0.8"));
+        headers.insert(
+            "accept-language",
+            HeaderValue::from_static("zh-CN,zh;q=0.8"),
+        );
 
         let compressed = zstd::stream::encode_all(
             Cursor::new(br#"{"model":"gpt-5.4","traces":[{"input":"compress this history"}]}"#),
