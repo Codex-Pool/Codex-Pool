@@ -201,6 +201,7 @@ fn test_state() -> AppState {
         models_cache: std::sync::RwLock::new(std::collections::HashMap::new()),
         outbound_proxy_runtime: Arc::new(OutboundProxyRuntime::new()),
         routing_cache: Arc::new(InMemoryRoutingCache::new()),
+        #[cfg(feature = "redis-backend")]
         alive_ring_router: None,
         seen_ok_reporter: None,
         event_sink: Arc::new(NoopEventSink),

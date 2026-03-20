@@ -72,6 +72,7 @@ const MAX_INVALID_REQUEST_GUARD_THRESHOLD: usize = 1_000;
 const DEFAULT_INVALID_REQUEST_GUARD_BLOCK_SEC: u64 = 120;
 const MIN_INVALID_REQUEST_GUARD_BLOCK_SEC: u64 = 10;
 const MAX_INVALID_REQUEST_GUARD_BLOCK_SEC: u64 = 3_600;
+#[cfg(feature = "redis-backend")]
 const DEFAULT_ROUTING_CACHE_REDIS_PREFIX: &str = "codex_pool:data_plane:routing";
 const CODEX_POOL_EDITION_ENV: &str = "CODEX_POOL_EDITION";
 const REQUEST_ID_HEADER: &str = "x-request-id";
@@ -195,9 +196,24 @@ impl AppState {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum EventSinkKind {
+    #[cfg(feature = "redis-backend")]
     Redis,
     ControlPlaneHttp,
     Noop,
+}
+
+#[cfg_attr(not(test), allow(dead_code))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RoutingCacheKind {
+    LocalOnly,
+    #[cfg(feature = "redis-backend")]
+    SharedRedis,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct RuntimeAdapterProfile {
+    event_sink_kind: EventSinkKind,
+    routing_cache_kind: RoutingCacheKind,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -227,14 +243,40 @@ fn select_event_sink_kind(
     EventSinkKind::Noop
 }
 
+fn select_routing_cache_kind(
+    _shared_routing_cache_enabled: bool,
+    _redis_url: Option<&str>,
+) -> RoutingCacheKind {
+    #[cfg(feature = "redis-backend")]
+    if _shared_routing_cache_enabled && _redis_url.is_some() {
+        return RoutingCacheKind::SharedRedis;
+    }
+
+    RoutingCacheKind::LocalOnly
+}
+
+fn resolve_runtime_adapter_profile(
+    edition: ProductEdition,
+    control_plane_base_url: Option<&str>,
+    shared_routing_cache_enabled: bool,
+    redis_url: Option<&str>,
+) -> RuntimeAdapterProfile {
+    RuntimeAdapterProfile {
+        event_sink_kind: select_event_sink_kind(edition, redis_url, control_plane_base_url),
+        routing_cache_kind: select_routing_cache_kind(shared_routing_cache_enabled, redis_url),
+    }
+}
+
 fn build_default_event_sink(config: &DataPlaneConfig) -> anyhow::Result<Arc<dyn EventSink>> {
     let control_plane_base_url = resolve_control_plane_base_url(config);
     let edition = ProductEdition::from_env_var(CODEX_POOL_EDITION_ENV);
-    let event_sink: Arc<dyn EventSink> = match select_event_sink_kind(
+    let runtime_profile = resolve_runtime_adapter_profile(
         edition,
-        config.redis_url.as_deref(),
         control_plane_base_url.as_deref(),
-    ) {
+        config.shared_routing_cache_enabled,
+        config.redis_url.as_deref(),
+    );
+    let event_sink: Arc<dyn EventSink> = match runtime_profile.event_sink_kind {
         #[cfg(feature = "redis-backend")]
         EventSinkKind::Redis => {
             let Some(redis_url) = config.redis_url.as_deref() else {
@@ -245,8 +287,6 @@ fn build_default_event_sink(config: &DataPlaneConfig) -> anyhow::Result<Arc<dyn 
                 config.request_log_stream(),
             ))
         }
-        #[cfg(not(feature = "redis-backend"))]
-        EventSinkKind::Redis => Arc::new(NoopEventSink),
         EventSinkKind::ControlPlaneHttp => {
             let Some(base_url) = control_plane_base_url.as_deref() else {
                 return Err(anyhow!(
@@ -408,6 +448,13 @@ async fn build_app_with_options(
 ) -> anyhow::Result<(Router, Arc<AppState>)> {
     let control_plane_base_url = resolve_control_plane_base_url(&config);
     let control_plane_internal_auth_token = resolve_internal_auth_token()?;
+    let runtime_profile = resolve_runtime_adapter_profile(
+        ProductEdition::from_env_var(CODEX_POOL_EDITION_ENV),
+        control_plane_base_url.as_deref(),
+        config.shared_routing_cache_enabled,
+        config.redis_url.as_deref(),
+    );
+    let routing_cache_kind = runtime_profile.routing_cache_kind;
     let enable_internal_debug_routes = config.enable_internal_debug_routes;
     let auth_validator = config.auth_validate_url.as_ref().map(|url| {
         AuthValidatorClient::new(
@@ -421,23 +468,29 @@ async fn build_app_with_options(
     let routing_cache: Arc<dyn RoutingCache> = {
         #[cfg(feature = "redis-backend")]
         {
-            if config.shared_routing_cache_enabled {
-                match config.redis_url.as_deref() {
-                    Some(redis_url) => Arc::new(HybridRoutingCache::with_shared(
+            match routing_cache_kind {
+                RoutingCacheKind::SharedRedis => {
+                    let redis_url = config
+                        .redis_url
+                        .as_deref()
+                        .expect("shared redis routing cache requires redis_url");
+                    Arc::new(HybridRoutingCache::with_shared(
                         local_routing_cache.clone(),
                         Arc::new(RedisRoutingCache::new(
                             redis_url,
                             DEFAULT_ROUTING_CACHE_REDIS_PREFIX,
                         )),
-                    )),
-                    None => Arc::new(HybridRoutingCache::local_only(local_routing_cache.clone())),
+                    ))
                 }
-            } else {
-                local_routing_cache
+                RoutingCacheKind::LocalOnly if config.shared_routing_cache_enabled => {
+                    Arc::new(HybridRoutingCache::local_only(local_routing_cache.clone()))
+                }
+                RoutingCacheKind::LocalOnly => local_routing_cache,
             }
         }
         #[cfg(not(feature = "redis-backend"))]
         {
+            let _ = routing_cache_kind;
             local_routing_cache
         }
     };
@@ -874,7 +927,9 @@ async fn readyz(State(state): State<Arc<AppState>>) -> (StatusCode, axum::Json<R
 #[cfg(test)]
 mod bootstrap_tests {
     use super::{
-        build_app_with_event_sink_without_status_routes, select_event_sink_kind, EventSinkKind,
+        build_app_with_event_sink_without_status_routes, select_event_sink_kind,
+        select_routing_cache_kind, resolve_runtime_adapter_profile, EventSinkKind,
+        RoutingCacheKind,
     };
     use crate::config::DataPlaneConfig;
     use crate::event::NoopEventSink;
@@ -927,7 +982,10 @@ mod bootstrap_tests {
             Some("http://127.0.0.1:8090"),
         );
 
+        #[cfg(feature = "redis-backend")]
         assert_eq!(selected, EventSinkKind::Redis);
+        #[cfg(not(feature = "redis-backend"))]
+        assert_eq!(selected, EventSinkKind::ControlPlaneHttp);
     }
 
     #[test]
@@ -954,6 +1012,57 @@ mod bootstrap_tests {
         let selected = select_event_sink_kind(ProductEdition::Personal, None, None);
 
         assert_eq!(selected, EventSinkKind::Noop);
+    }
+
+    #[test]
+    fn select_routing_cache_kind_stays_local_without_shared_redis() {
+        let selected = select_routing_cache_kind(false, Some("redis://127.0.0.1:6379"));
+        assert_eq!(selected, RoutingCacheKind::LocalOnly);
+
+        let selected = select_routing_cache_kind(true, None);
+        assert_eq!(selected, RoutingCacheKind::LocalOnly);
+    }
+
+    #[cfg(feature = "redis-backend")]
+    #[test]
+    fn select_routing_cache_kind_uses_shared_redis_when_enabled_and_available() {
+        let selected = select_routing_cache_kind(true, Some("redis://127.0.0.1:6379"));
+        assert_eq!(selected, RoutingCacheKind::SharedRedis);
+    }
+
+    #[test]
+    fn resolve_runtime_adapter_profile_uses_control_plane_http_and_local_cache_without_redis() {
+        let profile = resolve_runtime_adapter_profile(
+            ProductEdition::Team,
+            Some("http://127.0.0.1:8090"),
+            false,
+            None,
+        );
+
+        assert_eq!(profile.event_sink_kind, EventSinkKind::ControlPlaneHttp);
+        assert_eq!(profile.routing_cache_kind, RoutingCacheKind::LocalOnly);
+    }
+
+    #[test]
+    fn resolve_runtime_adapter_profile_prefers_redis_backends_when_available() {
+        let profile = resolve_runtime_adapter_profile(
+            ProductEdition::Team,
+            Some("http://127.0.0.1:8090"),
+            true,
+            Some("redis://127.0.0.1:6379"),
+        );
+
+        #[cfg(feature = "redis-backend")]
+        {
+            assert_eq!(profile.event_sink_kind, EventSinkKind::Redis);
+            assert_eq!(profile.routing_cache_kind, RoutingCacheKind::SharedRedis);
+        }
+
+        #[cfg(not(feature = "redis-backend"))]
+        {
+            assert_eq!(profile.event_sink_kind, EventSinkKind::ControlPlaneHttp);
+            assert_eq!(profile.routing_cache_kind, RoutingCacheKind::LocalOnly);
+        }
     }
 
     #[tokio::test]

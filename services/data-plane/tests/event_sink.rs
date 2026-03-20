@@ -1,3 +1,5 @@
+#![cfg(feature = "redis-backend")]
+
 use codex_pool_core::events::RequestLogEvent;
 use data_plane::event::redis_sink::RedisStreamEventSink;
 use uuid::Uuid;

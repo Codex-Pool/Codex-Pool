@@ -2772,6 +2772,7 @@ async fn pick_account_from_alive_ring(
     }
 }
 
+#[cfg(feature = "redis-backend")]
 fn pick_alive_ring_candidate_from_ids(
     state: &Arc<AppState>,
     candidate_ids: &[Uuid],
@@ -2852,9 +2853,12 @@ mod entry_route_selection_tests {
     use crate::upstream_health::SeenOkReporter;
     use async_trait::async_trait;
     use codex_pool_core::model::{
-        AiErrorLearningSettings, CompiledModelRoutingPolicy, CompiledRoutingPlan,
-        CompiledRoutingProfile, OutboundProxyPoolSettings, ProxyFailMode, RoutingStrategy,
+        AiErrorLearningSettings, OutboundProxyPoolSettings, ProxyFailMode, RoutingStrategy,
         UpstreamErrorTemplateRecord,
+    };
+    #[cfg(feature = "redis-backend")]
+    use codex_pool_core::model::{
+        CompiledModelRoutingPolicy, CompiledRoutingPlan, CompiledRoutingProfile,
     };
     use http_body_util::BodyExt;
     use serde_json::json;
@@ -2897,6 +2901,7 @@ mod entry_route_selection_tests {
         }
     }
 
+    #[cfg(feature = "redis-backend")]
     fn compiled_route(model: &str, account_ids: Vec<Uuid>) -> CompiledRoutingPlan {
         CompiledRoutingPlan {
             version_id: Uuid::new_v4(),
@@ -2918,6 +2923,7 @@ mod entry_route_selection_tests {
         }
     }
 
+    #[cfg(feature = "redis-backend")]
     fn test_state(accounts: Vec<UpstreamAccount>) -> Arc<AppState> {
         test_state_with_sink_and_reporter(accounts, Arc::new(NoopEventSink), None)
     }
@@ -3108,6 +3114,7 @@ mod entry_route_selection_tests {
         assert_eq!(events[0].error_code.as_deref(), Some("proxy_unavailable"));
     }
 
+    #[cfg(feature = "redis-backend")]
     #[tokio::test]
     async fn alive_ring_candidate_selection_respects_compiled_model_route() {
         let free = account("free");

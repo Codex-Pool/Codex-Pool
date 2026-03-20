@@ -27,6 +27,7 @@ pub struct SeenOkReportConfig {
     pub timeout: Duration,
 }
 
+#[cfg(feature = "redis-backend")]
 #[derive(Debug, Clone)]
 struct AliveRingCacheState {
     account_ids: Vec<Uuid>,

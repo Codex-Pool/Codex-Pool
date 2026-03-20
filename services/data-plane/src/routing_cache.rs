@@ -9,7 +9,9 @@ use uuid::Uuid;
 #[cfg(feature = "redis-backend")]
 use anyhow::Context;
 
+#[cfg(feature = "redis-backend")]
 const DEFAULT_LOCAL_STICKY_REHYDRATE_TTL: Duration = Duration::from_secs(30 * 60);
+#[cfg(feature = "redis-backend")]
 const DEFAULT_LOCAL_UNHEALTHY_REHYDRATE_TTL: Duration = Duration::from_secs(30);
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
