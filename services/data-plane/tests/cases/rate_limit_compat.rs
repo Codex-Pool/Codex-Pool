@@ -163,6 +163,9 @@ async fn codex_compat_stream_response_preserves_codex_rate_limit_headers() {
                 .append_header("x-codex-primary-used-percent", "91.5")
                 .append_header("x-codex-primary-window-minutes", "300")
                 .append_header("x-codex-primary-reset-at", "1777777777")
+                .append_header("x-codex-secondary-used-percent", "95.0")
+                .append_header("x-codex-secondary-window-minutes", "10080")
+                .append_header("x-codex-secondary-reset-at", "1777779999")
                 .set_body_raw(sse_payload, "text/event-stream"),
         )
         .mount(&upstream)
@@ -184,8 +187,16 @@ async fn codex_compat_stream_response_preserves_codex_rate_limit_headers() {
             .headers()
             .get("x-codex-primary-used-percent")
             .and_then(|value| value.to_str().ok()),
-        Some("91.5"),
-        "Codex-compatible clients should continue receiving x-codex rate limit headers"
+        Some("0"),
+        "Codex-compatible clients should receive rewritten pool-level primary rate-limit headers"
+    );
+    assert_eq!(
+        response
+            .headers()
+            .get("x-codex-secondary-used-percent")
+            .and_then(|value| value.to_str().ok()),
+        Some("0"),
+        "Codex-compatible clients should receive rewritten pool-level secondary rate-limit headers"
     );
     assert!(
         response.headers().get("x-codex-promo-message").is_none(),

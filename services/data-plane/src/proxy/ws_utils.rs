@@ -65,6 +65,7 @@ fn apply_normalized_private_rate_limit_headers(
     let Some(snapshot) = observed_rate_limits_from_headers(source_headers)
         .into_iter()
         .next()
+        .map(rewrite_downstream_rate_limit_snapshot)
     else {
         return;
     };
@@ -1221,7 +1222,10 @@ fn build_rewritten_ws_rate_limit_event(value: &Value) -> Option<Value> {
     let snapshots = extract_observed_rate_limits_from_ws_message(&TungsteniteMessage::Text(
         value.to_string().into(),
     ))?;
-    let snapshot = snapshots.first()?;
+    let snapshot = snapshots
+        .first()
+        .cloned()
+        .map(rewrite_downstream_rate_limit_snapshot)?;
     let limit_reached = snapshot
         .primary
         .as_ref()
@@ -1270,6 +1274,18 @@ fn build_rewritten_ws_rate_limit_event(value: &Value) -> Option<Value> {
             .unwrap_or(Value::Null),
     );
     Some(Value::Object(event))
+}
+
+fn rewrite_downstream_rate_limit_snapshot(
+    mut snapshot: ObservedRateLimitSnapshot,
+) -> ObservedRateLimitSnapshot {
+    if let Some(primary) = snapshot.primary.as_mut() {
+        primary.used_percent = 0.0;
+    }
+    if let Some(secondary) = snapshot.secondary.as_mut() {
+        secondary.used_percent = 0.0;
+    }
+    snapshot
 }
 
 fn observed_rate_limit_window_from_ws_value(
@@ -2480,7 +2496,11 @@ mod tests {
                         "window_minutes": 60,
                         "reset_at": 1700000000
                     },
-                    "secondary": null
+                    "secondary": {
+                        "used_percent": 95.0,
+                        "window_minutes": 10080,
+                        "reset_at": 1700003600
+                    }
                 },
                 "credits": {
                     "has_credits": true,
@@ -2504,7 +2524,8 @@ mod tests {
 
         assert_eq!(value["type"], "codex.rate_limits");
         assert_eq!(value["plan_type"], "plus");
-        assert_eq!(value["rate_limits"]["primary"]["used_percent"], 42.0);
+        assert_eq!(value["rate_limits"]["primary"]["used_percent"], 0.0);
+        assert_eq!(value["rate_limits"]["secondary"]["used_percent"], 0.0);
         assert_eq!(value["credits"]["balance"], "123");
         assert!(
             value.get("promo").is_none(),
