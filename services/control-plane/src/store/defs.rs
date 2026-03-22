@@ -75,6 +75,8 @@ const MIN_RATE_LIMIT_REFRESH_ERROR_BACKOFF_SEC: i64 = 5;
 const MAX_RATE_LIMIT_REFRESH_ERROR_BACKOFF_SEC: i64 = 3_600;
 const PRIMARY_RATE_LIMIT_WINDOW_MINUTES: i64 = 300;
 const SECONDARY_RATE_LIMIT_WINDOW_MINUTES: i64 = 10_080;
+const DEFAULT_CODEX_ACCOUNT_BASE_URL: &str = "https://chatgpt.com/backend-api/codex";
+const CODEX_ACCOUNT_BASE_PATH: &str = "/backend-api/codex";
 
 fn merge_localized_error_templates(
     base: &LocalizedErrorTemplates,
@@ -169,6 +171,45 @@ fn is_quota_error_signal(error_code: &str, error_message: &str) -> bool {
         || message.contains("quota exceeded")
         || message.contains("billing hard limit")
         || message.contains("start a free trial of plus")
+}
+
+fn trim_base_url(raw: &str) -> String {
+    raw.trim().trim_end_matches('/').to_string()
+}
+
+fn normalize_upstream_account_base_url(mode: &UpstreamMode, raw: &str) -> String {
+    let trimmed = trim_base_url(raw);
+    if !matches!(mode, UpstreamMode::ChatGptSession | UpstreamMode::CodexOauth) {
+        return trimmed;
+    }
+
+    if trimmed.is_empty() {
+        return DEFAULT_CODEX_ACCOUNT_BASE_URL.to_string();
+    }
+
+    let Ok(mut parsed) = reqwest::Url::parse(&trimmed) else {
+        return trimmed;
+    };
+    parsed.set_query(None);
+    parsed.set_fragment(None);
+
+    let current_path = parsed.path().trim_end_matches('/');
+    let normalized_path = if current_path.is_empty() || current_path == "/" || current_path == "/v1"
+    {
+        CODEX_ACCOUNT_BASE_PATH.to_string()
+    } else if current_path.ends_with(CODEX_ACCOUNT_BASE_PATH) {
+        current_path.to_string()
+    } else if current_path.ends_with("/v1") {
+        format!(
+            "{}{}",
+            current_path.trim_end_matches("/v1"),
+            CODEX_ACCOUNT_BASE_PATH
+        )
+    } else {
+        format!("{current_path}{CODEX_ACCOUNT_BASE_PATH}")
+    };
+    parsed.set_path(&normalized_path);
+    trim_base_url(parsed.as_str())
 }
 
 fn is_auth_error_signal(error_code: &str, error_message: &str) -> bool {

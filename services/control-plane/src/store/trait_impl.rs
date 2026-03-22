@@ -778,9 +778,10 @@ mod tests {
     use base64::Engine;
     use chrono::{DateTime, Duration, Utc};
     use crate::contracts::{
-        CreateApiKeyRequest, CreateTenantRequest, ImportOAuthRefreshTokenRequest,
-        OAuthRateLimitRefreshJobStatus, OAuthRateLimitSnapshot, OAuthRateLimitWindow,
-        UpsertModelRoutingPolicyRequest, UpsertRoutingProfileRequest,
+        CreateApiKeyRequest, CreateTenantRequest, CreateUpstreamAccountRequest,
+        ImportOAuthRefreshTokenRequest, OAuthRateLimitRefreshJobStatus,
+        OAuthRateLimitSnapshot, OAuthRateLimitWindow, UpsertModelRoutingPolicyRequest,
+        UpsertRoutingProfileRequest,
     };
     use codex_pool_core::model::{RoutingProfileSelector, UpstreamMode};
     use serde_json::json;
@@ -843,6 +844,27 @@ mod tests {
             created.record.key_hash.starts_with("hmac-sha256:"),
             "api key hash should use hmac-sha256 format"
         );
+    }
+
+    #[tokio::test]
+    async fn in_memory_create_upstream_account_normalizes_codex_base_url() {
+        let store = InMemoryStore::default();
+
+        let account = store
+            .create_upstream_account(CreateUpstreamAccountRequest {
+                label: "codex-ak".to_string(),
+                mode: UpstreamMode::CodexOauth,
+                base_url: "https://chatgpt.com".to_string(),
+                bearer_token: "access-token".to_string(),
+                chatgpt_account_id: Some("acct-demo".to_string()),
+                auth_provider: None,
+                enabled: Some(true),
+                priority: Some(100),
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(account.base_url, "https://chatgpt.com/backend-api/codex");
     }
 
     #[derive(Clone)]
@@ -1069,6 +1091,32 @@ mod tests {
             snapshot_account.chatgpt_account_id.as_deref(),
             Some("acct_demo")
         );
+    }
+
+    #[tokio::test]
+    async fn in_memory_oauth_import_normalizes_codex_base_url() {
+        let cipher = CredentialCipher::from_base64_key(
+            &base64::engine::general_purpose::STANDARD.encode([7_u8; 32]),
+        )
+        .unwrap();
+        let store = InMemoryStore::new_with_oauth(Arc::new(StaticOAuthTokenClient), Some(cipher));
+
+        let account = store
+            .import_oauth_refresh_token(ImportOAuthRefreshTokenRequest {
+                label: "oauth-bare-base".to_string(),
+                base_url: "https://chatgpt.com".to_string(),
+                refresh_token: "rt-bare-base".to_string(),
+                chatgpt_account_id: None,
+                mode: Some(UpstreamMode::CodexOauth),
+                enabled: Some(true),
+                priority: Some(100),
+                chatgpt_plan_type: None,
+                source_type: Some("codex".to_string()),
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(account.base_url, "https://chatgpt.com/backend-api/codex");
     }
 
     #[tokio::test]
@@ -1433,6 +1481,30 @@ mod tests {
             .collect::<Vec<_>>();
 
         assert_eq!(shared_accounts.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn in_memory_one_time_session_upsert_normalizes_codex_base_url() {
+        let store = InMemoryStore::default();
+
+        let account = store
+            .upsert_one_time_session_account(UpsertOneTimeSessionAccountRequest {
+                label: "codex-one-time".to_string(),
+                mode: UpstreamMode::CodexOauth,
+                base_url: "https://chatgpt.com".to_string(),
+                access_token: "one-time-token".to_string(),
+                chatgpt_account_id: Some("acct-one-time".to_string()),
+                enabled: Some(true),
+                priority: Some(100),
+                token_expires_at: Some(Utc::now() + Duration::hours(1)),
+                chatgpt_plan_type: Some("free".to_string()),
+                source_type: Some("codex".to_string()),
+            })
+            .await
+            .unwrap()
+            .account;
+
+        assert_eq!(account.base_url, "https://chatgpt.com/backend-api/codex");
     }
 
     #[tokio::test]

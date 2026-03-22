@@ -364,6 +364,7 @@ impl PostgresStore {
         let priority = req.priority.unwrap_or(100);
         let created_at = Utc::now();
         let mode = upstream_mode_to_db(&req.mode);
+        let base_url = normalize_upstream_account_base_url(&req.mode, &req.base_url);
         let auth_provider = upstream_auth_provider_to_db(&UpstreamAuthProvider::LegacyBearer);
 
         let row = sqlx::query(
@@ -387,7 +388,7 @@ impl PostgresStore {
         .bind(id)
         .bind(req.label)
         .bind(mode)
-        .bind(req.base_url)
+        .bind(base_url)
         .bind(req.bearer_token)
         .bind(req.chatgpt_account_id)
         .bind(auth_provider)

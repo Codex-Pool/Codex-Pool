@@ -504,9 +504,11 @@ impl InMemoryStore {
     ) -> Result<UpstreamAccount> {
         let cipher = self.require_credential_cipher()?;
         let resolved_mode = resolve_oauth_import_mode(req.mode.clone(), req.source_type.as_deref());
+        let normalized_base_url =
+            normalize_upstream_account_base_url(&resolved_mode, &req.base_url);
         let token_info = self
             .oauth_client
-            .refresh_token(&req.refresh_token, Some(&req.base_url))
+            .refresh_token(&req.refresh_token, Some(&normalized_base_url))
             .await
             .map_err(|err| anyhow!(err.to_string()))?;
 
@@ -514,7 +516,7 @@ impl InMemoryStore {
             id: Uuid::new_v4(),
             label: req.label,
             mode: resolved_mode,
-            base_url: req.base_url,
+            base_url: normalized_base_url,
             bearer_token: OAUTH_MANAGED_BEARER_SENTINEL.to_string(),
             chatgpt_account_id: req
                 .chatgpt_account_id
@@ -555,9 +557,11 @@ impl InMemoryStore {
     ) -> Result<OAuthUpsertResult> {
         let cipher = self.require_credential_cipher()?;
         let resolved_mode = resolve_oauth_import_mode(req.mode.clone(), req.source_type.as_deref());
+        let normalized_base_url =
+            normalize_upstream_account_base_url(&resolved_mode, &req.base_url);
         let token_info = self
             .oauth_client
-            .refresh_token(&req.refresh_token, Some(&req.base_url))
+            .refresh_token(&req.refresh_token, Some(&normalized_base_url))
             .await
             .map_err(|err| anyhow!(err.to_string()))?;
 
@@ -601,7 +605,7 @@ impl InMemoryStore {
             };
             account.label = req.label;
             account.mode = resolved_mode;
-            account.base_url = req.base_url;
+            account.base_url = normalized_base_url;
             account.bearer_token = OAUTH_MANAGED_BEARER_SENTINEL.to_string();
             account.chatgpt_account_id = normalized_chatgpt_account_id.clone();
             account.enabled = req.enabled.unwrap_or(true);
@@ -687,6 +691,7 @@ impl InMemoryStore {
         if normalized_label.is_empty() {
             return Err(anyhow!("label is required"));
         }
+        let normalized_base_url = normalize_upstream_account_base_url(&req.mode, &req.base_url);
 
         let matched_account_id = {
             let accounts = self.accounts.read().unwrap();
@@ -725,7 +730,7 @@ impl InMemoryStore {
             };
             account.label = normalized_label.clone();
             account.mode = req.mode;
-            account.base_url = req.base_url;
+            account.base_url = normalized_base_url.clone();
             account.bearer_token = req.access_token;
             account.chatgpt_account_id = normalized_chatgpt_account_id.clone();
             account.enabled = req.enabled.unwrap_or(true);
@@ -764,7 +769,7 @@ impl InMemoryStore {
             id: Uuid::new_v4(),
             label: normalized_label,
             mode: req.mode,
-            base_url: req.base_url,
+            base_url: normalized_base_url,
             bearer_token: req.access_token,
             chatgpt_account_id: normalized_chatgpt_account_id,
             enabled: req.enabled.unwrap_or(true),

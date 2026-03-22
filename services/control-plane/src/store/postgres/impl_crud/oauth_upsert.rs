@@ -371,10 +371,12 @@ impl PostgresStore {
         if refresh_token.is_empty() {
             return Err(anyhow!("refresh token is empty"));
         }
+        let desired_mode = resolve_oauth_import_mode(req.mode.clone(), req.source_type.as_deref());
+        let normalized_base_url = normalize_upstream_account_base_url(&desired_mode, &req.base_url);
         let validated = self
             .validate_oauth_refresh_token_inner(ValidateOAuthRefreshTokenRequest {
                 refresh_token: refresh_token.to_string(),
-                base_url: Some(req.base_url.clone()),
+                base_url: Some(normalized_base_url.clone()),
             })
             .await?;
         let resolved_chatgpt_account_id = req
@@ -402,7 +404,6 @@ impl PostgresStore {
         }
         let refresh_token_enc = cipher.encrypt(refresh_token)?;
         let refresh_token_sha256 = refresh_token_sha256(refresh_token);
-        let desired_mode = resolve_oauth_import_mode(req.mode.clone(), req.source_type.as_deref());
         let now = Utc::now();
 
         let row = sqlx::query(
@@ -456,7 +457,7 @@ impl PostgresStore {
         .bind(Uuid::new_v4())
         .bind(refresh_token_enc)
         .bind(refresh_token_sha256)
-        .bind(&req.base_url)
+        .bind(&normalized_base_url)
         .bind(&req.label)
         .bind(resolved_chatgpt_account_id)
         .bind(req.chatgpt_plan_type.clone())
@@ -479,9 +480,11 @@ impl PostgresStore {
     ) -> Result<UpstreamAccount> {
         let cipher = self.require_credential_cipher()?;
         let resolved_mode = resolve_oauth_import_mode(req.mode.clone(), req.source_type.as_deref());
+        let normalized_base_url =
+            normalize_upstream_account_base_url(&resolved_mode, &req.base_url);
         let token_info = self
             .oauth_client
-            .refresh_token(&req.refresh_token, Some(&req.base_url))
+            .refresh_token(&req.refresh_token, Some(&normalized_base_url))
             .await
             .map_err(|err| anyhow!(err.to_string()))?;
 
@@ -497,7 +500,7 @@ impl PostgresStore {
             .chatgpt_plan_type
             .clone()
             .or(token_info.chatgpt_plan_type.clone());
-        let base_url_for_rate_limit = req.base_url.clone();
+        let base_url_for_rate_limit = normalized_base_url.clone();
         let account_id = Uuid::new_v4();
         let enabled = req.enabled.unwrap_or(true);
         let priority = req.priority.unwrap_or(100);
@@ -533,7 +536,7 @@ impl PostgresStore {
         .bind(account_id)
         .bind(req.label)
         .bind(mode)
-        .bind(req.base_url)
+        .bind(&normalized_base_url)
         .bind(OAUTH_MANAGED_BEARER_SENTINEL)
         .bind(resolved_chatgpt_account_id.clone())
         .bind(AUTH_PROVIDER_OAUTH_REFRESH_TOKEN)
@@ -628,9 +631,11 @@ impl PostgresStore {
     ) -> Result<OAuthUpsertResult> {
         let cipher = self.require_credential_cipher()?;
         let resolved_mode = resolve_oauth_import_mode(req.mode.clone(), req.source_type.as_deref());
+        let normalized_base_url =
+            normalize_upstream_account_base_url(&resolved_mode, &req.base_url);
         let token_info = self
             .oauth_client
-            .refresh_token(&req.refresh_token, Some(&req.base_url))
+            .refresh_token(&req.refresh_token, Some(&normalized_base_url))
             .await
             .map_err(|err| anyhow!(err.to_string()))?;
 
@@ -707,7 +712,7 @@ impl PostgresStore {
             .bind(account_id)
             .bind(&req.label)
             .bind(mode)
-            .bind(&req.base_url)
+            .bind(&normalized_base_url)
             .bind(OAUTH_MANAGED_BEARER_SENTINEL)
             .bind(target_chatgpt_account_id.clone())
             .bind(AUTH_PROVIDER_OAUTH_REFRESH_TOKEN)
@@ -794,7 +799,7 @@ impl PostgresStore {
             self.prefill_oauth_rate_limits_after_upsert(
                 account_id,
                 &token_info.access_token,
-                &req.base_url,
+                &normalized_base_url,
                 target_chatgpt_account_id.clone(),
             )
             .await;
@@ -864,6 +869,7 @@ impl PostgresStore {
             .clone()
             .map(|value| value.trim().to_string())
             .filter(|value| !value.is_empty());
+        let normalized_base_url = normalize_upstream_account_base_url(&req.mode, &req.base_url);
         let enabled = req.enabled.unwrap_or(true);
         let priority = req.priority.unwrap_or(100);
         let mode = upstream_mode_to_db(&req.mode);
@@ -931,7 +937,7 @@ impl PostgresStore {
             .bind(account_id)
             .bind(&normalized_label)
             .bind(mode)
-            .bind(&req.base_url)
+            .bind(&normalized_base_url)
             .bind(&req.access_token)
             .bind(&normalized_chatgpt_account_id)
             .bind(AUTH_PROVIDER_LEGACY_BEARER)
@@ -964,7 +970,7 @@ impl PostgresStore {
             .bind(account_id)
             .bind(&normalized_label)
             .bind(mode)
-            .bind(&req.base_url)
+            .bind(&normalized_base_url)
             .bind(&req.access_token)
             .bind(&normalized_chatgpt_account_id)
             .bind(AUTH_PROVIDER_LEGACY_BEARER)

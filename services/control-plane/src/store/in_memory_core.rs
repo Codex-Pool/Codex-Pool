@@ -259,11 +259,12 @@ impl InMemoryStore {
     }
 
     fn create_upstream_account_inner(&self, req: CreateUpstreamAccountRequest) -> UpstreamAccount {
+        let base_url = normalize_upstream_account_base_url(&req.mode, &req.base_url);
         let account = UpstreamAccount {
             id: Uuid::new_v4(),
             label: req.label,
             mode: req.mode,
-            base_url: req.base_url,
+            base_url,
             bearer_token: req.bearer_token,
             chatgpt_account_id: req.chatgpt_account_id,
             enabled: req.enabled.unwrap_or(true),
