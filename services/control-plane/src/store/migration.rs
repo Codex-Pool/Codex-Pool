@@ -378,6 +378,7 @@ fn bundle_to_sqlite_state(bundle: &ControlPlaneMigrationBundle) -> SqlitePersist
                 )
             })
             .collect(),
+        oauth_refresh_token_vault: HashMap::new(),
         session_profiles: bundle
             .session_profiles
             .iter()
@@ -415,6 +416,7 @@ fn bundle_to_sqlite_state(bundle: &ControlPlaneMigrationBundle) -> SqlitePersist
                     item.account_id,
                     UpstreamAccountHealthStateRecord {
                         seen_ok_at: item.seen_ok_at,
+                        ..Default::default()
                     },
                 )
             })
