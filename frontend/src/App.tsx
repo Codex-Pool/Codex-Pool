@@ -39,6 +39,7 @@ import { adminAuthApi } from '@/api/adminAuth'
 
 const Dashboard = lazy(() => import('@/pages/Dashboard'))
 const Accounts = lazy(() => import('@/pages/Accounts'))
+const Inventory = lazy(() => import('@/pages/Inventory'))
 const ImportJobs = lazy(() => import('@/pages/ImportJobs'))
 const OAuthImport = lazy(() => import('@/pages/OAuthImport'))
 const Groups = lazy(() => import('@/pages/Groups'))
@@ -235,6 +236,14 @@ function AdminApp({ capabilities }: EditionAwareAppProps) {
             element={(
               <Suspense fallback={<RouteSkeleton />}>
                 <Accounts />
+              </Suspense>
+            )}
+          />
+          <Route
+            path="/inventory"
+            element={(
+              <Suspense fallback={<RouteSkeleton />}>
+                <Inventory />
               </Suspense>
             )}
           />

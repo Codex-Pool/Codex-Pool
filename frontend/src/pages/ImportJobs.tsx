@@ -16,9 +16,10 @@ import {
 import { useTranslation } from 'react-i18next'
 
 import { accountsApi } from '@/api/accounts'
-import { localizeApiErrorDisplay } from '@/api/errorI18n'
+import { localizeApiErrorDisplay, localizeOAuthErrorCodeDisplay } from '@/api/errorI18n'
 import {
   importJobsApi,
+  type OAuthImportAdmissionStatus,
   type OAuthImportCredentialMode,
   type OAuthImportJobItem,
   type OAuthImportJobSummary,
@@ -59,6 +60,7 @@ import {
 
 const JOB_ITEMS_PAGE_SIZE = 500
 const JOB_ITEMS_MAX_PAGES = 200
+type JobAdmissionFilter = 'all' | OAuthImportAdmissionStatus
 
 function isRunningStatus(status: OAuthImportJobSummary['status'] | undefined) {
   return status === 'queued' || status === 'running'
@@ -96,6 +98,38 @@ function formatTopValues(values: string[]) {
   return values.join(' · ')
 }
 
+function getAdmissionStatusLabel(
+  t: ReturnType<typeof useTranslation>['t'],
+  status: OAuthImportAdmissionStatus | undefined,
+) {
+  if (status === 'ready') {
+    return t('importJobs.admission.status.ready', { defaultValue: 'Ready' })
+  }
+  if (status === 'needs_refresh') {
+    return t('importJobs.admission.status.needsRefresh', { defaultValue: 'Needs refresh' })
+  }
+  if (status === 'no_quota') {
+    return t('importJobs.admission.status.noQuota', { defaultValue: 'No quota' })
+  }
+  if (status === 'failed') {
+    return t('importJobs.admission.status.failed', { defaultValue: 'Failed' })
+  }
+  if (status === 'queued') {
+    return t('importJobs.admission.status.queued', { defaultValue: 'Queued' })
+  }
+  return t('importJobs.admission.status.unknown', { defaultValue: 'Unknown' })
+}
+
+function getAdmissionStatusVariant(
+  status: OAuthImportAdmissionStatus | undefined,
+): 'success' | 'warning' | 'destructive' | 'secondary' | 'info' {
+  if (status === 'ready') return 'success'
+  if (status === 'needs_refresh') return 'warning'
+  if (status === 'no_quota') return 'info'
+  if (status === 'failed') return 'destructive'
+  return 'secondary'
+}
+
 export default function ImportJobs() {
   const { t } = useTranslation()
   const queryClient = useQueryClient()
@@ -111,6 +145,7 @@ export default function ImportJobs() {
   const [stagedFiles, setStagedFiles] = useState<StagedImportFile[]>([])
   const [pausedTrackingJobIds, setPausedTrackingJobIds] = useState<string[]>([])
   const [credentialMode, setCredentialMode] = useState<OAuthImportCredentialMode>('refresh_token')
+  const [jobAdmissionFilter, setJobAdmissionFilter] = useState<JobAdmissionFilter>('all')
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const pausedTrackingJobIdSet = useMemo(
@@ -569,6 +604,143 @@ export default function ImportJobs() {
     }
   }, [accountsInPoolQuery.data, selectedJobItemsQuery.data, selectedSummary])
 
+  const filteredJobItems = useMemo(() => {
+    const items = selectedJobItemsQuery.data ?? []
+    if (jobAdmissionFilter === 'all') {
+      return items
+    }
+    return items.filter((item) => item.admission_status === jobAdmissionFilter)
+  }, [jobAdmissionFilter, selectedJobItemsQuery.data])
+
+  const selectedAdmissionCounts = selectedSummary?.admission_counts ?? {
+    ready: 0,
+    needs_refresh: 0,
+    no_quota: 0,
+    failed: 0,
+  }
+
+  const jobItemColumns = useMemo<ColumnDef<OAuthImportJobItem>[]>(
+    () => [
+      {
+        id: 'label',
+        accessorFn: (row) => `${row.email ?? ''} ${row.label ?? ''}`.toLowerCase(),
+        header: t('importJobs.detail.columns.label'),
+        cell: ({ row }) => (
+          <div className="min-w-[220px] space-y-1">
+            <div className="font-medium text-foreground">{row.original.email ?? row.original.label}</div>
+            <div className="text-xs text-muted-foreground">{row.original.label}</div>
+            {row.original.chatgpt_account_id ? (
+              <div className="font-mono text-[11px] text-muted-foreground">
+                {row.original.chatgpt_account_id}
+              </div>
+            ) : null}
+          </div>
+        ),
+      },
+      {
+        id: 'status',
+        accessorFn: (row) => row.status,
+        header: t('importJobs.detail.columns.status'),
+        cell: ({ row }) => (
+          <Badge variant={row.original.status === 'failed' ? 'destructive' : row.original.status === 'created' || row.original.status === 'updated' ? 'success' : 'secondary'}>
+            {getImportStatusLabel(t, row.original.status)}
+          </Badge>
+        ),
+      },
+      {
+        id: 'admission',
+        accessorFn: (row) => row.admission_status ?? '',
+        header: t('importJobs.detail.columns.admission', { defaultValue: 'Admission' }),
+        cell: ({ row }) => (
+          <div className="min-w-[148px] space-y-1">
+            <Badge variant={getAdmissionStatusVariant(row.original.admission_status)}>
+              {getAdmissionStatusLabel(t, row.original.admission_status)}
+            </Badge>
+            {row.original.admission_source ? (
+              <div className="text-xs text-muted-foreground">
+                {row.original.admission_source}
+              </div>
+            ) : null}
+          </div>
+        ),
+      },
+      {
+        id: 'quota',
+        accessorFn: (row) => row.admission_status ?? '',
+        header: t('importJobs.detail.columns.quota', { defaultValue: 'Quota' }),
+        cell: ({ row }) => {
+          if (row.original.admission_status === 'no_quota') {
+            return (
+              <div className="min-w-[140px] text-xs text-sky-700 dark:text-sky-300">
+                {t('importJobs.admission.quotaExhausted', {
+                  defaultValue: 'Quota exhausted, waiting for reprobe.',
+                })}
+              </div>
+            )
+          }
+          if (row.original.admission_status === 'ready') {
+            return (
+              <div className="min-w-[140px] text-xs text-emerald-700 dark:text-emerald-300">
+                {t('importJobs.admission.quotaReady', {
+                  defaultValue: 'Probe succeeded and quota is available.',
+                })}
+              </div>
+            )
+          }
+          return (
+            <div className="min-w-[140px] text-xs text-muted-foreground">
+              {t('importJobs.admission.quotaNotApplicable', {
+                defaultValue: 'Quota summary unavailable.',
+              })}
+            </div>
+          )
+        },
+      },
+      {
+        id: 'reason',
+        accessorFn: (row) => `${row.error_code ?? ''} ${row.admission_reason ?? ''}`.toLowerCase(),
+        header: t('importJobs.detail.columns.reason', { defaultValue: 'Reason' }),
+        cell: ({ row }) => {
+          const admissionDisplay = localizeOAuthErrorCodeDisplay(t, row.original.admission_reason)
+          const importDisplay = localizeOAuthErrorCodeDisplay(t, row.original.error_code)
+          const label = row.original.admission_reason
+            ? admissionDisplay.label
+            : row.original.error_code
+              ? importDisplay.label
+              : '-'
+          const tooltip = row.original.admission_reason
+            ? admissionDisplay.tooltip
+            : row.original.error_code
+              ? importDisplay.tooltip
+              : undefined
+          return (
+            <div className="min-w-[220px]">
+              <div className="truncate text-sm text-foreground" title={tooltip}>
+                {label}
+              </div>
+              {row.original.error_message ? (
+                <div className="mt-1 truncate text-xs text-muted-foreground" title={row.original.error_message}>
+                  {row.original.error_message}
+                </div>
+              ) : null}
+            </div>
+          )
+        },
+      },
+      {
+        id: 'line',
+        accessorFn: (row) => row.line_no,
+        header: t('importJobs.detail.columns.line'),
+        cell: ({ row }) => (
+          <div className="text-xs text-muted-foreground">
+            {row.original.source_file}:{row.original.line_no}
+          </div>
+        ),
+      },
+    ],
+    [t],
+  )
+
   const toggleTrackingPaused = useCallback(() => {
     if (!effectiveSelectedJobId) {
       return
@@ -1006,6 +1178,78 @@ export default function ImportJobs() {
           </AnimatedContent>
         )}
       />
+
+      <PagePanel className="space-y-4">
+        <SectionHeader
+          eyebrow={t('importJobs.admission.eyebrow', { defaultValue: 'Admission outcome' })}
+          title={t('importJobs.detail.title')}
+          description={
+            effectiveSelectedJobId
+              ? t('importJobs.detail.jobIdLabel', { jobId: effectiveSelectedJobId })
+              : t('importJobs.detail.selectHint')
+          }
+          actions={(
+            <Select
+              value={jobAdmissionFilter}
+              onValueChange={(value) => setJobAdmissionFilter(value as JobAdmissionFilter)}
+            >
+              <SelectTrigger
+                className="min-w-[11rem]"
+                aria-label={t('importJobs.detail.admissionFilterLabel', {
+                  defaultValue: 'Admission filter',
+                })}
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">
+                  {t('importJobs.detail.admissionFilterAll', { defaultValue: 'All outcomes' })}
+                </SelectItem>
+                <SelectItem value="ready">{getAdmissionStatusLabel(t, 'ready')}</SelectItem>
+                <SelectItem value="needs_refresh">{getAdmissionStatusLabel(t, 'needs_refresh')}</SelectItem>
+                <SelectItem value="no_quota">{getAdmissionStatusLabel(t, 'no_quota')}</SelectItem>
+                <SelectItem value="failed">{getAdmissionStatusLabel(t, 'failed')}</SelectItem>
+              </SelectContent>
+            </Select>
+          )}
+        />
+
+        <div className="grid gap-px overflow-hidden rounded-[0.9rem] border border-border/70 bg-border/70 sm:grid-cols-2 xl:grid-cols-4">
+          <MiniMetric
+            title={getAdmissionStatusLabel(t, 'ready')}
+            value={selectedAdmissionCounts.ready}
+          />
+          <MiniMetric
+            title={getAdmissionStatusLabel(t, 'needs_refresh')}
+            value={selectedAdmissionCounts.needs_refresh}
+          />
+          <MiniMetric
+            title={getAdmissionStatusLabel(t, 'no_quota')}
+            value={selectedAdmissionCounts.no_quota}
+          />
+          <MiniMetric
+            title={getAdmissionStatusLabel(t, 'failed')}
+            value={selectedAdmissionCounts.failed}
+          />
+        </div>
+
+        <StandardDataTable
+          columns={jobItemColumns}
+          data={filteredJobItems}
+          density="comfortable"
+          defaultPageSize={20}
+          pageSizeOptions={[20, 50, 100]}
+          className="min-h-[28rem] border border-border/60 bg-background/[0.5] shadow-none backdrop-blur-[2px]"
+          searchPlaceholder={t('importJobs.detail.searchPlaceholderModern')}
+          emptyText={
+            effectiveSelectedJobId
+              ? selectedJobItemsQuery.isLoading
+                ? t('importJobs.detail.itemsLoading')
+                : t('importJobs.detail.itemsEmpty')
+              : t('importJobs.detail.selectHint')
+          }
+        />
+      </PagePanel>
 
       {confirmDialog}
     </motion.div>

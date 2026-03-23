@@ -4,6 +4,7 @@ import {
     KeyRound,
     Users,
     UserCog,
+    Archive,
     HardDriveDownload,
     ShieldCheck,
     Layers3,
@@ -180,6 +181,7 @@ export function AppLayout({
             label: t('nav.groups.assets'),
             items: [
                 { path: '/accounts', icon: UserCog, label: t('nav.accounts') },
+                { path: '/inventory', icon: Archive, label: t('nav.inventory') },
                 { path: '/models', icon: Box, label: t('nav.models') },
                 { path: STANDALONE_ADMIN_API_KEYS_PATH, icon: KeyRound, label: t('nav.apiKeys') },
                 { path: '/tenants', icon: Users, label: t('nav.tenants') },

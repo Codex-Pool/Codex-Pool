@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { type ColumnDef } from '@tanstack/react-table'
 import { useQuery } from '@tanstack/react-query'
-import { Building2, Gauge, RefreshCcw, Timer, TrendingUp, Users, Zap } from 'lucide-react'
+import { Archive, Building2, Gauge, RefreshCcw, ShieldCheck, Timer, TrendingUp, TriangleAlert, Users, Zap } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router-dom'
 import {
@@ -18,6 +18,7 @@ import {
 
 import { adminKeysApi } from '@/api/adminKeys'
 import { adminTenantsApi } from '@/api/adminTenants'
+import { accountsApi } from '@/api/accounts'
 import { dashboardApi } from '@/api/dashboard'
 import { usageApi } from '@/api/usage'
 import {
@@ -78,6 +79,7 @@ import {
 import { formatExactCount } from '@/lib/count-number-format'
 import { describeDashboardOverviewLayout } from '@/lib/page-archetypes'
 import { cn } from '@/lib/utils'
+import { isSessionMode } from '@/features/accounts/utils'
 
 type AlertSeverity = 'critical' | 'warning' | 'info'
 type AlertStatus = 'open' | 'resolved'
@@ -289,6 +291,34 @@ export default function Dashboard() {
     refetchInterval: 30_000,
   })
 
+  const { data: inventorySummary } = useQuery({
+    queryKey: ['dashboardOauthInventorySummary'],
+    queryFn: accountsApi.getOAuthInventorySummary,
+    staleTime: 60_000,
+    refetchInterval: 60_000,
+  })
+
+  const { data: dashboardAccounts = [] } = useQuery({
+    queryKey: ['dashboardUpstreamAccounts'],
+    queryFn: accountsApi.listAccounts,
+    staleTime: 60_000,
+    refetchInterval: 60_000,
+  })
+
+  const dashboardSessionAccountIds = useMemo(
+    () => dashboardAccounts.filter((account) => isSessionMode(account.mode)).map((account) => account.id),
+    [dashboardAccounts],
+  )
+
+  const { data: dashboardOauthStatuses = [] } = useQuery({
+    queryKey: ['dashboardOauthStatuses', dashboardSessionAccountIds],
+    queryFn: () => accountsApi.listOAuthStatuses(dashboardSessionAccountIds),
+    enabled: dashboardSessionAccountIds.length > 0,
+    staleTime: 60_000,
+    refetchInterval: 60_000,
+    retry: false,
+  })
+
   const {
     data: summaryData,
     isLoading: isLoadingSummary,
@@ -320,6 +350,22 @@ export default function Dashboard() {
 
   const isRefreshing = manualRefreshing || isRefetchingSystem || isRefetchingSummary || isRefetchingLeaderboard
   const isLoading = isLoadingSystem || isLoadingSummary
+
+  const runtimePoolCounts = useMemo(() => {
+    return dashboardOauthStatuses.reduce(
+      (acc, status) => {
+        if (status.pool_state === 'active') {
+          acc.active += 1
+        } else if (status.pool_state === 'quarantine') {
+          acc.quarantine += 1
+        } else if (status.pool_state === 'pending_purge') {
+          acc.pendingPurge += 1
+        }
+        return acc
+      },
+      { active: 0, quarantine: 0, pendingPurge: 0 },
+    )
+  }, [dashboardOauthStatuses])
 
   const handleRefresh = () => {
     setRangeAnchorMs(Date.now())
@@ -814,6 +860,72 @@ export default function Dashboard() {
     },
   ]
 
+  const poolOverviewMetrics = [
+    {
+      id: 'vault-queued',
+      title: t('dashboard.poolOverview.queued', { defaultValue: 'Vault queued' }),
+      value: inventorySummary?.queued ?? 0,
+      icon: Archive,
+      description: t('dashboard.poolOverview.queuedDesc', {
+        defaultValue: 'Imported and waiting for admission probing.',
+      }),
+    },
+    {
+      id: 'vault-ready',
+      title: t('dashboard.poolOverview.ready', { defaultValue: 'Vault ready' }),
+      value: inventorySummary?.ready ?? 0,
+      icon: ShieldCheck,
+      description: t('dashboard.poolOverview.readyDesc', {
+        defaultValue: 'Can enter active runtime without refresh.',
+      }),
+    },
+    {
+      id: 'vault-needs-refresh',
+      title: t('dashboard.poolOverview.needsRefresh', { defaultValue: 'Vault needs refresh' }),
+      value: inventorySummary?.needs_refresh ?? 0,
+      icon: RefreshCcw,
+      description: t('dashboard.poolOverview.needsRefreshDesc', {
+        defaultValue: 'Needs one refresh before it can join the active pool.',
+      }),
+    },
+    {
+      id: 'vault-no-quota',
+      title: t('dashboard.poolOverview.noQuota', { defaultValue: 'Vault no quota' }),
+      value: inventorySummary?.no_quota ?? 0,
+      icon: Timer,
+      description: t('dashboard.poolOverview.noQuotaDesc', {
+        defaultValue: 'Probe succeeded but quota is currently exhausted.',
+      }),
+    },
+    {
+      id: 'runtime-active',
+      title: t('dashboard.poolOverview.active', { defaultValue: 'Active' }),
+      value: runtimePoolCounts.active,
+      icon: Zap,
+      description: t('dashboard.poolOverview.activeDesc', {
+        defaultValue: 'Currently routable runtime accounts.',
+      }),
+    },
+    {
+      id: 'runtime-quarantine',
+      title: t('dashboard.poolOverview.quarantine', { defaultValue: 'Quarantine' }),
+      value: runtimePoolCounts.quarantine,
+      icon: Gauge,
+      description: t('dashboard.poolOverview.quarantineDesc', {
+        defaultValue: 'Temporarily isolated while retry or reset is pending.',
+      }),
+    },
+    {
+      id: 'runtime-pending-purge',
+      title: t('dashboard.poolOverview.pendingPurge', { defaultValue: 'Pending purge' }),
+      value: runtimePoolCounts.pendingPurge,
+      icon: TriangleAlert,
+      description: t('dashboard.poolOverview.pendingPurgeDesc', {
+        defaultValue: 'Fatal runtime credentials already removed from routing.',
+      }),
+    },
+  ]
+
   return (
     <div className="flex-1 w-full overflow-y-auto px-4 py-4 sm:px-6 lg:px-8">
       <DashboardShell
@@ -1022,6 +1134,29 @@ export default function Dashboard() {
             />
           ))}
         </DashboardMetricGrid>
+
+        <PagePanel className="space-y-4">
+          <SectionHeader
+            eyebrow={t('dashboard.poolOverview.eyebrow', { defaultValue: 'Pool overview' })}
+            title={t('dashboard.poolOverview.title', { defaultValue: 'Inventory and runtime pool' })}
+            description={t('dashboard.poolOverview.description', {
+              defaultValue:
+                'Read vault admission and runtime pool counts together so you can spot activation pressure before it shows up as request failures.',
+            })}
+          />
+          <DashboardMetricGrid className="xl:grid-cols-4 2xl:grid-cols-4">
+            {poolOverviewMetrics.map((metric) => (
+              <DashboardMetricCard
+                key={metric.id}
+                title={metric.title}
+                value={formatDashboardCount(metric.value)}
+                valueTitle={formatExactCount(metric.value)}
+                description={metric.description}
+                icon={<metric.icon className="h-4 w-4" />}
+              />
+            ))}
+          </DashboardMetricGrid>
+        </PagePanel>
 
         <div className="grid gap-6 2xl:grid-cols-[minmax(0,1.55fr)_minmax(0,1fr)]">
           <PagePanel className="space-y-5">

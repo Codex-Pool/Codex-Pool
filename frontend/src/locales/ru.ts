@@ -47,6 +47,7 @@ export default {
             plan: "План",
             provider: "Провайдер / Режим",
             rateLimit: "Использование Rate Limit",
+            runtimePool: "Runtime pool",
             binding: "Привязка",
             unbound: "отвязано"
         },
@@ -74,6 +75,7 @@ export default {
                 credentials: "Учетные данные",
                 identity: "Идентификация",
                 refresh: "Состояние обновления",
+                runtimeHealth: "Runtime health",
                 supportedModels: "Доступные модели",
                 subscription: "Подписка"
             },
@@ -106,6 +108,14 @@ export default {
                 rateLimitsExpiresAt: "Срок действия лимитов",
                 rateLimitsLastErrorCode: "Код последней ошибки лимитов",
                 rateLimitsLastError: "Последняя ошибка лимитов",
+                poolState: "Runtime pool",
+                refreshCredentialState: "Состояние refresh credential",
+                quarantineReason: "Причина карантина",
+                quarantineUntil: "Карантин до",
+                pendingPurgeReason: "Причина pending purge",
+                pendingPurgeAt: "Время pending purge",
+                hasRefreshCredential: "Есть refresh credential",
+                hasAccessTokenFallback: "Есть fallback access token",
                 rawAccount: "Сырые данные аккаунта",
                 rawOauthStatus: "Сырые данные статуса OAuth"
             }
@@ -211,6 +221,13 @@ export default {
                 unknown: "Неизвестный тип учетных данных"
             }
         },
+        refreshCredentialState: {
+            healthy: "Нормально",
+            degraded: "Деградация",
+            invalid: "Недействительно",
+            missing: "Отсутствует",
+            unknown: "Неизвестно"
+        },
         rateLimits: {
             labels: {
                 fiveHours: "Лимит 5 часов",
@@ -229,6 +246,21 @@ export default {
             usedPrefix: "Использовано"
         },
         searchPlaceholder: "Поиск по email, метке и URL…",
+        runtimePool: {
+            eyebrow: "Runtime health",
+            title: "Состояние онлайн-пула",
+            description: "Accounts показывает только онлайн-пул. Для queued, ready и no_quota записей используйте Inventory.",
+            openInventory: "Открыть Inventory",
+            active: "Активные",
+            activeDesc: "Сейчас доступны для runtime routing.",
+            quarantine: "Карантин",
+            quarantineDesc: "Временно изолированы до повторной попытки или сброса квоты.",
+            pendingPurge: "Pending purge",
+            pendingPurgeDesc: "Уже сняты с маршрутизации и ждут асинхронной очистки.",
+            vaultReady: "Vault ready",
+            vaultReadyDesc: "Записи инвентаря, которые можно добавить в active без refresh.",
+            unknown: "Неизвестно"
+        },
         status: {
             active: "Активен",
             disabled: "Отключен"
@@ -582,6 +614,25 @@ export default {
             title: "Операционный пульс",
             usagePipeline: "Контур учета"
         },
+        poolOverview: {
+            eyebrow: "Обзор пула",
+            title: "Инвентарь и runtime pool",
+            description: "Смотрите vault admission и runtime pool вместе, чтобы раньше заметить давление на активацию.",
+            queued: "Vault queued",
+            queuedDesc: "Импортировано и ждет admission probe.",
+            ready: "Vault ready",
+            readyDesc: "Может войти в active без refresh.",
+            needsRefresh: "Vault needs refresh",
+            needsRefreshDesc: "Перед входом в active нужен один refresh.",
+            noQuota: "Vault no quota",
+            noQuotaDesc: "Probe успешен, но квота сейчас исчерпана.",
+            active: "Активные",
+            activeDesc: "Аккаунты, доступные для маршрутизации прямо сейчас.",
+            quarantine: "Карантин",
+            quarantineDesc: "Runtime-аккаунты, временно изолированные до повторной попытки или сброса.",
+            pendingPurge: "Pending purge",
+            pendingPurgeDesc: "Фатальные аккаунты уже сняты с маршрутизации."
+        },
         tokenComponents: {
             cached: "Кэшированный ввод",
             input: "Ввод",
@@ -635,11 +686,16 @@ export default {
         },
         detail: {
             columns: {
+                admission: "Admission",
                 error: "Ошибка",
                 label: "Метка",
                 line: "Строка",
+                quota: "Quota",
+                reason: "Причина",
                 status: "Статус"
             },
+            admissionFilterAll: "Все исходы",
+            admissionFilterLabel: "Фильтр admission",
             filterLabel: "Фильтр статуса",
             itemsEmpty: "Подходящих элементов нет.",
             itemsLoading: "Загрузка элементов задания…",
@@ -701,6 +757,20 @@ export default {
             refreshTokenHint: "Подходит, когда нужен управляемый платформой refresh и ротация токенов.",
             accessToken: "Импорт AK",
             accessTokenHint: "Подходит для одноразового импорта без фоновой ротации refresh."
+        },
+        admission: {
+            eyebrow: "Admission outcome",
+            quotaExhausted: "Квота исчерпана, ожидается повторная probe.",
+            quotaReady: "Probe успешен, квота доступна.",
+            quotaNotApplicable: "Сводка по квоте недоступна.",
+            status: {
+                queued: "Queued",
+                ready: "Ready",
+                needsRefresh: "Needs refresh",
+                noQuota: "No quota",
+                failed: "Failed",
+                unknown: "Unknown"
+            }
         },
         metrics: {
             created: "Создано",
@@ -815,6 +885,58 @@ export default {
             warningFiles: "Проверить: {{count}}"
         },
         subtitle: "Безопасная загрузка учетных данных в файлах формата CSV/TXT."
+    },
+    inventory: {
+        eyebrow: "Inventory",
+        title: "OAuth Inventory",
+        subtitle: "Отслеживайте OAuth-инвентарь в vault до активации, чтобы queued, ready и no_quota не смешивались с онлайн-пулом.",
+        loading: "Загрузка inventory…",
+        empty: "Нет записей inventory для текущего фильтра.",
+        searchPlaceholder: "Поиск по email, метке, account ID или admission reason…",
+        meta: {
+            total: "Всего {{count}}",
+            filtered: "Показано {{count}}"
+        },
+        metrics: {
+            total: "Всего записей"
+        },
+        filters: {
+            status: "Статус inventory",
+            all: "Весь inventory"
+        },
+        status: {
+            queued: "Queued",
+            ready: "Ready",
+            needsRefresh: "Needs refresh",
+            noQuota: "No quota",
+            failed: "Failed",
+            unknown: "Unknown"
+        },
+        credentials: {
+            hasRt: "RT ready",
+            noRt: "Нет RT",
+            hasAk: "AK fallback",
+            noAk: "Нет AK"
+        },
+        columns: {
+            account: "Аккаунт",
+            chatgptAccountId: "ChatGPT Account ID",
+            vaultStatus: "Статус vault",
+            credentials: "Учетные данные",
+            quota: "Сводка по квоте",
+            timeline: "Временная шкала admission",
+            reason: "Причина"
+        },
+        fields: {
+            checkedAt: "Проверено",
+            retryAfter: "Повтор после",
+            source: "Источник"
+        },
+        table: {
+            eyebrow: "Vault view",
+            title: "Admission inventory records",
+            description: "Эта таблица показывает только vault inventory. Runtime activation и quarantine по-прежнему смотрите в Accounts."
+        }
     },
     oauthImport: {
         title: "Импорт через OAuth-вход",
@@ -1353,6 +1475,7 @@ export default {
         billing: "Биллинг",
         config: "Настройки",
         dashboard: "Обзор",
+        inventory: "Inventory",
         groups: {
             analytics: "Аналитика",
             assets: "Активы",

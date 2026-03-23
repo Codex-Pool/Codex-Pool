@@ -47,6 +47,7 @@ export default {
             plan: "Plan",
             provider: "Provider / Mode",
             rateLimit: "Rate Limit Usage",
+            runtimePool: "Runtime Pool",
             binding: "Binding",
             unbound: "unbound"
         },
@@ -74,6 +75,7 @@ export default {
                 credentials: "Credentials",
                 identity: "Identity",
                 refresh: "Refresh State",
+                runtimeHealth: "Runtime Health",
                 supportedModels: "Available Models",
                 subscription: "Subscription"
             },
@@ -106,6 +108,14 @@ export default {
                 rateLimitsExpiresAt: "Rate Limits Expires At",
                 rateLimitsLastErrorCode: "Rate Limits Last Error Code",
                 rateLimitsLastError: "Rate Limits Last Error",
+                poolState: "Runtime Pool",
+                refreshCredentialState: "Refresh Credential State",
+                quarantineReason: "Quarantine Reason",
+                quarantineUntil: "Quarantine Until",
+                pendingPurgeReason: "Pending Purge Reason",
+                pendingPurgeAt: "Pending Purge At",
+                hasRefreshCredential: "Has Refresh Credential",
+                hasAccessTokenFallback: "Has Access Token Fallback",
                 rawAccount: "Account Payload",
                 rawOauthStatus: "OAuth Status Payload"
             }
@@ -211,6 +221,13 @@ export default {
                 unknown: "Unknown credential type"
             }
         },
+        refreshCredentialState: {
+            healthy: "Healthy",
+            degraded: "Degraded",
+            invalid: "Invalid",
+            missing: "Missing",
+            unknown: "Unknown"
+        },
         rateLimits: {
             labels: {
                 fiveHours: "5-Hour Limit",
@@ -229,6 +246,21 @@ export default {
             usedPrefix: "Used"
         },
         searchPlaceholder: "Search by email, label, URL…",
+        runtimePool: {
+            eyebrow: "Runtime health",
+            title: "Online pool posture",
+            description: "Accounts only reflects the online pool. Use Inventory to inspect queued, ready, or no-quota vault records before activation.",
+            openInventory: "Open Inventory",
+            active: "Active",
+            activeDesc: "Eligible for runtime routing right now.",
+            quarantine: "Quarantine",
+            quarantineDesc: "Temporarily isolated while waiting for retry or quota reset.",
+            pendingPurge: "Pending purge",
+            pendingPurgeDesc: "Fatal credentials already removed from routing and waiting for cleanup.",
+            vaultReady: "Vault ready",
+            vaultReadyDesc: "Inventory records that can join the active pool without refresh.",
+            unknown: "Unknown"
+        },
         status: {
             active: "Active",
             disabled: "Disabled"
@@ -572,6 +604,25 @@ export default {
             title: "Operational pulse",
             usagePipeline: "Usage pipeline"
         },
+        poolOverview: {
+            eyebrow: "Pool overview",
+            title: "Inventory and runtime pool",
+            description: "Read vault admission and runtime pool counts together so you can spot activation pressure before it shows up as request failures.",
+            queued: "Vault queued",
+            queuedDesc: "Imported and waiting for admission probing.",
+            ready: "Vault ready",
+            readyDesc: "Can enter active runtime without refresh.",
+            needsRefresh: "Vault needs refresh",
+            needsRefreshDesc: "Needs one refresh before it can join the active pool.",
+            noQuota: "Vault no quota",
+            noQuotaDesc: "Probe succeeded but quota is currently exhausted.",
+            active: "Active",
+            activeDesc: "Currently routable runtime accounts.",
+            quarantine: "Quarantine",
+            quarantineDesc: "Temporarily isolated while retry or reset is pending.",
+            pendingPurge: "Pending purge",
+            pendingPurgeDesc: "Fatal runtime credentials already removed from routing."
+        },
         scope: {
             apiKey: "API Key View",
             global: "Global View",
@@ -635,11 +686,16 @@ export default {
         },
         detail: {
             columns: {
+                admission: "Admission",
                 error: "Error",
                 label: "Label",
                 line: "Line",
+                quota: "Quota",
+                reason: "Reason",
                 status: "Status"
             },
+            admissionFilterAll: "All outcomes",
+            admissionFilterLabel: "Admission filter",
             filterLabel: "Status filter",
             itemsEmpty: "No matching job items.",
             itemsLoading: "Loading job items…",
@@ -701,6 +757,20 @@ export default {
             refreshTokenHint: "Use refresh_token when you want managed refresh and token rotation.",
             accessToken: "Import AK",
             accessTokenHint: "Use access_token when you want one-time imports without refresh rotation."
+        },
+        admission: {
+            eyebrow: "Admission outcome",
+            quotaExhausted: "Quota exhausted, waiting for reprobe.",
+            quotaReady: "Probe succeeded and quota is available.",
+            quotaNotApplicable: "Quota summary unavailable.",
+            status: {
+                queued: "Queued",
+                ready: "Ready",
+                needsRefresh: "Needs refresh",
+                noQuota: "No quota",
+                failed: "Failed",
+                unknown: "Unknown"
+            }
         },
         metrics: {
             created: "Created",
@@ -815,6 +885,58 @@ export default {
             warningFiles: "Needs Review {{count}}"
         },
         subtitle: "Upload account secrets securely in strictly formatted CSV/TXT files."
+    },
+    inventory: {
+        eyebrow: "Inventory",
+        title: "OAuth Inventory",
+        subtitle: "Track vaulted OAuth inventory before activation so queued, ready, and no-quota records never get mixed into the runtime pool view.",
+        loading: "Loading inventory…",
+        empty: "No inventory records match the current filter.",
+        searchPlaceholder: "Search by email, label, account ID, or admission reason…",
+        meta: {
+            total: "Total {{count}}",
+            filtered: "Showing {{count}}"
+        },
+        metrics: {
+            total: "Total records"
+        },
+        filters: {
+            status: "Inventory status",
+            all: "All inventory"
+        },
+        status: {
+            queued: "Queued",
+            ready: "Ready",
+            needsRefresh: "Needs refresh",
+            noQuota: "No quota",
+            failed: "Failed",
+            unknown: "Unknown"
+        },
+        credentials: {
+            hasRt: "RT ready",
+            noRt: "No RT",
+            hasAk: "AK fallback",
+            noAk: "No AK"
+        },
+        columns: {
+            account: "Account",
+            chatgptAccountId: "ChatGPT Account ID",
+            vaultStatus: "Vault Status",
+            credentials: "Credentials",
+            quota: "Quota Summary",
+            timeline: "Admission Timeline",
+            reason: "Reason"
+        },
+        fields: {
+            checkedAt: "Checked",
+            retryAfter: "Retry after",
+            source: "Source"
+        },
+        table: {
+            eyebrow: "Vault view",
+            title: "Admission inventory records",
+            description: "This table only covers vault inventory. Runtime activation and quarantine are still managed from Accounts."
+        }
     },
     oauthImport: {
         title: "OAuth Login Import",
@@ -1353,6 +1475,7 @@ export default {
         billing: "Billing",
         config: "Configuration",
         dashboard: "Dashboard",
+        inventory: "Inventory",
         groups: {
             analytics: "Analytics",
             assets: "Pool Assets",

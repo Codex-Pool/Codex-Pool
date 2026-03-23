@@ -15,7 +15,11 @@ import { extractApiErrorStatus } from '@/api/client'
 import { localizeApiErrorDisplay, localizeOAuthErrorCodeDisplay } from '@/api/errorI18n'
 import { importJobsApi, type OAuthImportJobSummary } from '@/api/importJobs'
 import {
+  DashboardMetricCard,
+  DashboardMetricGrid,
   PageIntro,
+  PagePanel,
+  SectionHeader,
 } from '@/components/layout/page-archetypes'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -221,12 +225,38 @@ export default function Accounts() {
   const isOAuthStatusRefreshing =
     oauthAccountIds.length > 0 && (isOauthStatusesLoading || isOauthStatusesFetching)
 
+  const { data: inventorySummary } = useQuery({
+    queryKey: ['oauthInventorySummary'],
+    queryFn: accountsApi.getOAuthInventorySummary,
+    staleTime: 60000,
+    refetchInterval: 60000,
+    refetchOnWindowFocus: 'always',
+  })
+
   const oauthStatusMap = useMemo(() => {
     const map = new Map<string, OAuthAccountStatusResponse>()
     oauthStatusesRaw.forEach((status) => {
       map.set(status.account_id, status)
     })
     return map
+  }, [oauthStatusesRaw])
+
+  const runtimePoolCounts = useMemo(() => {
+    return oauthStatusesRaw.reduce(
+      (acc, status) => {
+        if (status.pool_state === 'active') {
+          acc.active += 1
+        } else if (status.pool_state === 'quarantine') {
+          acc.quarantine += 1
+        } else if (status.pool_state === 'pending_purge') {
+          acc.pendingPurge += 1
+        } else {
+          acc.unknown += 1
+        }
+        return acc
+      },
+      { active: 0, quarantine: 0, pendingPurge: 0, unknown: 0 },
+    )
   }, [oauthStatusesRaw])
 
   const detailIsSessionAccount = Boolean(detailAccount && isSessionMode(detailAccount.mode))
@@ -1221,6 +1251,56 @@ export default function Accounts() {
           )}
           actions={accountsLayout.mobileToolbarPlacement === 'after-intro' ? toolbarActions : undefined}
         />
+
+        <PagePanel className="space-y-4">
+          <SectionHeader
+            eyebrow={t('accounts.runtimePool.eyebrow', { defaultValue: 'Runtime health' })}
+            title={t('accounts.runtimePool.title', { defaultValue: 'Online pool posture' })}
+            description={t('accounts.runtimePool.description', {
+              defaultValue:
+                'Accounts only reflects the online pool. Use Inventory to inspect queued, ready, or no-quota vault records before activation.',
+            })}
+            actions={(
+              <Button variant="outline" size="sm" onClick={() => navigate('/inventory')}>
+                {t('accounts.runtimePool.openInventory', { defaultValue: 'Open Inventory' })}
+              </Button>
+            )}
+          />
+          <DashboardMetricGrid className="xl:grid-cols-4">
+            <DashboardMetricCard
+              title={t('accounts.runtimePool.active', { defaultValue: 'Active' })}
+              value={runtimePoolCounts.active}
+              valueTitle={String(runtimePoolCounts.active)}
+              description={t('accounts.runtimePool.activeDesc', {
+                defaultValue: 'Eligible for runtime routing right now.',
+              })}
+            />
+            <DashboardMetricCard
+              title={t('accounts.runtimePool.quarantine', { defaultValue: 'Quarantine' })}
+              value={runtimePoolCounts.quarantine}
+              valueTitle={String(runtimePoolCounts.quarantine)}
+              description={t('accounts.runtimePool.quarantineDesc', {
+                defaultValue: 'Temporarily isolated while waiting for retry or quota reset.',
+              })}
+            />
+            <DashboardMetricCard
+              title={t('accounts.runtimePool.pendingPurge', { defaultValue: 'Pending purge' })}
+              value={runtimePoolCounts.pendingPurge}
+              valueTitle={String(runtimePoolCounts.pendingPurge)}
+              description={t('accounts.runtimePool.pendingPurgeDesc', {
+                defaultValue: 'Fatal credentials already removed from routing and waiting for cleanup.',
+              })}
+            />
+            <DashboardMetricCard
+              title={t('accounts.runtimePool.vaultReady', { defaultValue: 'Vault ready' })}
+              value={inventorySummary?.ready ?? 0}
+              valueTitle={String(inventorySummary?.ready ?? 0)}
+              description={t('accounts.runtimePool.vaultReadyDesc', {
+                defaultValue: 'Inventory records that can join the active pool without refresh.',
+              })}
+            />
+          </DashboardMetricGrid>
+        </PagePanel>
 
         {accountsLayout.mobileFiltersPlacement === 'after-toolbar' ? (
           <section className="space-y-4 border-t border-border/70 pt-4">

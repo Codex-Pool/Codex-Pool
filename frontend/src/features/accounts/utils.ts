@@ -2,7 +2,9 @@ import type { TFunction } from 'i18next'
 
 import type {
   OAuthAccountStatusResponse,
+  OAuthInventoryStatus,
   OAuthRateLimitRefreshJobSummary,
+  OAuthRateLimitSnapshot,
   OAuthRateLimitWindow,
   UpstreamAccount,
 } from '@/api/accounts'
@@ -82,8 +84,14 @@ export function isRateLimitRefreshJobTerminal(status?: OAuthRateLimitRefreshJobS
 }
 
 export function extractRateLimitDisplays(status?: OAuthAccountStatusResponse): RateLimitDisplay[] {
-  const snapshots = status?.rate_limits ?? []
-  if (snapshots.length === 0) {
+  return extractRateLimitDisplaysFromSnapshots(status?.rate_limits)
+}
+
+export function extractRateLimitDisplaysFromSnapshots(
+  snapshots?: OAuthRateLimitSnapshot[],
+): RateLimitDisplay[] {
+  const normalizedSnapshots = snapshots ?? []
+  if (normalizedSnapshots.length === 0) {
     return []
   }
 
@@ -120,7 +128,7 @@ export function extractRateLimitDisplays(status?: OAuthAccountStatusResponse): R
     }
   }
 
-  for (const snapshot of snapshots) {
+  for (const snapshot of normalizedSnapshots) {
     const marker = `${snapshot.limit_id ?? ''} ${snapshot.limit_name ?? ''}`.toLowerCase()
     const isGithubLimit = marker.includes('github')
 
@@ -339,4 +347,91 @@ export function getSourceTypeLabel(sourceType: string | undefined, t: TFunction)
     return t('accounts.oauth.sourceType.codex', { defaultValue: 'Codex' })
   }
   return t('accounts.oauth.sourceType.unknown', { defaultValue: 'Unknown source' })
+}
+
+export function getPoolStateLabel(
+  poolState: OAuthAccountStatusResponse['pool_state'] | undefined,
+  t: TFunction,
+) {
+  if (poolState === 'active') {
+    return t('accounts.runtimePool.active', { defaultValue: 'Active' })
+  }
+  if (poolState === 'quarantine') {
+    return t('accounts.runtimePool.quarantine', { defaultValue: 'Quarantine' })
+  }
+  if (poolState === 'pending_purge') {
+    return t('accounts.runtimePool.pendingPurge', { defaultValue: 'Pending purge' })
+  }
+  return t('accounts.runtimePool.unknown', { defaultValue: 'Unknown' })
+}
+
+export function getPoolStateBadgeVariant(
+  poolState: OAuthAccountStatusResponse['pool_state'] | undefined,
+): 'success' | 'warning' | 'destructive' | 'secondary' {
+  if (poolState === 'active') {
+    return 'success'
+  }
+  if (poolState === 'quarantine') {
+    return 'warning'
+  }
+  if (poolState === 'pending_purge') {
+    return 'destructive'
+  }
+  return 'secondary'
+}
+
+export function getRefreshCredentialStateLabel(
+  credentialState: OAuthAccountStatusResponse['refresh_credential_state'] | undefined,
+  t: TFunction,
+) {
+  if (credentialState === 'healthy') {
+    return t('accounts.refreshCredentialState.healthy', { defaultValue: 'Healthy' })
+  }
+  if (credentialState === 'degraded') {
+    return t('accounts.refreshCredentialState.degraded', { defaultValue: 'Degraded' })
+  }
+  if (credentialState === 'invalid') {
+    return t('accounts.refreshCredentialState.invalid', { defaultValue: 'Invalid' })
+  }
+  if (credentialState === 'missing') {
+    return t('accounts.refreshCredentialState.missing', { defaultValue: 'Missing' })
+  }
+  return t('accounts.refreshCredentialState.unknown', { defaultValue: 'Unknown' })
+}
+
+export function getInventoryStatusLabel(status: OAuthInventoryStatus | undefined, t: TFunction) {
+  if (status === 'queued') {
+    return t('inventory.status.queued', { defaultValue: 'Queued' })
+  }
+  if (status === 'ready') {
+    return t('inventory.status.ready', { defaultValue: 'Ready' })
+  }
+  if (status === 'needs_refresh') {
+    return t('inventory.status.needsRefresh', { defaultValue: 'Needs refresh' })
+  }
+  if (status === 'no_quota') {
+    return t('inventory.status.noQuota', { defaultValue: 'No quota' })
+  }
+  if (status === 'failed') {
+    return t('inventory.status.failed', { defaultValue: 'Failed' })
+  }
+  return t('inventory.status.unknown', { defaultValue: 'Unknown' })
+}
+
+export function getInventoryStatusBadgeVariant(
+  status: OAuthInventoryStatus | undefined,
+): 'success' | 'warning' | 'destructive' | 'secondary' | 'info' {
+  if (status === 'ready') {
+    return 'success'
+  }
+  if (status === 'needs_refresh') {
+    return 'warning'
+  }
+  if (status === 'no_quota') {
+    return 'info'
+  }
+  if (status === 'failed') {
+    return 'destructive'
+  }
+  return 'secondary'
 }

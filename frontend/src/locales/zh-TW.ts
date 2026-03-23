@@ -47,6 +47,7 @@ export default {
             plan: "方案",
             provider: "帳號類型",
             rateLimit: "Rate Limit 使用",
+            runtimePool: "運行池",
             binding: "綁定帳號 ID",
             unbound: "未綁定"
         },
@@ -74,6 +75,7 @@ export default {
                 credentials: "憑證",
                 identity: "身份資訊",
                 refresh: "刷新狀態",
+                runtimeHealth: "運行健康",
                 supportedModels: "可用模型",
                 subscription: "訂閱資訊"
             },
@@ -106,6 +108,14 @@ export default {
                 rateLimitsExpiresAt: "限額到期時間",
                 rateLimitsLastErrorCode: "限額最近錯誤碼",
                 rateLimitsLastError: "限額最近錯誤",
+                poolState: "運行池",
+                refreshCredentialState: "刷新憑證狀態",
+                quarantineReason: "隔離原因",
+                quarantineUntil: "隔離到期",
+                pendingPurgeReason: "待清理原因",
+                pendingPurgeAt: "待清理時間",
+                hasRefreshCredential: "是否有刷新憑證",
+                hasAccessTokenFallback: "是否有存取權杖回退",
                 rawAccount: "帳號原始資料",
                 rawOauthStatus: "OAuth 狀態原始資料"
             }
@@ -211,6 +221,13 @@ export default {
                 unknown: "未知憑證類型"
             }
         },
+        refreshCredentialState: {
+            healthy: "健康",
+            degraded: "降級",
+            invalid: "無效",
+            missing: "缺失",
+            unknown: "未知"
+        },
         rateLimits: {
             labels: {
                 fiveHours: "5小時限制",
@@ -229,6 +246,21 @@ export default {
             usedPrefix: "已用"
         },
         searchPlaceholder: "依電子郵件、標籤、URL 搜尋…",
+        runtimePool: {
+            eyebrow: "運行健康",
+            title: "在線池態勢",
+            description: "Accounts 只代表在線池。若要查看 queued、ready、no_quota 等庫存狀態，請前往 Inventory。",
+            openInventory: "開啟 Inventory",
+            active: "活躍",
+            activeDesc: "目前可參與運行時路由。",
+            quarantine: "隔離",
+            quarantineDesc: "等待重試或額度恢復中的臨時隔離帳號。",
+            pendingPurge: "待清理",
+            pendingPurgeDesc: "已從路由摘除、等待非同步清理的致命帳號。",
+            vaultReady: "庫存就緒",
+            vaultReadyDesc: "無需 refresh 即可補入 active 池的庫存記錄。",
+            unknown: "未知"
+        },
         status: {
             active: "正常",
             disabled: "已停用"
@@ -582,6 +614,25 @@ export default {
             title: "運行脈搏",
             usagePipeline: "用量鏈路"
         },
+        poolOverview: {
+            eyebrow: "池子總覽",
+            title: "庫存與運行池",
+            description: "把 vault 准入與 runtime 池子一起看，可以更早發現激活壓力。",
+            queued: "庫存排隊",
+            queuedDesc: "已導入，等待准入探測。",
+            ready: "庫存就緒",
+            readyDesc: "無需 refresh 即可進入 active。",
+            needsRefresh: "庫存待刷新",
+            needsRefreshDesc: "進入 active 前需要一次 refresh。",
+            noQuota: "庫存無額度",
+            noQuotaDesc: "探測成功，但目前額度已耗盡。",
+            active: "活躍",
+            activeDesc: "目前可路由的運行帳號。",
+            quarantine: "隔離",
+            quarantineDesc: "等待重試或重置中的運行帳號。",
+            pendingPurge: "待清理",
+            pendingPurgeDesc: "已判定致命並從路由摘除。"
+        },
         tokenComponents: {
             cached: "快取輸入",
             input: "輸入",
@@ -635,11 +686,16 @@ export default {
         },
         detail: {
             columns: {
+                admission: "准入",
                 error: "錯誤訊息",
                 label: "標籤",
                 line: "行號",
+                quota: "額度",
+                reason: "原因",
                 status: "狀態"
             },
+            admissionFilterAll: "全部結果",
+            admissionFilterLabel: "准入篩選",
             filterLabel: "狀態篩選",
             itemsEmpty: "沒有符合條件的條目。",
             itemsLoading: "正在載入任務條目…",
@@ -701,6 +757,20 @@ export default {
             refreshTokenHint: "適合需要平台代管續簽與輪轉的帳號。",
             accessToken: "匯入 AK",
             accessTokenHint: "適合只做一次性匯入，避免 refresh 輪轉壓力。"
+        },
+        admission: {
+            eyebrow: "准入結果",
+            quotaExhausted: "額度已耗盡，等待重新探測。",
+            quotaReady: "探測成功且目前有額度。",
+            quotaNotApplicable: "暫無額度摘要。",
+            status: {
+                queued: "排隊中",
+                ready: "已就緒",
+                needsRefresh: "需刷新",
+                noQuota: "無額度",
+                failed: "失敗",
+                unknown: "未知"
+            }
         },
         metrics: {
             created: "新建",
@@ -815,6 +885,58 @@ export default {
             warningFiles: "需確認 {{count}}"
         },
         subtitle: "透過嚴格格式的 CSV/TXT 檔案安全地上傳帳號憑證。"
+    },
+    inventory: {
+        eyebrow: "庫存",
+        title: "OAuth 庫存",
+        subtitle: "在激活前檢視 vault 中的 OAuth 庫存，避免 queued、ready、no_quota 與在線池混在一起。",
+        loading: "載入庫存中…",
+        empty: "目前篩選條件下沒有庫存記錄。",
+        searchPlaceholder: "依電子郵件、標籤、帳號 ID 或准入原因搜尋…",
+        meta: {
+            total: "總計 {{count}}",
+            filtered: "目前顯示 {{count}}"
+        },
+        metrics: {
+            total: "記錄總數"
+        },
+        filters: {
+            status: "庫存狀態",
+            all: "全部庫存"
+        },
+        status: {
+            queued: "排隊中",
+            ready: "已就緒",
+            needsRefresh: "需刷新",
+            noQuota: "無額度",
+            failed: "失敗",
+            unknown: "未知"
+        },
+        credentials: {
+            hasRt: "具備 RT",
+            noRt: "無 RT",
+            hasAk: "具備 AK 回退",
+            noAk: "無 AK"
+        },
+        columns: {
+            account: "帳號",
+            chatgptAccountId: "ChatGPT 帳號 ID",
+            vaultStatus: "庫存狀態",
+            credentials: "憑證",
+            quota: "額度摘要",
+            timeline: "准入時間線",
+            reason: "原因"
+        },
+        fields: {
+            checkedAt: "探測時間",
+            retryAfter: "重試時間",
+            source: "來源"
+        },
+        table: {
+            eyebrow: "Vault 視圖",
+            title: "准入庫存記錄",
+            description: "這個表只顯示 vault 庫存。運行時激活與隔離仍在 Accounts 中查看。"
+        }
     },
     oauthImport: {
         title: "OAuth 登入匯入",
@@ -1353,6 +1475,7 @@ export default {
         billing: "計費",
         config: "全域設定",
         dashboard: "服務總覽",
+        inventory: "庫存",
         groups: {
             analytics: "數據分析",
             assets: "資產池",

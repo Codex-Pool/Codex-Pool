@@ -30,6 +30,8 @@ import { formatRelativeTime } from '@/lib/time'
 import { RateLimitCell } from './rate-limit-cell'
 import type { ToggleAccountPayload } from './types'
 import {
+  getPoolStateBadgeVariant,
+  getPoolStateLabel,
   getCredentialKindShortLabel,
   getModeLabel,
   getPlanLabel,
@@ -227,6 +229,65 @@ export function useAccountsColumns({
               <Badge variant="success" className="w-fit max-w-full truncate" title={statusLabel}>
                 {statusLabel}
               </Badge>
+            </div>
+          )
+        },
+      },
+      {
+        id: 'runtimePool',
+        accessorFn: (row) => {
+          const poolState = oauthStatusMap.get(row.id)?.pool_state
+          if (poolState === 'active') return 3
+          if (poolState === 'quarantine') return 2
+          if (poolState === 'pending_purge') return 1
+          return 0
+        },
+        header: t('accounts.columns.runtimePool', { defaultValue: 'Runtime Pool' }),
+        cell: ({ row }) => {
+          const cellClass = 'min-w-[136px] max-w-[168px] h-[40px]'
+          const isSession = isSessionMode(row.original.mode)
+          if (!isSession) {
+            return (
+              <div className={cn(cellClass, 'flex items-center')}>
+                <span className="text-xs text-muted-foreground">
+                  {t('accounts.oauth.notApplicable')}
+                </span>
+              </div>
+            )
+          }
+          if (isOAuthStatusRefreshing) {
+            return (
+              <div className={cn(cellClass, 'flex items-center')}>
+                <Skeleton className="h-5 w-20" />
+              </div>
+            )
+          }
+          const status = oauthStatusMap.get(row.original.id)
+          if (!status) {
+            return (
+              <div className={cn(cellClass, 'flex items-center')}>
+                <span className="text-xs text-muted-foreground">{t('accounts.oauth.loading')}</span>
+              </div>
+            )
+          }
+
+          const detail =
+            status.pool_state === 'quarantine'
+              ? status.quarantine_reason
+              : status.pool_state === 'pending_purge'
+                ? status.pending_purge_reason
+                : undefined
+
+          return (
+            <div className={cn(cellClass, 'flex flex-col items-start justify-center gap-0.5')}>
+              <Badge variant={getPoolStateBadgeVariant(status.pool_state)}>
+                {getPoolStateLabel(status.pool_state, t)}
+              </Badge>
+              {detail ? (
+                <div className="max-w-full truncate text-[11px] text-muted-foreground" title={detail}>
+                  {detail}
+                </div>
+              ) : null}
             </div>
           )
         },

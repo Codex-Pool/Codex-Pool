@@ -25,7 +25,10 @@ import {
   getAuthProviderLabel,
   getCredentialKindLabel,
   getModeLabel,
+  getPoolStateBadgeVariant,
+  getPoolStateLabel,
   getPlanLabel,
+  getRefreshCredentialStateLabel,
   getRefreshStatusLabel,
   getSourceTypeLabel,
 } from './utils'
@@ -358,6 +361,56 @@ export function AccountDetailDialog({
                           <DetailField label={fieldLabel('effectiveEnabled', 'Effective Enabled')}>
                             <Badge variant={oauthStatus.effective_enabled ? 'success' : 'warning'}>
                               {oauthStatus.effective_enabled ? t('common.yes') : t('common.no')}
+                            </Badge>
+                          </DetailField>
+                        </div>
+                      </DetailSection>
+
+                      <DetailSection
+                        title={t('accounts.details.sections.runtimeHealth', {
+                          defaultValue: 'Runtime Health',
+                        })}
+                      >
+                        <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                          <DetailField label={fieldLabel('poolState', 'Runtime Pool')}>
+                            <Badge variant={getPoolStateBadgeVariant(oauthStatus.pool_state)}>
+                              {getPoolStateLabel(oauthStatus.pool_state, t)}
+                            </Badge>
+                          </DetailField>
+                          <DetailField
+                            label={fieldLabel('refreshCredentialState', 'Refresh Credential State')}
+                          >
+                            <Badge variant={oauthStatus.has_refresh_credential ? 'success' : 'secondary'}>
+                              {getRefreshCredentialStateLabel(
+                                oauthStatus.refresh_credential_state,
+                                t,
+                              )}
+                            </Badge>
+                          </DetailField>
+                          <DetailField label={fieldLabel('quarantineReason', 'Quarantine Reason')}>
+                            {oauthStatus.quarantine_reason
+                              ? localizeOAuthErrorCodeDisplay(t, oauthStatus.quarantine_reason).label
+                              : '-'}
+                          </DetailField>
+                          <DetailField label={fieldLabel('quarantineUntil', 'Quarantine Until')}>
+                            {formatOptionalDateTime(oauthStatus.quarantine_until)}
+                          </DetailField>
+                          <DetailField label={fieldLabel('pendingPurgeReason', 'Pending Purge Reason')}>
+                            {oauthStatus.pending_purge_reason
+                              ? localizeOAuthErrorCodeDisplay(t, oauthStatus.pending_purge_reason).label
+                              : '-'}
+                          </DetailField>
+                          <DetailField label={fieldLabel('pendingPurgeAt', 'Pending Purge At')}>
+                            {formatOptionalDateTime(oauthStatus.pending_purge_at)}
+                          </DetailField>
+                          <DetailField label={fieldLabel('hasRefreshCredential', 'Has Refresh Credential')}>
+                            <Badge variant={oauthStatus.has_refresh_credential ? 'success' : 'secondary'}>
+                              {oauthStatus.has_refresh_credential ? t('common.yes') : t('common.no')}
+                            </Badge>
+                          </DetailField>
+                          <DetailField label={fieldLabel('hasAccessTokenFallback', 'Has Access Token Fallback')}>
+                            <Badge variant={oauthStatus.has_access_token_fallback ? 'info' : 'secondary'}>
+                              {oauthStatus.has_access_token_fallback ? t('common.yes') : t('common.no')}
                             </Badge>
                           </DetailField>
                         </div>

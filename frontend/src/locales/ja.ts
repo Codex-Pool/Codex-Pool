@@ -47,6 +47,7 @@ export default {
             plan: "プラン",
             provider: "プロバイダ / モード",
             rateLimit: "Rate Limit 使用状況",
+            runtimePool: "ランタイムプール",
             binding: "バインディング",
             unbound: "未バインド"
         },
@@ -74,6 +75,7 @@ export default {
                 credentials: "資格情報",
                 identity: "識別情報",
                 refresh: "更新状態",
+                runtimeHealth: "ランタイム健全性",
                 supportedModels: "利用可能なモデル",
                 subscription: "契約情報"
             },
@@ -106,6 +108,14 @@ export default {
                 rateLimitsExpiresAt: "Rate Limit 有効期限",
                 rateLimitsLastErrorCode: "Rate Limit 最終エラーコード",
                 rateLimitsLastError: "Rate Limit 最終エラー",
+                poolState: "ランタイムプール",
+                refreshCredentialState: "更新資格情報状態",
+                quarantineReason: "隔離理由",
+                quarantineUntil: "隔離終了時刻",
+                pendingPurgeReason: "削除待ち理由",
+                pendingPurgeAt: "削除待ち時刻",
+                hasRefreshCredential: "更新資格情報あり",
+                hasAccessTokenFallback: "アクセストークン fallback あり",
                 rawAccount: "アカウント生データ",
                 rawOauthStatus: "OAuth ステータス生データ"
             }
@@ -211,6 +221,13 @@ export default {
                 unknown: "不明な資格情報タイプ"
             }
         },
+        refreshCredentialState: {
+            healthy: "正常",
+            degraded: "劣化",
+            invalid: "無効",
+            missing: "欠落",
+            unknown: "不明"
+        },
         rateLimits: {
             labels: {
                 fiveHours: "5時間制限",
@@ -229,6 +246,21 @@ export default {
             usedPrefix: "使用済み"
         },
         searchPlaceholder: "メール、ラベル、URL で検索…",
+        runtimePool: {
+            eyebrow: "ランタイム健全性",
+            title: "オンラインプールの状態",
+            description: "Accounts はオンラインプールのみを表示します。queued、ready、no_quota などの在庫状態は Inventory で確認します。",
+            openInventory: "Inventory を開く",
+            active: "アクティブ",
+            activeDesc: "現在ランタイムルーティング可能です。",
+            quarantine: "隔離",
+            quarantineDesc: "再試行またはクォータ回復待ちで一時隔離されています。",
+            pendingPurge: "削除待ち",
+            pendingPurgeDesc: "ルーティングから外され、非同期クリーンアップ待ちです。",
+            vaultReady: "在庫 ready",
+            vaultReadyDesc: "refresh なしで active プールに入れる在庫です。",
+            unknown: "不明"
+        },
         status: {
             active: "アクティブ",
             disabled: "無効"
@@ -582,6 +614,25 @@ export default {
             title: "運用パルス",
             usagePipeline: "利用パイプライン"
         },
+        poolOverview: {
+            eyebrow: "プール概要",
+            title: "在庫とランタイムプール",
+            description: "vault admission と runtime pool を並べて見ることで、アクティベーション圧力を早く把握できます。",
+            queued: "Vault queued",
+            queuedDesc: "取り込み済みで admission probe 待ちです。",
+            ready: "Vault ready",
+            readyDesc: "refresh なしで active に入れます。",
+            needsRefresh: "Vault needs refresh",
+            needsRefreshDesc: "active に入る前に 1 回 refresh が必要です。",
+            noQuota: "Vault no quota",
+            noQuotaDesc: "probe は成功したが現在クォータ不足です。",
+            active: "アクティブ",
+            activeDesc: "現在ルーティング可能なランタイムアカウントです。",
+            quarantine: "隔離",
+            quarantineDesc: "再試行またはリセット待ちのランタイムアカウントです。",
+            pendingPurge: "削除待ち",
+            pendingPurgeDesc: "致命判定済みでルーティングから外されています。"
+        },
         tokenComponents: {
             cached: "キャッシュ入力",
             input: "入力",
@@ -635,11 +686,16 @@ export default {
         },
         detail: {
             columns: {
+                admission: "Admission",
                 error: "エラー",
                 label: "ラベル",
                 line: "行",
+                quota: "Quota",
+                reason: "理由",
                 status: "状態"
             },
+            admissionFilterAll: "すべての結果",
+            admissionFilterLabel: "Admission フィルター",
             filterLabel: "ステータス絞り込み",
             itemsEmpty: "一致する項目がありません。",
             itemsLoading: "ジョブ項目を読み込み中…",
@@ -701,6 +757,20 @@ export default {
             refreshTokenHint: "プラットフォーム側で更新とローテーションを管理したい場合に使います。",
             accessToken: "AK を取り込む",
             accessTokenHint: "更新ローテーションを行わない単発取り込みに向いています。"
+        },
+        admission: {
+            eyebrow: "Admission outcome",
+            quotaExhausted: "クォータ切れのため再 probe 待ちです。",
+            quotaReady: "probe 成功、現在クォータあり。",
+            quotaNotApplicable: "クォータ概要はありません。",
+            status: {
+                queued: "Queued",
+                ready: "Ready",
+                needsRefresh: "Needs refresh",
+                noQuota: "No quota",
+                failed: "Failed",
+                unknown: "Unknown"
+            }
         },
         metrics: {
             created: "新規",
@@ -815,6 +885,58 @@ export default {
             warningFiles: "確認要 {{count}}"
         },
         subtitle: "厳密な形式の CSV/TXT ファイルでアカウントのシークレットを安全にアップロードします。"
+    },
+    inventory: {
+        eyebrow: "Inventory",
+        title: "OAuth Inventory",
+        subtitle: "アクティベーション前に vault 内の OAuth 在庫を確認し、queued、ready、no_quota がオンラインプールと混ざらないようにします。",
+        loading: "在庫を読み込み中…",
+        empty: "現在のフィルターに一致する在庫レコードはありません。",
+        searchPlaceholder: "メール、ラベル、アカウント ID、admission reason で検索…",
+        meta: {
+            total: "合計 {{count}}",
+            filtered: "{{count}} 件を表示"
+        },
+        metrics: {
+            total: "総レコード"
+        },
+        filters: {
+            status: "在庫状態",
+            all: "すべての在庫"
+        },
+        status: {
+            queued: "Queued",
+            ready: "Ready",
+            needsRefresh: "Needs refresh",
+            noQuota: "No quota",
+            failed: "Failed",
+            unknown: "Unknown"
+        },
+        credentials: {
+            hasRt: "RT ready",
+            noRt: "RT なし",
+            hasAk: "AK fallback",
+            noAk: "AK なし"
+        },
+        columns: {
+            account: "アカウント",
+            chatgptAccountId: "ChatGPT アカウント ID",
+            vaultStatus: "Vault 状態",
+            credentials: "資格情報",
+            quota: "クォータ概要",
+            timeline: "Admission タイムライン",
+            reason: "理由"
+        },
+        fields: {
+            checkedAt: "確認時刻",
+            retryAfter: "再試行時刻",
+            source: "ソース"
+        },
+        table: {
+            eyebrow: "Vault view",
+            title: "Admission inventory records",
+            description: "このテーブルは vault 在庫のみを表示します。ランタイムの activation と quarantine は Accounts で確認します。"
+        }
     },
     oauthImport: {
         title: "OAuth ログインインポート",
@@ -1353,6 +1475,7 @@ export default {
         billing: "請求する",
         config: "設定",
         dashboard: "ダッシュボード",
+        inventory: "Inventory",
         groups: {
             analytics: "分析",
             assets: "プール資産",

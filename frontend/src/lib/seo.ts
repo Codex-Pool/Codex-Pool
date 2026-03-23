@@ -27,6 +27,13 @@ const routeSeoConfigs: RouteSeoConfig[] = [
         descriptionDefault: 'Manage API credentials and billing health.',
     },
     {
+        pattern: /^\/inventory\/?$/,
+        titleKey: 'inventory.title',
+        titleDefault: 'OAuth Inventory',
+        descriptionKey: 'inventory.subtitle',
+        descriptionDefault: 'Monitor queued, ready, and no-quota OAuth vault records before activation.',
+    },
+    {
         pattern: /^\/imports\/?$/,
         titleKey: 'importJobs.title',
         titleDefault: 'Batch Import Jobs',

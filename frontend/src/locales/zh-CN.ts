@@ -47,6 +47,7 @@ export default {
             plan: "套餐",
             provider: "账号类型",
             rateLimit: "Rate Limit 使用",
+            runtimePool: "运行池",
             binding: "绑定账号 ID",
             unbound: "未绑定"
         },
@@ -74,6 +75,7 @@ export default {
                 credentials: "凭据",
                 identity: "身份信息",
                 refresh: "刷新状态",
+                runtimeHealth: "运行健康",
                 supportedModels: "可用模型",
                 subscription: "订阅信息"
             },
@@ -106,6 +108,14 @@ export default {
                 rateLimitsExpiresAt: "限额过期时间",
                 rateLimitsLastErrorCode: "限额最近错误码",
                 rateLimitsLastError: "限额最近错误",
+                poolState: "运行池",
+                refreshCredentialState: "刷新凭证状态",
+                quarantineReason: "隔离原因",
+                quarantineUntil: "隔离到期",
+                pendingPurgeReason: "待清理原因",
+                pendingPurgeAt: "待清理时间",
+                hasRefreshCredential: "是否有刷新凭证",
+                hasAccessTokenFallback: "是否有访问令牌回退",
                 rawAccount: "账号原始数据",
                 rawOauthStatus: "OAuth 状态原始数据"
             }
@@ -211,6 +221,13 @@ export default {
                 unknown: "未知凭据类型"
             }
         },
+        refreshCredentialState: {
+            healthy: "健康",
+            degraded: "退化",
+            invalid: "无效",
+            missing: "缺失",
+            unknown: "未知"
+        },
         rateLimits: {
             labels: {
                 fiveHours: "5小时限制",
@@ -229,6 +246,21 @@ export default {
             usedPrefix: "已用"
         },
         searchPlaceholder: "按邮箱、标签、URL 搜索…",
+        runtimePool: {
+            eyebrow: "运行健康",
+            title: "在线池态势",
+            description: "Accounts 只代表在线池。想查看 queued、ready、no_quota 等库存状态，请进入 Inventory。",
+            openInventory: "打开 Inventory",
+            active: "活跃",
+            activeDesc: "当前可参与运行时路由。",
+            quarantine: "隔离",
+            quarantineDesc: "等待重试或额度恢复的临时隔离账号。",
+            pendingPurge: "待清理",
+            pendingPurgeDesc: "已从路由摘除，等待异步清理的致命账号。",
+            vaultReady: "库存就绪",
+            vaultReadyDesc: "无需 refresh 即可补入 active 池的库存记录。",
+            unknown: "未知"
+        },
         status: {
             active: "正常",
             disabled: "已禁用"
@@ -582,6 +614,25 @@ export default {
             title: "运行脉搏",
             usagePipeline: "用量链路"
         },
+        poolOverview: {
+            eyebrow: "池子总览",
+            title: "库存与运行池",
+            description: "把 vault 准入和 runtime 池子放在一起看，能更早发现激活压力。",
+            queued: "库存排队",
+            queuedDesc: "已导入，等待准入探测。",
+            ready: "库存就绪",
+            readyDesc: "无需 refresh 即可进入 active。",
+            needsRefresh: "库存待刷新",
+            needsRefreshDesc: "进入 active 前需要一次 refresh。",
+            noQuota: "库存无额度",
+            noQuotaDesc: "探测成功，但当前额度已耗尽。",
+            active: "活跃",
+            activeDesc: "当前可路由的运行账号。",
+            quarantine: "隔离",
+            quarantineDesc: "等待重试或重置中的运行账号。",
+            pendingPurge: "待清理",
+            pendingPurgeDesc: "已判定致命并从路由摘除。"
+        },
         tokenComponents: {
             cached: "缓存输入",
             input: "输入",
@@ -635,11 +686,16 @@ export default {
         },
         detail: {
             columns: {
+                admission: "准入",
                 error: "错误信息",
                 label: "标签",
                 line: "行号",
+                quota: "额度",
+                reason: "原因",
                 status: "状态"
             },
+            admissionFilterAll: "全部结果",
+            admissionFilterLabel: "准入筛选",
             filterLabel: "状态筛选",
             itemsEmpty: "没有匹配的任务条目。",
             itemsLoading: "正在加载任务条目…",
@@ -701,6 +757,20 @@ export default {
             refreshTokenHint: "适合需要平台托管续签和轮转的账号。",
             accessToken: "导入 AK",
             accessTokenHint: "适合只做一次性导入，避免 refresh 轮转压力。"
+        },
+        admission: {
+            eyebrow: "准入结果",
+            quotaExhausted: "额度已耗尽，等待重新探测。",
+            quotaReady: "探测成功且当前有额度。",
+            quotaNotApplicable: "暂无额度摘要。",
+            status: {
+                queued: "排队中",
+                ready: "已就绪",
+                needsRefresh: "需刷新",
+                noQuota: "无额度",
+                failed: "失败",
+                unknown: "未知"
+            }
         },
         metrics: {
             created: "新建",
@@ -815,6 +885,58 @@ export default {
             warningFiles: "需确认 {{count}}"
         },
         subtitle: "通过严格格式的 CSV/TXT 文件安全地上传账号凭证。"
+    },
+    inventory: {
+        eyebrow: "库存",
+        title: "OAuth 库存",
+        subtitle: "在激活前观察 vault 中的 OAuth 库存，避免 queued、ready、no_quota 和在线池混在一起。",
+        loading: "加载库存中…",
+        empty: "当前筛选条件下没有库存记录。",
+        searchPlaceholder: "按邮箱、标签、账号 ID 或准入原因搜索…",
+        meta: {
+            total: "总计 {{count}}",
+            filtered: "当前显示 {{count}}"
+        },
+        metrics: {
+            total: "记录总数"
+        },
+        filters: {
+            status: "库存状态",
+            all: "全部库存"
+        },
+        status: {
+            queued: "排队中",
+            ready: "已就绪",
+            needsRefresh: "需刷新",
+            noQuota: "无额度",
+            failed: "失败",
+            unknown: "未知"
+        },
+        credentials: {
+            hasRt: "具备 RT",
+            noRt: "无 RT",
+            hasAk: "具备 AK 回退",
+            noAk: "无 AK"
+        },
+        columns: {
+            account: "账号",
+            chatgptAccountId: "ChatGPT 账号 ID",
+            vaultStatus: "库存状态",
+            credentials: "凭证",
+            quota: "额度摘要",
+            timeline: "准入时间线",
+            reason: "原因"
+        },
+        fields: {
+            checkedAt: "探测时间",
+            retryAfter: "重试时间",
+            source: "来源"
+        },
+        table: {
+            eyebrow: "Vault 视图",
+            title: "准入库存记录",
+            description: "这个表只展示 vault 库存。运行时激活与隔离仍在 Accounts 里查看。"
+        }
     },
     oauthImport: {
         title: "OAuth 登录导入",
@@ -1353,6 +1475,7 @@ export default {
         billing: "计费",
         config: "全局配置",
         dashboard: "服务总览",
+        inventory: "库存",
         groups: {
             analytics: "数据分析",
             assets: "资产池",
