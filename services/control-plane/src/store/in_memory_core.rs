@@ -433,6 +433,10 @@ impl InMemoryStore {
         true
     }
 
+    fn runtime_pool_account_count_inner(&self) -> usize {
+        self.accounts.read().unwrap().len()
+    }
+
     fn set_account_pool_state_active_inner(&self, account_id: Uuid, at: DateTime<Utc>) {
         let mut states = self.account_health_states.write().unwrap();
         let state = states.entry(account_id).or_default();
@@ -442,6 +446,133 @@ impl InMemoryStore {
         state.pending_purge_at = None;
         state.pending_purge_reason = None;
         state.last_pool_transition_at = Some(at);
+    }
+
+    fn set_account_pool_state_quarantine_inner(
+        &self,
+        account_id: Uuid,
+        at: DateTime<Utc>,
+        until: Option<DateTime<Utc>>,
+        reason: Option<String>,
+    ) -> Result<()> {
+        if !self.accounts.read().unwrap().contains_key(&account_id) {
+            return Err(anyhow!("upstream account not found"));
+        }
+        let normalized_reason = reason.and_then(|value| {
+            let trimmed = value.trim();
+            if trimmed.is_empty() {
+                None
+            } else {
+                Some(trimmed.to_string())
+            }
+        });
+        let mut states = self.account_health_states.write().unwrap();
+        let state = states.entry(account_id).or_default();
+        state.pool_state = AccountPoolState::Quarantine;
+        state.quarantine_until = until;
+        state.quarantine_reason = normalized_reason;
+        state.pending_purge_at = None;
+        state.pending_purge_reason = None;
+        state.last_pool_transition_at = Some(at);
+        drop(states);
+
+        self.revision.fetch_add(1, Ordering::Relaxed);
+        Ok(())
+    }
+
+    fn record_upstream_account_live_result_inner(
+        &self,
+        account_id: Uuid,
+        reported_at: DateTime<Utc>,
+        status: OAuthLiveResultStatus,
+        source: OAuthLiveResultSource,
+        status_code: Option<u16>,
+        error_code: Option<String>,
+        error_message_preview: Option<String>,
+    ) -> Result<bool> {
+        if !self.accounts.read().unwrap().contains_key(&account_id) {
+            return Err(anyhow!("upstream account not found"));
+        }
+
+        let normalized_error_code = error_code.and_then(|value| {
+            let normalized = value.trim().to_ascii_lowercase().replace([' ', '-'], "_");
+            if normalized.is_empty() {
+                None
+            } else {
+                Some(normalized)
+            }
+        });
+        let normalized_error_message = error_message_preview.and_then(|value| {
+            let trimmed = value.trim();
+            if trimmed.is_empty() {
+                None
+            } else {
+                Some(truncate_error_message(trimmed.to_string()))
+            }
+        });
+
+        {
+            let mut states = self.account_health_states.write().unwrap();
+            let state = states.entry(account_id).or_default();
+            state.last_live_result_at = Some(reported_at);
+            state.last_live_result_status = Some(status.clone());
+            state.last_live_result_source = Some(source);
+            state.last_live_result_status_code =
+                status_code.filter(|code| (200..600).contains(code));
+            if status == OAuthLiveResultStatus::Failed {
+                state.last_live_error_code = normalized_error_code.clone();
+                state.last_live_error_message_preview = normalized_error_message.clone();
+            } else {
+                state.last_live_error_code = None;
+                state.last_live_error_message_preview = None;
+            }
+        }
+
+        let accepted = match status {
+            OAuthLiveResultStatus::Ok => {
+                self.mark_account_seen_ok_inner(account_id, reported_at, 0);
+                self.set_account_pool_state_active_inner(account_id, reported_at);
+                true
+            }
+            OAuthLiveResultStatus::Failed => match normalized_error_code.as_deref() {
+                Some("account_deactivated") => {
+                    self.mark_upstream_account_pending_purge_inner(
+                        account_id,
+                        Some("account_deactivated".to_string()),
+                    )?;
+                    true
+                }
+                Some("rate_limited") | Some("quota_exhausted") => {
+                    let reason = normalized_error_code
+                        .clone()
+                        .unwrap_or_else(|| "rate_limited".to_string());
+                    let until = Some(
+                        reported_at
+                            + Duration::seconds(rate_limit_failure_backoff_seconds(&reason, "")),
+                    );
+                    self.set_account_pool_state_quarantine_inner(
+                        account_id,
+                        reported_at,
+                        until,
+                        Some(reason),
+                    )?;
+                    true
+                }
+                Some("auth_expired") | Some("token_invalidated") => {
+                    self.set_account_pool_state_quarantine_inner(
+                        account_id,
+                        reported_at,
+                        Some(reported_at + Duration::minutes(30)),
+                        normalized_error_code.clone(),
+                    )?;
+                    true
+                }
+                _ => false,
+            },
+        };
+
+        self.revision.fetch_add(1, Ordering::Relaxed);
+        Ok(accepted)
     }
 
     fn mark_upstream_account_pending_purge_inner(
@@ -741,6 +872,12 @@ impl InMemoryStore {
             quarantine_reason: pool_state_record.quarantine_reason,
             pending_purge_at: pool_state_record.pending_purge_at,
             pending_purge_reason: pool_state_record.pending_purge_reason,
+            last_live_result_at: pool_state_record.last_live_result_at,
+            last_live_result_status: pool_state_record.last_live_result_status,
+            last_live_result_source: pool_state_record.last_live_result_source,
+            last_live_result_status_code: pool_state_record.last_live_result_status_code,
+            last_live_error_code: pool_state_record.last_live_error_code,
+            last_live_error_message_preview: pool_state_record.last_live_error_message_preview,
             supported_models,
             rate_limits: rate_limit_cache.rate_limits,
             rate_limits_fetched_at: rate_limit_cache.fetched_at,

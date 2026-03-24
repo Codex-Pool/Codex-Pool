@@ -40,20 +40,20 @@ use crate::contracts::{
     CreateApiKeyRequest, CreateApiKeyResponse, CreateOutboundProxyNodeRequest, CreateTenantRequest,
     CreateUpstreamAccountRequest, HourlyAccountUsagePoint, HourlyTenantApiKeyUsagePoint,
     ImportOAuthRefreshTokenRequest, ModelRoutingPoliciesResponse, ModelRoutingSettingsResponse,
-    OAuthAccountStatusResponse, OAuthFamilyActionResponse, OAuthImportItemStatus,
-    OAuthImportJobActionResponse, OAuthImportJobItemsResponse, OAuthImportJobSummary,
-    OAuthInventoryRecord, OAuthInventorySummaryResponse, OAuthRateLimitRefreshJobStatus,
-    OAuthRateLimitRefreshJobSummary, OAuthRateLimitSnapshot, OAuthRateLimitWindow,
-    PolicyResponse, RoutingPlanVersionsResponse, RoutingProfilesResponse,
-    TenantUsageLeaderboardItem, TenantUsageLeaderboardResponse,
-    UpdateAiErrorLearningSettingsRequest, UpdateBuiltinErrorTemplateRequest,
-    UpdateModelRoutingSettingsRequest, UpdateOutboundProxyNodeRequest,
-    UpdateOutboundProxyPoolSettingsRequest, UpdateUpstreamErrorTemplateRequest,
-    UpsertModelRoutingPolicyRequest, UpsertRetryPolicyRequest, UpsertRoutingPolicyRequest,
-    UpsertRoutingProfileRequest, UpsertStreamRetryPolicyRequest, UpstreamErrorTemplateResponse,
-    UpstreamErrorTemplatesResponse, UsageHourlyTenantTrendsResponse, UsageHourlyTrendsResponse,
-    UsageLeaderboardOverviewResponse, UsageQueryResponse, UsageSummaryQueryResponse,
-    ValidateOAuthRefreshTokenRequest, ValidateOAuthRefreshTokenResponse,
+    OAuthAccountStatusResponse, OAuthFamilyActionResponse, OAuthHealthSignalsSummaryResponse,
+    OAuthImportItemStatus, OAuthImportJobActionResponse, OAuthImportJobItemsResponse,
+    OAuthImportJobSummary, OAuthInventoryRecord, OAuthInventorySummaryResponse,
+    OAuthRuntimePoolSummaryResponse, OAuthRateLimitRefreshJobStatus,
+    OAuthRateLimitRefreshJobSummary, OAuthRateLimitSnapshot, OAuthRateLimitWindow, PolicyResponse,
+    RoutingPlanVersionsResponse, RoutingProfilesResponse, TenantUsageLeaderboardItem,
+    TenantUsageLeaderboardResponse, UpdateAiErrorLearningSettingsRequest,
+    UpdateBuiltinErrorTemplateRequest, UpdateModelRoutingSettingsRequest,
+    UpdateOutboundProxyNodeRequest, UpdateOutboundProxyPoolSettingsRequest,
+    UpdateUpstreamErrorTemplateRequest, UpsertModelRoutingPolicyRequest, UpsertRetryPolicyRequest,
+    UpsertRoutingPolicyRequest, UpsertRoutingProfileRequest, UpsertStreamRetryPolicyRequest,
+    UpstreamErrorTemplateResponse, UpstreamErrorTemplatesResponse, UsageHourlyTenantTrendsResponse,
+    UsageHourlyTrendsResponse, UsageLeaderboardOverviewResponse, UsageQueryResponse,
+    UsageSummaryQueryResponse, ValidateOAuthRefreshTokenRequest, ValidateOAuthRefreshTokenResponse,
 };
 use crate::import_jobs::{
     CreateOAuthImportJobOptions, ImportUploadFile, InMemoryOAuthImportJobStore,
@@ -2192,6 +2192,14 @@ pub fn build_app_with_store_and_services(
             get(get_oauth_inventory_records),
         )
         .route(
+            "/api/v1/upstream-accounts/runtime/summary",
+            get(get_oauth_runtime_pool_summary),
+        )
+        .route(
+            "/api/v1/upstream-accounts/health/signals/summary",
+            get(get_oauth_health_signals_summary),
+        )
+        .route(
             "/api/v1/upstream-accounts/oauth/rate-limits/refresh-jobs",
             post(create_oauth_rate_limit_refresh_job),
         )
@@ -2388,6 +2396,10 @@ pub fn build_app_with_store_and_services(
         .route(
             "/internal/v1/upstream-accounts/{account_id}/disable",
             post(internal_disable_upstream_account),
+        )
+        .route(
+            "/internal/v1/upstream-accounts/{account_id}/health/live-result",
+            post(internal_report_upstream_account_live_result),
         )
         .route(
             "/internal/v1/upstream-accounts/{account_id}/health/seen-ok",

@@ -880,6 +880,31 @@ impl ControlPlaneStore for SqliteBackedStore {
         .await?;
         self.persist_state_after_write().await
     }
+
+    async fn record_upstream_account_live_result(
+        &self,
+        account_id: Uuid,
+        reported_at: DateTime<Utc>,
+        status: OAuthLiveResultStatus,
+        source: OAuthLiveResultSource,
+        status_code: Option<u16>,
+        error_code: Option<String>,
+        error_message_preview: Option<String>,
+    ) -> Result<bool> {
+        let changed = ControlPlaneStore::record_upstream_account_live_result(
+            &self.inner,
+            account_id,
+            reported_at,
+            status,
+            source,
+            status_code,
+            error_code,
+            error_message_preview,
+        )
+        .await?;
+        self.persist_state_after_write().await?;
+        Ok(changed)
+    }
 }
 
 #[cfg(test)]
@@ -888,7 +913,9 @@ mod sqlite_backed_store_tests {
         normalize_sqlite_database_url, AccountPoolState, OAuthVaultRecordStatus,
         SqliteBackedStore,
     };
-    use crate::contracts::{ImportOAuthRefreshTokenRequest, OAuthAccountPoolState};
+    use crate::contracts::{
+        ImportOAuthRefreshTokenRequest, OAuthAccountPoolState, OAuthInventoryFailureStage,
+    };
     use crate::crypto::CredentialCipher;
     use crate::oauth::{
         OAuthRefreshErrorCode, OAuthTokenClient, OAuthTokenClientError, OAuthTokenInfo,
@@ -897,15 +924,18 @@ mod sqlite_backed_store_tests {
     use crate::contracts::{
         CreateApiKeyRequest, CreateTenantRequest, CreateUpstreamAccountRequest,
     };
+    use crate::store::UpsertOneTimeSessionAccountRequest;
     use async_trait::async_trait;
     use base64::Engine;
     use chrono::{Duration, Utc};
     use codex_pool_core::model::{UpstreamAuthProvider, UpstreamMode};
     use serde_json::json;
     use std::sync::atomic::{AtomicUsize, Ordering};
-    use std::sync::Arc;
+    use std::sync::{Arc, LazyLock, Mutex};
     use tokio::sync::Barrier;
     use uuid::Uuid;
+
+    static SQLITE_ENV_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
 
     fn temp_sqlite_url(name: &str) -> String {
         let path = std::env::temp_dir().join(format!("{name}-{}.sqlite3", Uuid::new_v4()));
@@ -1917,6 +1947,119 @@ mod sqlite_backed_store_tests {
     }
 
     #[tokio::test]
+    async fn sqlite_backed_store_runtime_pool_cap_blocks_oauth_activation() {
+        let _guard = SQLITE_ENV_LOCK.lock().expect("lock sqlite env");
+        let old_target = std::env::var("CONTROL_PLANE_ACTIVE_POOL_TARGET").ok();
+        let old_min = std::env::var("CONTROL_PLANE_ACTIVE_POOL_MIN").ok();
+        let old_batch = std::env::var("CONTROL_PLANE_VAULT_ACTIVATE_BATCH_SIZE").ok();
+        let old_concurrency = std::env::var("CONTROL_PLANE_VAULT_ACTIVATE_CONCURRENCY").ok();
+        let old_max_rps = std::env::var("CONTROL_PLANE_VAULT_ACTIVATE_MAX_RPS").ok();
+        let old_runtime_cap = std::env::var("CONTROL_PLANE_RUNTIME_POOL_CAP").ok();
+
+        std::env::set_var("CONTROL_PLANE_ACTIVE_POOL_TARGET", "4");
+        std::env::set_var("CONTROL_PLANE_ACTIVE_POOL_MIN", "0");
+        std::env::set_var("CONTROL_PLANE_VAULT_ACTIVATE_BATCH_SIZE", "4");
+        std::env::set_var("CONTROL_PLANE_VAULT_ACTIVATE_CONCURRENCY", "1");
+        std::env::set_var("CONTROL_PLANE_VAULT_ACTIVATE_MAX_RPS", "10");
+        std::env::set_var("CONTROL_PLANE_RUNTIME_POOL_CAP", "2");
+
+        let database_url = temp_sqlite_url("cp-store-sqlite-runtime-cap");
+        let store = SqliteBackedStore::connect_with_oauth(
+            &database_url,
+            Arc::new(StaticOAuthTokenClient),
+            Some(test_cipher(29)),
+        )
+        .await
+        .expect("connect sqlite store with runtime cap");
+
+        for index in 0..2 {
+            store
+                .upsert_one_time_session_account(UpsertOneTimeSessionAccountRequest {
+                    label: format!("legacy-runtime-{index}"),
+                    mode: UpstreamMode::CodexOauth,
+                    base_url: "https://chatgpt.com/backend-api/codex".to_string(),
+                    access_token: format!("legacy-runtime-token-{index}"),
+                    chatgpt_account_id: Some(format!("acct_runtime_legacy_{index}")),
+                    enabled: Some(true),
+                    priority: Some(100),
+                    token_expires_at: Some(Utc::now() + Duration::hours(2)),
+                    chatgpt_plan_type: Some("free".to_string()),
+                    source_type: Some("codex".to_string()),
+                })
+                .await
+                .expect("upsert legacy runtime account");
+        }
+
+        store
+            .queue_oauth_refresh_token(ImportOAuthRefreshTokenRequest {
+                label: "runtime-cap-oauth".to_string(),
+                base_url: "https://chatgpt.com/backend-api/codex".to_string(),
+                refresh_token: "rt-runtime-cap-oauth".to_string(),
+                fallback_access_token: Some("ak-runtime-cap-oauth".to_string()),
+                fallback_token_expires_at: Some(Utc::now() + Duration::hours(2)),
+                chatgpt_account_id: Some("acct_runtime_cap_oauth".to_string()),
+                mode: Some(UpstreamMode::CodexOauth),
+                enabled: Some(true),
+                priority: Some(100),
+                chatgpt_plan_type: Some("free".to_string()),
+                source_type: Some("codex".to_string()),
+            })
+            .await
+            .expect("queue oauth refresh token under runtime cap");
+
+        let activated = store
+            .activate_oauth_refresh_token_vault()
+            .await
+            .expect("activate oauth vault with runtime cap");
+        assert_eq!(activated, 0);
+        assert_eq!(
+            store
+                .list_upstream_accounts()
+                .await
+                .expect("list accounts after runtime-cap activation")
+                .len(),
+            2,
+            "legacy bearer runtime accounts should consume unified runtime cap slots"
+        );
+        let inventory = store
+            .oauth_inventory_summary()
+            .await
+            .expect("load inventory summary after runtime-cap activation");
+        assert_eq!(inventory.total, 1);
+
+        if let Some(value) = old_target {
+            std::env::set_var("CONTROL_PLANE_ACTIVE_POOL_TARGET", value);
+        } else {
+            std::env::remove_var("CONTROL_PLANE_ACTIVE_POOL_TARGET");
+        }
+        if let Some(value) = old_min {
+            std::env::set_var("CONTROL_PLANE_ACTIVE_POOL_MIN", value);
+        } else {
+            std::env::remove_var("CONTROL_PLANE_ACTIVE_POOL_MIN");
+        }
+        if let Some(value) = old_batch {
+            std::env::set_var("CONTROL_PLANE_VAULT_ACTIVATE_BATCH_SIZE", value);
+        } else {
+            std::env::remove_var("CONTROL_PLANE_VAULT_ACTIVATE_BATCH_SIZE");
+        }
+        if let Some(value) = old_concurrency {
+            std::env::set_var("CONTROL_PLANE_VAULT_ACTIVATE_CONCURRENCY", value);
+        } else {
+            std::env::remove_var("CONTROL_PLANE_VAULT_ACTIVATE_CONCURRENCY");
+        }
+        if let Some(value) = old_max_rps {
+            std::env::set_var("CONTROL_PLANE_VAULT_ACTIVATE_MAX_RPS", value);
+        } else {
+            std::env::remove_var("CONTROL_PLANE_VAULT_ACTIVATE_MAX_RPS");
+        }
+        if let Some(value) = old_runtime_cap {
+            std::env::set_var("CONTROL_PLANE_RUNTIME_POOL_CAP", value);
+        } else {
+            std::env::remove_var("CONTROL_PLANE_RUNTIME_POOL_CAP");
+        }
+    }
+
+    #[tokio::test]
     async fn sqlite_backed_store_activation_marks_fatal_vault_failures_failed() {
         let database_url = temp_sqlite_url("cp-store-sqlite-vault-fatal");
         let store = SqliteBackedStore::connect_with_oauth(
@@ -1944,23 +2087,55 @@ mod sqlite_backed_store_tests {
             .await
             .expect("queue oauth refresh token");
 
-        let activated = store
-            .activate_oauth_refresh_token_vault()
-            .await
-            .expect("activate oauth vault");
-        assert_eq!(activated, 0);
-        assert!(
-            store.list_upstream_accounts().await.expect("list accounts").is_empty(),
-            "fatal activation failures should never materialize runtime accounts"
-        );
+        for attempt in 0..3 {
+            let activated = store
+                .activate_oauth_refresh_token_vault()
+                .await
+                .expect("activate oauth vault");
+            assert_eq!(activated, 0);
+            assert!(
+                store.list_upstream_accounts().await.expect("list accounts").is_empty(),
+                "fatal activation failures should never materialize runtime accounts"
+            );
 
-        let vault = store.inner.oauth_refresh_token_vault.read().unwrap();
-        let record = vault.values().next().expect("vault record");
-        assert_eq!(record.status, OAuthVaultRecordStatus::Failed);
-        assert_eq!(record.failure_count, 1);
-        assert_eq!(record.last_error_code.as_deref(), Some("refresh_token_revoked"));
-        assert_eq!(record.backoff_until, None);
-        assert_eq!(record.next_attempt_at, None);
+            let vault = store.inner.oauth_refresh_token_vault.read().unwrap();
+            let record = vault.values().next().expect("vault record");
+            assert_eq!(
+                record.last_error_code.as_deref(),
+                Some("refresh_token_revoked")
+            );
+            assert_eq!(
+                record.failure_stage,
+                Some(OAuthInventoryFailureStage::ActivationRefresh)
+            );
+            assert_eq!(record.failure_count, attempt + 1);
+
+            if attempt < 2 {
+                assert_eq!(record.status, OAuthVaultRecordStatus::NeedsRefresh);
+                assert!(record.retryable);
+                assert!(record.backoff_until.is_some());
+                assert!(record.next_attempt_at.is_some());
+                assert!(record.next_retry_at.is_some());
+                assert_eq!(record.terminal_reason, None);
+            } else {
+                assert_eq!(record.status, OAuthVaultRecordStatus::Failed);
+                assert!(!record.retryable);
+                assert_eq!(
+                    record.terminal_reason.as_deref(),
+                    Some("refresh_token_revoked")
+                );
+                assert_eq!(record.backoff_until, None);
+                assert_eq!(record.next_attempt_at, None);
+                assert_eq!(record.next_retry_at, None);
+            }
+            drop(vault);
+
+            let mut vault = store.inner.oauth_refresh_token_vault.write().unwrap();
+            let record = vault.values_mut().next().expect("vault record");
+            record.backoff_until = None;
+            record.next_attempt_at = Some(Utc::now());
+            record.next_retry_at = Some(Utc::now());
+        }
     }
 
     #[tokio::test]

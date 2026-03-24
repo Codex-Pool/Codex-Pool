@@ -62,6 +62,10 @@ const OAUTH_VAULT_STATUS_READY: &str = "ready";
 const OAUTH_VAULT_STATUS_NEEDS_REFRESH: &str = "needs_refresh";
 const OAUTH_VAULT_STATUS_NO_QUOTA: &str = "no_quota";
 const OAUTH_VAULT_STATUS_FAILED: &str = "failed";
+const OAUTH_INVENTORY_FAILURE_STAGE_ADMISSION_PROBE: &str = "admission_probe";
+const OAUTH_INVENTORY_FAILURE_STAGE_ACTIVATION_REFRESH: &str = "activation_refresh";
+const OAUTH_INVENTORY_FAILURE_STAGE_ACTIVATION_RATE_LIMITS: &str = "activation_rate_limits";
+const OAUTH_INVENTORY_FAILURE_STAGE_RUNTIME_REFRESH: &str = "runtime_refresh";
 
 fn oauth_vault_status_to_db(status: OAuthVaultRecordStatus) -> &'static str {
     match status {
@@ -82,6 +86,39 @@ fn parse_oauth_vault_record_status(raw: &str) -> Result<OAuthVaultRecordStatus> 
         OAUTH_VAULT_STATUS_FAILED => Ok(OAuthVaultRecordStatus::Failed),
         _ => Err(anyhow!(
             "unsupported oauth vault record status in postgres: {raw}"
+        )),
+    }
+}
+
+fn oauth_inventory_failure_stage_to_db(stage: OAuthInventoryFailureStage) -> &'static str {
+    match stage {
+        OAuthInventoryFailureStage::AdmissionProbe => OAUTH_INVENTORY_FAILURE_STAGE_ADMISSION_PROBE,
+        OAuthInventoryFailureStage::ActivationRefresh => {
+            OAUTH_INVENTORY_FAILURE_STAGE_ACTIVATION_REFRESH
+        }
+        OAuthInventoryFailureStage::ActivationRateLimits => {
+            OAUTH_INVENTORY_FAILURE_STAGE_ACTIVATION_RATE_LIMITS
+        }
+        OAuthInventoryFailureStage::RuntimeRefresh => OAUTH_INVENTORY_FAILURE_STAGE_RUNTIME_REFRESH,
+    }
+}
+
+fn parse_oauth_inventory_failure_stage(raw: &str) -> Result<OAuthInventoryFailureStage> {
+    match raw {
+        OAUTH_INVENTORY_FAILURE_STAGE_ADMISSION_PROBE => {
+            Ok(OAuthInventoryFailureStage::AdmissionProbe)
+        }
+        OAUTH_INVENTORY_FAILURE_STAGE_ACTIVATION_REFRESH => {
+            Ok(OAuthInventoryFailureStage::ActivationRefresh)
+        }
+        OAUTH_INVENTORY_FAILURE_STAGE_ACTIVATION_RATE_LIMITS => {
+            Ok(OAuthInventoryFailureStage::ActivationRateLimits)
+        }
+        OAUTH_INVENTORY_FAILURE_STAGE_RUNTIME_REFRESH => {
+            Ok(OAuthInventoryFailureStage::RuntimeRefresh)
+        }
+        _ => Err(anyhow!(
+            "unsupported oauth inventory failure stage in postgres: {raw}"
         )),
     }
 }

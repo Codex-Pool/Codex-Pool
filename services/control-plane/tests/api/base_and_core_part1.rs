@@ -300,6 +300,12 @@ fn sample_cached_oauth_status(account_id: Uuid) -> OAuthAccountStatusResponse {
         quarantine_reason: None,
         pending_purge_at: None,
         pending_purge_reason: None,
+        last_live_result_at: None,
+        last_live_result_status: None,
+        last_live_result_source: None,
+        last_live_result_status_code: None,
+        last_live_error_code: None,
+        last_live_error_message_preview: None,
         supported_models: vec!["o3".to_string(), "gpt-5.4".to_string()],
         rate_limits: vec![OAuthRateLimitSnapshot {
             limit_id: Some("five_hours".to_string()),

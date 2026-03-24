@@ -235,6 +235,128 @@ async fn oauth_inventory_routes_expose_vault_admission_state() {
 }
 
 #[tokio::test]
+async fn oauth_runtime_and_health_summary_routes_reflect_pool_state() {
+    let store = InMemoryStore::default();
+    let app = build_app_with_store(Arc::new(store));
+    let admin_token = login_admin_token(&app).await;
+
+    for label in ["runtime-summary-a", "runtime-summary-b"] {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/upstream-accounts")
+                    .header("content-type", "application/json")
+                    .header("authorization", format!("Bearer {admin_token}"))
+                    .body(Body::from(
+                        json!({
+                            "label": label,
+                            "mode": "chat_gpt_session",
+                            "base_url": "https://chatgpt.com/backend-api/codex",
+                            "bearer_token": format!("token-{label}"),
+                            "enabled": true,
+                            "priority": 100
+                        })
+                        .to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    let list_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/upstream-accounts")
+                .header("authorization", format!("Bearer {admin_token}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(list_response.status(), StatusCode::OK);
+    let list_body = to_bytes(list_response.into_body(), usize::MAX).await.unwrap();
+    let list_json: Vec<Value> = serde_json::from_slice(&list_body).unwrap();
+    let account_id = list_json[0]["id"].as_str().unwrap().to_string();
+
+    let live_result = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!(
+                    "/internal/v1/upstream-accounts/{account_id}/health/live-result"
+                ))
+                .header("content-type", "application/json")
+                .header(
+                    "authorization",
+                    format!("Bearer {}", internal_service_token()),
+                )
+                .body(Body::from(
+                    json!({
+                        "status": "failed",
+                        "source": "active",
+                        "status_code": 429,
+                        "error_code": "rate_limited",
+                        "error_message": "too many requests"
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(live_result.status(), StatusCode::OK);
+
+    let runtime_summary = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/upstream-accounts/runtime/summary")
+                .header("authorization", format!("Bearer {admin_token}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(runtime_summary.status(), StatusCode::OK);
+    let runtime_body = to_bytes(runtime_summary.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let runtime_json: Value = serde_json::from_slice(&runtime_body).unwrap();
+    assert_eq!(runtime_json["total"], 2);
+    assert_eq!(runtime_json["quarantine"], 1);
+    assert_eq!(runtime_json["active"], 1);
+    assert_eq!(runtime_json["legacy_bearer"], 2);
+
+    let health_summary = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/upstream-accounts/health/signals/summary")
+                .header("authorization", format!("Bearer {admin_token}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(health_summary.status(), StatusCode::OK);
+    let health_body = to_bytes(health_summary.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let health_json: Value = serde_json::from_slice(&health_body).unwrap();
+    assert_eq!(health_json["total"], 2);
+    assert_eq!(health_json["live_result_failed"], 1);
+    assert_eq!(health_json["quarantine_signals"], 1);
+}
+
+#[tokio::test]
 async fn oauth_status_route_returns_not_found_for_unknown_account() {
     let app = build_app();
     let admin_token = login_admin_token(&app).await;
@@ -500,6 +622,58 @@ async fn internal_oauth_refresh_and_disable_routes_work() {
 }
 
 #[tokio::test]
+async fn internal_oauth_refresh_route_returns_status_for_legacy_bearer_account() {
+    let store = Arc::new(InMemoryStore::default());
+    let account = store
+        .upsert_one_time_session_account(UpsertOneTimeSessionAccountRequest {
+            label: "legacy-bearer-internal-refresh".to_string(),
+            mode: codex_pool_core::model::UpstreamMode::CodexOauth,
+            base_url: "https://chatgpt.com/backend-api/codex".to_string(),
+            access_token: "legacy-bearer-refresh-noop".to_string(),
+            chatgpt_account_id: Some("acct_legacy_internal_refresh".to_string()),
+            enabled: Some(true),
+            priority: Some(100),
+            token_expires_at: Some(
+                chrono::Utc::now() + chrono::Duration::hours(2),
+            ),
+            chatgpt_plan_type: Some("free".to_string()),
+            source_type: Some("codex".to_string()),
+        })
+        .await
+        .expect("create legacy bearer account")
+        .account;
+    let app = build_app_with_store(store);
+
+    let refresh_response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!(
+                    "/internal/v1/upstream-accounts/{}/oauth/refresh",
+                    account.id
+                ))
+                .header(
+                    "authorization",
+                    format!("Bearer {}", internal_service_token()),
+                )
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(refresh_response.status(), StatusCode::OK);
+    let refresh_body = to_bytes(refresh_response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let refresh_json: Value = serde_json::from_slice(&refresh_body).unwrap();
+    assert_eq!(refresh_json["account_id"], account.id.to_string());
+    assert_eq!(refresh_json["auth_provider"], "legacy_bearer");
+    assert_eq!(refresh_json["credential_kind"], "one_time_access_token");
+    assert_eq!(refresh_json["has_refresh_credential"], false);
+    assert_eq!(refresh_json["last_refresh_status"], "never");
+}
+
+#[tokio::test]
 async fn oauth_family_disable_and_enable_routes_work() {
     let cipher_key = base64::engine::general_purpose::STANDARD.encode([9_u8; 32]);
     let cipher = CredentialCipher::from_base64_key(&cipher_key).unwrap();
@@ -698,6 +872,369 @@ async fn internal_seen_ok_route_requires_internal_token_and_is_idempotent() {
     assert_eq!(second_json["accepted"], false);
     sleep(Duration::from_millis(50)).await;
     assert_eq!(store.seen_ok_refresh_call_count(), 1);
+}
+
+#[tokio::test]
+async fn internal_live_result_route_requires_internal_token_and_accepts_payload() {
+    let store = InMemoryStore::default();
+    let app = build_app_with_store(Arc::new(store));
+    let admin_token = login_admin_token(&app).await;
+
+    let create_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/upstream-accounts")
+                .header("content-type", "application/json")
+                .header("authorization", format!("Bearer {admin_token}"))
+                .body(Body::from(
+                    json!({
+                        "label": "live-result-account",
+                        "mode": "chat_gpt_session",
+                        "base_url": "https://chatgpt.com/backend-api/codex",
+                        "bearer_token": "test-token",
+                        "enabled": true,
+                        "priority": 100
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(create_response.status(), StatusCode::OK);
+    let create_body = to_bytes(create_response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let create_json: Value = serde_json::from_slice(&create_body).unwrap();
+    let account_id = create_json["id"].as_str().unwrap().to_string();
+
+    let payload = json!({
+        "status": "failed",
+        "source": "passive",
+        "status_code": 401,
+        "error_code": "account_deactivated",
+        "error_message": "account is deactivated",
+        "upstream_request_id": "req-live-route",
+        "model": "gpt-5.4"
+    });
+
+    let unauthorized = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!(
+                    "/internal/v1/upstream-accounts/{account_id}/health/live-result"
+                ))
+                .header("content-type", "application/json")
+                .body(Body::from(payload.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(unauthorized.status(), StatusCode::UNAUTHORIZED);
+
+    let authorized = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!(
+                    "/internal/v1/upstream-accounts/{account_id}/health/live-result"
+                ))
+                .header("content-type", "application/json")
+                .header(
+                    "authorization",
+                    format!("Bearer {}", internal_service_token()),
+                )
+                .body(Body::from(payload.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(authorized.status(), StatusCode::OK);
+    let authorized_body = to_bytes(authorized.into_body(), usize::MAX).await.unwrap();
+    let authorized_json: Value = serde_json::from_slice(&authorized_body).unwrap();
+    assert_eq!(authorized_json["ok"], true);
+    assert_eq!(authorized_json["accepted"], true);
+    assert_eq!(authorized_json["account_id"], account_id);
+    assert_eq!(authorized_json["status"], "failed");
+    assert_eq!(authorized_json["error_code"], "account_deactivated");
+
+    let status_response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(format!("/api/v1/upstream-accounts/{account_id}/oauth/status"))
+                .header("authorization", format!("Bearer {admin_token}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(status_response.status(), StatusCode::OK);
+    let status_body = to_bytes(status_response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let status_json: Value = serde_json::from_slice(&status_body).unwrap();
+    assert_eq!(status_json["pool_state"], "pending_purge");
+    assert_eq!(status_json["pending_purge_reason"], "account_deactivated");
+    assert_eq!(status_json["last_live_result_status"], "failed");
+    assert_eq!(status_json["last_live_result_source"], "passive");
+    assert_eq!(status_json["last_live_result_status_code"], 401);
+    assert_eq!(status_json["last_live_error_code"], "account_deactivated");
+}
+
+#[tokio::test]
+async fn internal_live_result_rate_limited_quarantines_runtime_account() {
+    let store = InMemoryStore::default();
+    let app = build_app_with_store(Arc::new(store));
+    let admin_token = login_admin_token(&app).await;
+
+    let create_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/upstream-accounts")
+                .header("content-type", "application/json")
+                .header("authorization", format!("Bearer {admin_token}"))
+                .body(Body::from(
+                    json!({
+                        "label": "live-result-rate-limited",
+                        "mode": "chat_gpt_session",
+                        "base_url": "https://chatgpt.com/backend-api/codex",
+                        "bearer_token": "test-token-rate-limited",
+                        "enabled": true,
+                        "priority": 100
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(create_response.status(), StatusCode::OK);
+    let create_body = to_bytes(create_response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let create_json: Value = serde_json::from_slice(&create_body).unwrap();
+    let account_id = create_json["id"].as_str().unwrap().to_string();
+
+    let payload = json!({
+        "status": "failed",
+        "source": "active",
+        "status_code": 429,
+        "error_code": "rate_limited",
+        "error_message": "too many requests",
+        "upstream_request_id": "req-live-rate-limited",
+        "model": "gpt-5.4"
+    });
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!(
+                    "/internal/v1/upstream-accounts/{account_id}/health/live-result"
+                ))
+                .header("content-type", "application/json")
+                .header(
+                    "authorization",
+                    format!("Bearer {}", internal_service_token()),
+                )
+                .body(Body::from(payload.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let json: Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json["accepted"], true);
+
+    let status_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(format!("/api/v1/upstream-accounts/{account_id}/oauth/status"))
+                .header("authorization", format!("Bearer {admin_token}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(status_response.status(), StatusCode::OK);
+    let status_body = to_bytes(status_response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let status_json: Value = serde_json::from_slice(&status_body).unwrap();
+    assert_eq!(status_json["pool_state"], "quarantine");
+    assert_eq!(status_json["quarantine_reason"], "rate_limited");
+    assert!(status_json["quarantine_until"].is_string());
+    assert_eq!(status_json["last_live_result_status"], "failed");
+    assert_eq!(status_json["last_live_result_source"], "active");
+    assert_eq!(status_json["last_live_result_status_code"], 429);
+    assert_eq!(status_json["last_live_error_code"], "rate_limited");
+
+    let snapshot_response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/data-plane/snapshot")
+                .header(
+                    "authorization",
+                    format!("Bearer {}", internal_service_token()),
+                )
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(snapshot_response.status(), StatusCode::OK);
+    let snapshot_body = to_bytes(snapshot_response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let snapshot_json: Value = serde_json::from_slice(&snapshot_body).unwrap();
+    let snapshot_account = snapshot_json["accounts"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["id"] == account_id)
+        .cloned();
+    assert!(
+        snapshot_account.is_none(),
+        "quarantined account should be removed from runtime snapshot"
+    );
+}
+
+#[tokio::test]
+async fn internal_live_result_token_invalidated_quarantines_runtime_account() {
+    let store = InMemoryStore::default();
+    let app = build_app_with_store(Arc::new(store));
+    let admin_token = login_admin_token(&app).await;
+
+    let create_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/upstream-accounts")
+                .header("content-type", "application/json")
+                .header("authorization", format!("Bearer {admin_token}"))
+                .body(Body::from(
+                    json!({
+                        "label": "live-result-token-invalidated",
+                        "mode": "chat_gpt_session",
+                        "base_url": "https://chatgpt.com/backend-api/codex",
+                        "bearer_token": "test-token-token-invalidated",
+                        "enabled": true,
+                        "priority": 100
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(create_response.status(), StatusCode::OK);
+    let create_body = to_bytes(create_response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let create_json: Value = serde_json::from_slice(&create_body).unwrap();
+    let account_id = create_json["id"].as_str().unwrap().to_string();
+
+    let payload = json!({
+        "status": "failed",
+        "source": "passive",
+        "status_code": 401,
+        "error_code": "token_invalidated",
+        "error_message": "token invalidated",
+        "upstream_request_id": "req-live-token-invalidated",
+        "model": "gpt-5.4"
+    });
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!(
+                    "/internal/v1/upstream-accounts/{account_id}/health/live-result"
+                ))
+                .header("content-type", "application/json")
+                .header(
+                    "authorization",
+                    format!("Bearer {}", internal_service_token()),
+                )
+                .body(Body::from(payload.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let json: Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json["accepted"], true);
+
+    let status_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(format!("/api/v1/upstream-accounts/{account_id}/oauth/status"))
+                .header("authorization", format!("Bearer {admin_token}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(status_response.status(), StatusCode::OK);
+    let status_body = to_bytes(status_response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let status_json: Value = serde_json::from_slice(&status_body).unwrap();
+    assert_eq!(status_json["pool_state"], "quarantine");
+    assert_eq!(status_json["quarantine_reason"], "token_invalidated");
+    assert!(status_json["quarantine_until"].is_string());
+    assert_eq!(status_json["last_live_result_status"], "failed");
+    assert_eq!(status_json["last_live_result_source"], "passive");
+    assert_eq!(status_json["last_live_result_status_code"], 401);
+    assert_eq!(status_json["last_live_error_code"], "token_invalidated");
+
+    let snapshot_response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/data-plane/snapshot")
+                .header(
+                    "authorization",
+                    format!("Bearer {}", internal_service_token()),
+                )
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(snapshot_response.status(), StatusCode::OK);
+    let snapshot_body = to_bytes(snapshot_response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let snapshot_json: Value = serde_json::from_slice(&snapshot_body).unwrap();
+    let snapshot_account = snapshot_json["accounts"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["id"] == account_id)
+        .cloned();
+    assert!(
+        snapshot_account.is_none(),
+        "token_invalidated account should be removed from runtime snapshot"
+    );
 }
 
 #[tokio::test]

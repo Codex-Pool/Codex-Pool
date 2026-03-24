@@ -48,9 +48,11 @@ fn schedule_next_oauth_refresh(expires_at: DateTime<Utc>, account_id: Uuid) -> D
 #[derive(Debug, Clone)]
 struct RateLimitRefreshTarget {
     account_id: Uuid,
+    auth_provider: UpstreamAuthProvider,
     base_url: String,
     chatgpt_account_id: Option<String>,
     access_token_enc: Option<String>,
+    bearer_token: Option<String>,
 }
 
 #[derive(Debug, Default)]
@@ -100,7 +102,7 @@ impl PostgresStore {
         let auth_provider =
             parse_upstream_auth_provider(row.try_get::<String, _>("auth_provider")?.as_str())?;
         if auth_provider != UpstreamAuthProvider::OAuthRefreshToken {
-            return Err(anyhow!("account is not an oauth account"));
+            return self.fetch_oauth_account_status(account_id).await;
         }
 
         let token_expires_at = row
@@ -414,27 +416,29 @@ impl PostgresStore {
         &self,
         auth_provider: &UpstreamAuthProvider,
         access_token_enc: Option<String>,
+        bearer_token: Option<String>,
         base_url: Option<String>,
         chatgpt_account_id: Option<String>,
     ) -> Result<Vec<OAuthRateLimitSnapshot>, (String, String)> {
-        if *auth_provider != UpstreamAuthProvider::OAuthRefreshToken {
-            return Ok(Vec::new());
-        }
-
-        let Some(access_token_enc) = access_token_enc else {
-            return Ok(Vec::new());
-        };
-        let Some(cipher) = self.credential_cipher.as_ref() else {
-            return Err((
-                "credential_cipher_missing".to_string(),
-                "oauth credential cipher is not configured".to_string(),
-            ));
-        };
-        let access_token = match cipher.decrypt(&access_token_enc) {
-            Ok(value) => value,
-            Err(err) => {
-                return Err(("credential_decrypt_failed".to_string(), err.to_string()));
+        let access_token = match auth_provider {
+            UpstreamAuthProvider::OAuthRefreshToken => {
+                let Some(access_token_enc) = access_token_enc else {
+                    return Ok(Vec::new());
+                };
+                let Some(cipher) = self.credential_cipher.as_ref() else {
+                    return Err((
+                        "credential_cipher_missing".to_string(),
+                        "oauth credential cipher is not configured".to_string(),
+                    ));
+                };
+                match cipher.decrypt(&access_token_enc) {
+                    Ok(value) => value,
+                    Err(err) => {
+                        return Err(("credential_decrypt_failed".to_string(), err.to_string()));
+                    }
+                }
             }
+            UpstreamAuthProvider::LegacyBearer => bearer_token.unwrap_or_default(),
         };
         if access_token.trim().is_empty() {
             return Ok(Vec::new());

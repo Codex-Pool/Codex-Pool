@@ -1010,6 +1010,12 @@ impl PostgresStore {
                 admission_error_message TEXT NULL,
                 admission_rate_limits_json JSONB NULL,
                 admission_rate_limits_expires_at TIMESTAMPTZ NULL,
+                failure_stage TEXT NULL,
+                attempt_count INT NOT NULL DEFAULT 0,
+                transient_retry_count INT NOT NULL DEFAULT 0,
+                next_retry_at TIMESTAMPTZ NULL,
+                retryable BOOLEAN NOT NULL DEFAULT true,
+                terminal_reason TEXT NULL,
                 created_at TIMESTAMPTZ NOT NULL,
                 updated_at TIMESTAMPTZ NOT NULL
             )
@@ -1539,6 +1545,66 @@ impl PostgresStore {
         .execute(tx.as_mut())
         .await
         .context("failed to add oauth_refresh_token_vault admission_rate_limits_expires_at column")?;
+
+        sqlx::query(
+            r#"
+            ALTER TABLE oauth_refresh_token_vault
+            ADD COLUMN IF NOT EXISTS failure_stage TEXT NULL
+            "#,
+        )
+        .execute(tx.as_mut())
+        .await
+        .context("failed to add oauth_refresh_token_vault failure_stage column")?;
+
+        sqlx::query(
+            r#"
+            ALTER TABLE oauth_refresh_token_vault
+            ADD COLUMN IF NOT EXISTS attempt_count INT NOT NULL DEFAULT 0
+            "#,
+        )
+        .execute(tx.as_mut())
+        .await
+        .context("failed to add oauth_refresh_token_vault attempt_count column")?;
+
+        sqlx::query(
+            r#"
+            ALTER TABLE oauth_refresh_token_vault
+            ADD COLUMN IF NOT EXISTS transient_retry_count INT NOT NULL DEFAULT 0
+            "#,
+        )
+        .execute(tx.as_mut())
+        .await
+        .context("failed to add oauth_refresh_token_vault transient_retry_count column")?;
+
+        sqlx::query(
+            r#"
+            ALTER TABLE oauth_refresh_token_vault
+            ADD COLUMN IF NOT EXISTS next_retry_at TIMESTAMPTZ NULL
+            "#,
+        )
+        .execute(tx.as_mut())
+        .await
+        .context("failed to add oauth_refresh_token_vault next_retry_at column")?;
+
+        sqlx::query(
+            r#"
+            ALTER TABLE oauth_refresh_token_vault
+            ADD COLUMN IF NOT EXISTS retryable BOOLEAN NOT NULL DEFAULT true
+            "#,
+        )
+        .execute(tx.as_mut())
+        .await
+        .context("failed to add oauth_refresh_token_vault retryable column")?;
+
+        sqlx::query(
+            r#"
+            ALTER TABLE oauth_refresh_token_vault
+            ADD COLUMN IF NOT EXISTS terminal_reason TEXT NULL
+            "#,
+        )
+        .execute(tx.as_mut())
+        .await
+        .context("failed to add oauth_refresh_token_vault terminal_reason column")?;
 
         sqlx::query(
             r#"

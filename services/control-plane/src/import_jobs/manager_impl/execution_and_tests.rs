@@ -27,6 +27,25 @@ async fn execute_import_with_retry(
                             .clone()
                             .or_else(|| record.admission_error_message.clone())
                     }),
+                    failure_stage: admission.as_ref().and_then(|record| record.failure_stage),
+                    attempt_count: admission
+                        .as_ref()
+                        .map(|record| record.attempt_count)
+                        .unwrap_or(0),
+                    transient_retry_count: admission
+                        .as_ref()
+                        .map(|record| record.transient_retry_count)
+                        .unwrap_or(0),
+                    next_retry_at: admission
+                        .as_ref()
+                        .and_then(|record| record.next_retry_at),
+                    retryable: admission
+                        .as_ref()
+                        .map(|record| record.retryable)
+                        .unwrap_or(false),
+                    terminal_reason: admission
+                        .as_ref()
+                        .and_then(|record| record.terminal_reason.clone()),
                 })
             }
             ImportTaskRequest::OneTimeAccessToken(req) => {
@@ -38,6 +57,12 @@ async fn execute_import_with_retry(
                     admission_status: None,
                     admission_source: None,
                     admission_reason: None,
+                    failure_stage: None,
+                    attempt_count: 0,
+                    transient_retry_count: 0,
+                    next_retry_at: None,
+                    retryable: false,
+                    terminal_reason: None,
                 })
             }
             ImportTaskRequest::ManualRefreshAccount(req) => {
@@ -55,6 +80,12 @@ async fn execute_import_with_retry(
                     admission_status: None,
                     admission_source: None,
                     admission_reason: None,
+                    failure_stage: None,
+                    attempt_count: 0,
+                    transient_retry_count: 0,
+                    next_retry_at: None,
+                    retryable: false,
+                    terminal_reason: None,
                 })
             }
         };
@@ -240,6 +271,12 @@ mod tests {
                 admission_status: None,
                 admission_source: None,
                 admission_reason: None,
+                failure_stage: None,
+                attempt_count: 0,
+                transient_retry_count: 0,
+                next_retry_at: None,
+                retryable: false,
+                terminal_reason: None,
             },
             request: Some(ImportTaskRequest::OAuthRefresh(ImportOAuthRefreshTokenRequest {
                 label: "pause-resume".to_string(),
@@ -581,6 +618,12 @@ mod tests {
                     admission_status: None,
                     admission_source: None,
                     admission_reason: None,
+                    failure_stage: None,
+                    attempt_count: 0,
+                    transient_retry_count: 0,
+                    next_retry_at: None,
+                    retryable: false,
+                    terminal_reason: None,
                 },
             )
             .await
@@ -627,6 +670,12 @@ mod tests {
                     admission_status: None,
                     admission_source: None,
                     admission_reason: None,
+                    failure_stage: None,
+                    attempt_count: 0,
+                    transient_retry_count: 0,
+                    next_retry_at: None,
+                    retryable: false,
+                    terminal_reason: None,
                 },
                 request: Some(ImportTaskRequest::OAuthRefresh(ImportOAuthRefreshTokenRequest {
                     label: format!("multi-batch-{item_id}"),
@@ -663,6 +712,12 @@ mod tests {
                         admission_status: None,
                         admission_source: None,
                         admission_reason: None,
+                        failure_stage: None,
+                        attempt_count: 0,
+                        transient_retry_count: 0,
+                        next_retry_at: None,
+                        retryable: false,
+                        terminal_reason: None,
                     },
                 )
                 .await

@@ -42,6 +42,23 @@ fn parse_oauth_vault_record_row(
         admission_error_message: row.try_get("admission_error_message")?,
         admission_rate_limits,
         admission_rate_limits_expires_at: row.try_get("admission_rate_limits_expires_at")?,
+        failure_stage: row
+            .try_get::<Option<String>, _>("failure_stage")?
+            .map(|raw| parse_oauth_inventory_failure_stage(raw.as_str()))
+            .transpose()?,
+        attempt_count: row
+            .try_get::<i32, _>("attempt_count")?
+            .max(0)
+            .try_into()
+            .unwrap_or(u32::MAX),
+        transient_retry_count: row
+            .try_get::<i32, _>("transient_retry_count")?
+            .max(0)
+            .try_into()
+            .unwrap_or(u32::MAX),
+        next_retry_at: row.try_get("next_retry_at")?,
+        retryable: row.try_get("retryable")?,
+        terminal_reason: row.try_get("terminal_reason")?,
         created_at: row.try_get("created_at")?,
         updated_at: row.try_get("updated_at")?,
     })
@@ -76,6 +93,23 @@ fn parse_oauth_inventory_record_row(row: &sqlx_postgres::PgRow) -> Result<OAuthI
         admission_error_message: row.try_get("admission_error_message")?,
         admission_rate_limits,
         admission_rate_limits_expires_at: row.try_get("admission_rate_limits_expires_at")?,
+        failure_stage: row
+            .try_get::<Option<String>, _>("failure_stage")?
+            .map(|raw| parse_oauth_inventory_failure_stage(raw.as_str()))
+            .transpose()?,
+        attempt_count: row
+            .try_get::<i32, _>("attempt_count")?
+            .max(0)
+            .try_into()
+            .unwrap_or(u32::MAX),
+        transient_retry_count: row
+            .try_get::<i32, _>("transient_retry_count")?
+            .max(0)
+            .try_into()
+            .unwrap_or(u32::MAX),
+        next_retry_at: row.try_get("next_retry_at")?,
+        retryable: row.try_get("retryable")?,
+        terminal_reason: row.try_get("terminal_reason")?,
         created_at: row.try_get("created_at")?,
         updated_at: row.try_get("updated_at")?,
     })
@@ -479,6 +513,12 @@ impl PostgresStore {
                 admission_error_message,
                 admission_rate_limits_json::text AS admission_rate_limits_json_text,
                 admission_rate_limits_expires_at,
+                failure_stage,
+                attempt_count,
+                transient_retry_count,
+                next_retry_at,
+                retryable,
+                terminal_reason,
                 created_at,
                 updated_at
             FROM oauth_refresh_token_vault
@@ -506,6 +546,12 @@ impl PostgresStore {
         fallback_token_expires_at: Option<DateTime<Utc>>,
         rate_limits: Vec<OAuthRateLimitSnapshot>,
         rate_limits_expires_at: Option<DateTime<Utc>>,
+        failure_stage: Option<OAuthInventoryFailureStage>,
+        attempt_count_delta: u32,
+        transient_retry_count_delta: u32,
+        next_retry_at: Option<DateTime<Utc>>,
+        retryable: bool,
+        terminal_reason: Option<String>,
     ) -> Result<()> {
         let rate_limits_json = if rate_limits.is_empty() {
             None
@@ -528,6 +574,12 @@ impl PostgresStore {
                 fallback_token_expires_at = COALESCE($8, fallback_token_expires_at),
                 admission_rate_limits_json = $9::jsonb,
                 admission_rate_limits_expires_at = $10,
+                failure_stage = $11,
+                attempt_count = attempt_count + $12,
+                transient_retry_count = transient_retry_count + $13,
+                next_retry_at = $14,
+                retryable = $15,
+                terminal_reason = $16,
                 updated_at = $4
             WHERE id = $1
             "#,
@@ -542,6 +594,12 @@ impl PostgresStore {
         .bind(fallback_token_expires_at)
         .bind(rate_limits_json)
         .bind(rate_limits_expires_at)
+        .bind(failure_stage.map(oauth_inventory_failure_stage_to_db))
+        .bind(i32::try_from(attempt_count_delta).unwrap_or(i32::MAX))
+        .bind(i32::try_from(transient_retry_count_delta).unwrap_or(i32::MAX))
+        .bind(next_retry_at)
+        .bind(retryable)
+        .bind(terminal_reason)
         .execute(&self.pool)
         .await
         .context("failed to update oauth vault admission result")?;
@@ -566,6 +624,12 @@ impl PostgresStore {
                 None,
                 Vec::new(),
                 None,
+                Some(OAuthInventoryFailureStage::AdmissionProbe),
+                1,
+                0,
+                None,
+                false,
+                Some("credential_cipher_missing".to_string()),
             )
             .await?;
             return Ok(());
@@ -582,6 +646,12 @@ impl PostgresStore {
                 Some("fallback access token is not available".to_string()),
                 None,
                 Vec::new(),
+                None,
+                Some(OAuthInventoryFailureStage::AdmissionProbe),
+                1,
+                0,
+                None,
+                true,
                 None,
             )
             .await?;
@@ -602,6 +672,12 @@ impl PostgresStore {
                     None,
                     Vec::new(),
                     None,
+                    Some(OAuthInventoryFailureStage::AdmissionProbe),
+                    1,
+                    0,
+                    None,
+                    false,
+                    Some("credential_decrypt_failed".to_string()),
                 )
                 .await?;
                 return Ok(());
@@ -618,6 +694,12 @@ impl PostgresStore {
                     None,
                     Vec::new(),
                     None,
+                    Some(OAuthInventoryFailureStage::AdmissionProbe),
+                    1,
+                    0,
+                    None,
+                    false,
+                    Some("credential_decrypt_failed".to_string()),
                 )
                 .await?;
                 return Ok(());
@@ -654,6 +736,12 @@ impl PostgresStore {
                         None,
                         rate_limits,
                         rate_limits_expires_at,
+                        Some(OAuthInventoryFailureStage::AdmissionProbe),
+                        1,
+                        0,
+                        None,
+                        true,
+                        None,
                     )
                     .await?;
                     return Ok(());
@@ -670,6 +758,12 @@ impl PostgresStore {
                         fallback_expires_at,
                         rate_limits,
                         rate_limits_expires_at,
+                        Some(OAuthInventoryFailureStage::AdmissionProbe),
+                        1,
+                        0,
+                        blocked_until,
+                        true,
+                        None,
                     )
                     .await?;
                     return Ok(());
@@ -686,6 +780,12 @@ impl PostgresStore {
                     fallback_expires_at,
                     rate_limits,
                     rate_limits_expires_at,
+                    None,
+                    1,
+                    0,
+                    None,
+                    false,
+                    None,
                 )
                 .await?;
                 Ok(())
@@ -693,25 +793,49 @@ impl PostgresStore {
             Err(err) => {
                 let error_code = err.code().as_str().to_string();
                 let error_message = truncate_error_message(err.to_string());
-                let retry_after = if is_quota_error_signal(&error_code, &error_message)
-                    || is_rate_limited_signal(&error_code, &error_message)
+                let transient_signal =
+                    is_transient_upstream_error_signal(&error_code, &error_message);
+                let current_transient_retry_count = record.transient_retry_count;
+                let retry_after = if transient_signal
+                    && can_retry_transient_admission_failure(current_transient_retry_count)
                 {
-                    Some(
-                        checked_at
-                            + Duration::seconds(rate_limit_failure_backoff_seconds(
-                                &error_code,
-                                &error_message,
-                            )),
+                    admission_probe_retry_after_with_budget(
+                        checked_at,
+                        &error_code,
+                        &error_message,
+                        current_transient_retry_count,
                     )
-                } else {
+                } else if transient_signal {
                     None
+                } else {
+                    admission_probe_retry_after_with_budget(
+                        checked_at,
+                        &error_code,
+                        &error_message,
+                        current_transient_retry_count,
+                    )
                 };
-                let status = if retry_after.is_some() {
+                let status = if retry_after.is_some()
+                    && (is_quota_error_signal(&error_code, &error_message)
+                        || is_rate_limited_signal(&error_code, &error_message))
+                {
                     OAuthVaultRecordStatus::NoQuota
                 } else if is_auth_error_signal(&error_code, &error_message) {
                     OAuthVaultRecordStatus::NeedsRefresh
                 } else {
                     OAuthVaultRecordStatus::Failed
+                };
+                let retryable = match status {
+                    OAuthVaultRecordStatus::Ready => false,
+                    OAuthVaultRecordStatus::NeedsRefresh => true,
+                    OAuthVaultRecordStatus::NoQuota => retry_after.is_some(),
+                    OAuthVaultRecordStatus::Failed => retry_after.is_some(),
+                    OAuthVaultRecordStatus::Queued => false,
+                };
+                let terminal_reason = if retryable {
+                    None
+                } else {
+                    Some(error_code.clone())
                 };
                 self.update_oauth_vault_admission_result(
                     record_id,
@@ -724,6 +848,12 @@ impl PostgresStore {
                     fallback_expires_at,
                     Vec::new(),
                     retry_after,
+                    Some(OAuthInventoryFailureStage::AdmissionProbe),
+                    1,
+                    if transient_signal && retry_after.is_some() { 1 } else { 0 },
+                    retry_after,
+                    retryable,
+                    terminal_reason,
                 )
                 .await?;
                 Ok(())
@@ -806,6 +936,12 @@ impl PostgresStore {
                 admission_error_message,
                 admission_rate_limits_json::text AS admission_rate_limits_json_text,
                 admission_rate_limits_expires_at,
+                failure_stage,
+                attempt_count,
+                transient_retry_count,
+                next_retry_at,
+                retryable,
+                terminal_reason,
                 created_at,
                 updated_at
             FROM oauth_refresh_token_vault
@@ -877,11 +1013,17 @@ impl PostgresStore {
                 admission_error_message,
                 admission_rate_limits_json,
                 admission_rate_limits_expires_at,
+                failure_stage,
+                attempt_count,
+                transient_retry_count,
+                next_retry_at,
+                retryable,
+                terminal_reason,
                 created_at,
                 updated_at
             )
             VALUES (
-                $1, $2, $3, $4, $5, $6, $7, NULL, $8, $9, $10, $11, $12, $13, $14, 0, NULL, $15, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, $15, $15
+                $1, $2, $3, $4, $5, $6, $7, NULL, $8, $9, $10, $11, $12, $13, $14, 0, NULL, $15, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 0, 0, $15, true, NULL, $15, $15
             )
             ON CONFLICT (refresh_token_sha256) DO UPDATE
             SET
@@ -915,6 +1057,12 @@ impl PostgresStore {
                 admission_error_message = NULL,
                 admission_rate_limits_json = NULL,
                 admission_rate_limits_expires_at = NULL,
+                failure_stage = NULL,
+                attempt_count = 0,
+                transient_retry_count = 0,
+                next_retry_at = EXCLUDED.next_retry_at,
+                retryable = true,
+                terminal_reason = NULL,
                 updated_at = EXCLUDED.updated_at
             RETURNING id, (xmax = 0) AS inserted
             "#,

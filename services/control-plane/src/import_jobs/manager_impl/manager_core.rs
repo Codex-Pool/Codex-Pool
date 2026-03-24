@@ -133,6 +133,12 @@ impl OAuthImportJobManager {
             admission_status: None,
             admission_source: None,
             admission_reason: None,
+            failure_stage: None,
+            attempt_count: 0,
+            transient_retry_count: 0,
+            next_retry_at: None,
+            retryable: false,
+            terminal_reason: None,
         };
         let mut persisted = PersistedImportItem {
             item,

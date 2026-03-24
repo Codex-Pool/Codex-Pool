@@ -40,6 +40,38 @@ fn vault_activation_backoff(failure_count: i32) -> Duration {
 }
 
 impl PostgresStore {
+    async fn load_due_oauth_vault_admission_reprobe_candidates(
+        &self,
+        now: DateTime<Utc>,
+        limit: usize,
+    ) -> Result<Vec<Uuid>> {
+        let rows = sqlx::query(
+            r#"
+            SELECT id
+            FROM oauth_refresh_token_vault
+            WHERE
+                status IN ($2, $3)
+                AND admission_retry_after IS NOT NULL
+                AND admission_retry_after <= $1
+            ORDER BY admission_retry_after ASC, created_at ASC, id ASC
+            LIMIT $4
+            "#,
+        )
+        .bind(now)
+        .bind(oauth_vault_status_to_db(OAuthVaultRecordStatus::NoQuota))
+        .bind(oauth_vault_status_to_db(OAuthVaultRecordStatus::Failed))
+        .bind(i64::try_from(limit).unwrap_or(i64::MAX))
+        .fetch_all(&self.pool)
+        .await
+        .context("failed to load due oauth vault admission reprobe candidates")?;
+
+        let mut items = Vec::with_capacity(rows.len());
+        for row in rows {
+            items.push(row.try_get("id")?);
+        }
+        Ok(items)
+    }
+
     async fn load_oauth_vault_activation_candidates(
         &self,
         now: DateTime<Utc>,
@@ -75,6 +107,12 @@ impl PostgresStore {
                 admission_error_message,
                 admission_rate_limits_json::text AS admission_rate_limits_json_text,
                 admission_rate_limits_expires_at,
+                failure_stage,
+                attempt_count,
+                transient_retry_count,
+                next_retry_at,
+                retryable,
+                terminal_reason,
                 created_at,
                 updated_at
             FROM oauth_refresh_token_vault
@@ -147,18 +185,29 @@ impl PostgresStore {
         };
 
         let next_failure_count = current_failure_count.saturating_add(1);
-        let fatal = is_fatal_refresh_error_code(Some(error_code));
+        let fatal_auth = is_fatal_refresh_error_code(Some(error_code));
+        let terminal_config_error = matches!(
+            normalize_health_error_code(error_code).as_str(),
+            "credential_cipher_missing" | "credential_decrypt_failed"
+        );
         let now = Utc::now();
-        let backoff = if fatal {
-            None
+        let allow_retry = if terminal_config_error {
+            false
+        } else if fatal_auth {
+            can_retry_fatal_activation_failure(next_failure_count as u32)
         } else {
-            Some(vault_activation_backoff(next_failure_count))
+            true
+        };
+        let backoff = if allow_retry {
+            Some(vault_activation_backoff(next_failure_count as u32))
+        } else {
+            None
         };
         let next_attempt_at = backoff.map(|value| now + value);
-        let status = if fatal {
-            OAuthVaultRecordStatus::Failed
-        } else {
+        let status = if allow_retry {
             oauth_vault_activation_fallback_status(current_status)
+        } else {
+            OAuthVaultRecordStatus::Failed
         };
 
         sqlx::query(
@@ -171,7 +220,12 @@ impl PostgresStore {
                 next_attempt_at = $5,
                 last_error_code = $6,
                 last_error_message = $7,
-                updated_at = $8
+                failure_stage = $8,
+                attempt_count = attempt_count + 1,
+                next_retry_at = $9,
+                retryable = $10,
+                terminal_reason = $11,
+                updated_at = $12
             WHERE id = $1
             "#,
         )
@@ -182,6 +236,16 @@ impl PostgresStore {
         .bind(next_attempt_at)
         .bind(error_code)
         .bind(truncate_error_message(error_message.to_string()))
+        .bind(oauth_inventory_failure_stage_to_db(
+            OAuthInventoryFailureStage::ActivationRefresh,
+        ))
+        .bind(next_attempt_at)
+        .bind(allow_retry)
+        .bind(if allow_retry {
+            None
+        } else {
+            Some(error_code.to_string())
+        })
         .bind(now)
         .execute(tx.as_mut())
         .await
@@ -208,6 +272,34 @@ impl PostgresStore {
     }
 
     async fn activate_oauth_refresh_token_vault_inner(&self) -> Result<u64> {
+        let reprobe_limit = oauth_vault_activate_batch_size_from_env();
+        for record_id in self
+            .load_due_oauth_vault_admission_reprobe_candidates(Utc::now(), reprobe_limit)
+            .await?
+        {
+            self.probe_oauth_vault_admission_inner(record_id).await?;
+        }
+        let _ = self.purge_expired_one_time_accounts_inner().await?;
+        let runtime_count = sqlx::query_scalar::<_, i64>(
+            r#"
+            SELECT COUNT(*)::BIGINT
+            FROM upstream_accounts
+            "#,
+        )
+        .fetch_one(&self.pool)
+        .await
+        .context("failed to count runtime upstream accounts")?;
+        let runtime_count = usize::try_from(runtime_count.max(0)).unwrap_or_default();
+        let runtime_cap = runtime_pool_cap_from_env();
+        if runtime_count >= runtime_cap {
+            tracing::warn!(
+                runtime_count,
+                runtime_cap,
+                "postgres runtime pool reached configured cap; skipping oauth vault activation"
+            );
+            return Ok(0);
+        }
+
         let active_count = sqlx::query_scalar::<_, i64>(
             r#"
             SELECT COUNT(*)::BIGINT
@@ -238,7 +330,8 @@ impl PostgresStore {
 
         let batch_size = oauth_vault_activate_batch_size_from_env();
         let needed = target.saturating_sub(active_count);
-        let limit = needed.min(batch_size);
+        let headroom = runtime_cap.saturating_sub(runtime_count);
+        let limit = needed.min(batch_size).min(headroom);
         if limit == 0 {
             return Ok(0);
         }

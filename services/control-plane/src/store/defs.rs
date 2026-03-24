@@ -25,7 +25,9 @@ use crate::contracts::{
     CreateApiKeyRequest, CreateApiKeyResponse, CreateOutboundProxyNodeRequest,
     CreateTenantRequest, CreateUpstreamAccountRequest, ImportOAuthRefreshTokenRequest,
     OAuthAccountPoolState, OAuthAccountStatusResponse, OAuthFamilyActionResponse,
-    OAuthInventoryRecord, OAuthInventorySummaryResponse,
+    OAuthHealthSignalsSummaryResponse, OAuthInventoryRecord, OAuthInventorySummaryResponse,
+    OAuthInventoryFailureStage, OAuthLiveResultSource, OAuthLiveResultStatus,
+    OAuthRuntimePoolSummaryResponse,
     OAuthRateLimitRefreshErrorSummary, OAuthRateLimitRefreshJobStatus,
     OAuthRateLimitRefreshJobSummary, OAuthRateLimitSnapshot, OAuthRefreshStatus,
     OAuthVaultRecordStatus, RefreshCredentialState, SessionCredentialKind,
@@ -66,6 +68,7 @@ const OAUTH_VAULT_ACTIVATE_CONCURRENCY_ENV: &str =
     "CONTROL_PLANE_VAULT_ACTIVATE_CONCURRENCY";
 const DEFAULT_OAUTH_VAULT_ACTIVATE_CONCURRENCY: usize = 8;
 const MIN_OAUTH_VAULT_ACTIVATE_CONCURRENCY: usize = 1;
+const OAUTH_VAULT_TERMINAL_AUTH_RETRY_LIMIT: u32 = 3;
 const MAX_OAUTH_VAULT_ACTIVATE_CONCURRENCY: usize = 64;
 const OAUTH_VAULT_ACTIVATE_MAX_RPS_ENV: &str = "CONTROL_PLANE_VAULT_ACTIVATE_MAX_RPS";
 const DEFAULT_OAUTH_VAULT_ACTIVATE_MAX_RPS: u32 = 1;
@@ -79,6 +82,10 @@ const ACTIVE_POOL_MIN_ENV: &str = "CONTROL_PLANE_ACTIVE_POOL_MIN";
 const DEFAULT_ACTIVE_POOL_MIN: usize = 4_500;
 const MIN_ACTIVE_POOL_MIN: usize = 1;
 const MAX_ACTIVE_POOL_MIN: usize = 100_000;
+const RUNTIME_POOL_CAP_ENV: &str = "CONTROL_PLANE_RUNTIME_POOL_CAP";
+const DEFAULT_RUNTIME_POOL_CAP: usize = 100_000;
+const MIN_RUNTIME_POOL_CAP: usize = 1;
+const MAX_RUNTIME_POOL_CAP: usize = 100_000;
 const PENDING_PURGE_DELAY_SEC_ENV: &str = "CONTROL_PLANE_PENDING_PURGE_DELAY_SEC";
 const DEFAULT_PENDING_PURGE_DELAY_SEC: i64 = 300;
 const MIN_PENDING_PURGE_DELAY_SEC: i64 = 5;
@@ -185,6 +192,14 @@ fn active_pool_min_from_env() -> usize {
         .and_then(|raw| raw.parse::<usize>().ok())
         .unwrap_or(DEFAULT_ACTIVE_POOL_MIN)
         .clamp(MIN_ACTIVE_POOL_MIN, MAX_ACTIVE_POOL_MIN)
+}
+
+fn runtime_pool_cap_from_env() -> usize {
+    std::env::var(RUNTIME_POOL_CAP_ENV)
+        .ok()
+        .and_then(|raw| raw.parse::<usize>().ok())
+        .unwrap_or(DEFAULT_RUNTIME_POOL_CAP)
+        .clamp(MIN_RUNTIME_POOL_CAP, MAX_RUNTIME_POOL_CAP)
 }
 
 fn pending_purge_delay_sec_from_env() -> i64 {
@@ -339,6 +354,21 @@ fn is_rate_limited_signal(error_code: &str, error_message: &str) -> bool {
     message.contains("rate limit") || message.contains("too many requests")
 }
 
+fn is_transient_upstream_error_signal(error_code: &str, error_message: &str) -> bool {
+    let code = normalize_health_error_code(error_code);
+    if matches!(code.as_str(), "upstream_unavailable" | "overloaded" | "timeout") {
+        return true;
+    }
+
+    let message = error_message.to_ascii_lowercase();
+    message.contains("service unavailable")
+        || message.contains("temporarily unavailable")
+        || message.contains("upstream unavailable")
+        || message.contains("timed out")
+        || message.contains("timeout")
+        || message.contains("connection reset")
+}
+
 fn is_fatal_refresh_error_code(error_code: Option<&str>) -> bool {
     let Some(error_code) = error_code else {
         return false;
@@ -417,6 +447,57 @@ fn rate_limit_failure_backoff_seconds(error_code: &str, error_message: &str) -> 
     }
 
     rate_limit_refresh_error_backoff_sec_from_env()
+}
+
+fn admission_probe_retry_after(
+    checked_at: DateTime<Utc>,
+    error_code: &str,
+    error_message: &str,
+) -> Option<DateTime<Utc>> {
+    if is_quota_error_signal(error_code, error_message)
+        || is_rate_limited_signal(error_code, error_message)
+    {
+        return Some(
+            checked_at
+                + Duration::seconds(rate_limit_failure_backoff_seconds(error_code, error_message)),
+        );
+    }
+    if is_transient_upstream_error_signal(error_code, error_message) {
+        return Some(checked_at + Duration::minutes(5));
+    }
+    None
+}
+
+fn admission_probe_retry_after_with_budget(
+    checked_at: DateTime<Utc>,
+    error_code: &str,
+    error_message: &str,
+    transient_retry_count: u32,
+) -> Option<DateTime<Utc>> {
+    if is_quota_error_signal(error_code, error_message)
+        || is_rate_limited_signal(error_code, error_message)
+    {
+        return admission_probe_retry_after(checked_at, error_code, error_message);
+    }
+
+    if !is_transient_upstream_error_signal(error_code, error_message) {
+        return None;
+    }
+
+    let delay = match transient_retry_count {
+        0 => Duration::minutes(5),
+        1 => Duration::minutes(30),
+        _ => Duration::hours(6),
+    };
+    Some(checked_at + delay)
+}
+
+fn can_retry_transient_admission_failure(transient_retry_count: u32) -> bool {
+    transient_retry_count < OAUTH_VAULT_TERMINAL_AUTH_RETRY_LIMIT
+}
+
+fn can_retry_fatal_activation_failure(failure_count: u32) -> bool {
+    failure_count < OAUTH_VAULT_TERMINAL_AUTH_RETRY_LIMIT
 }
 
 struct SeenOkRateLimitRefreshContext<'a> {
@@ -815,6 +896,69 @@ pub trait ControlPlaneStore: Send + Sync {
     async fn oauth_inventory_records(&self) -> Result<Vec<OAuthInventoryRecord>> {
         Err(anyhow!("oauth inventory records query is not implemented"))
     }
+    async fn oauth_runtime_pool_summary(&self) -> Result<OAuthRuntimePoolSummaryResponse> {
+        let accounts = self.list_upstream_accounts().await?;
+        let statuses = self
+            .oauth_account_statuses(accounts.iter().map(|item| item.id).collect())
+            .await?;
+        let mut summary = OAuthRuntimePoolSummaryResponse {
+            total: accounts.len() as u64,
+            ..Default::default()
+        };
+        for status in statuses {
+            match status.pool_state {
+                OAuthAccountPoolState::Active => summary.active = summary.active.saturating_add(1),
+                OAuthAccountPoolState::Quarantine => {
+                    summary.quarantine = summary.quarantine.saturating_add(1)
+                }
+                OAuthAccountPoolState::PendingPurge => {
+                    summary.pending_purge = summary.pending_purge.saturating_add(1)
+                }
+            }
+            match status.auth_provider {
+                UpstreamAuthProvider::OAuthRefreshToken => {
+                    summary.oauth_refresh_token = summary.oauth_refresh_token.saturating_add(1)
+                }
+                UpstreamAuthProvider::LegacyBearer => {
+                    summary.legacy_bearer = summary.legacy_bearer.saturating_add(1)
+                }
+            }
+            if status.rate_limits_fetched_at.is_some() {
+                summary.rate_limits_ready = summary.rate_limits_ready.saturating_add(1);
+            }
+        }
+        Ok(summary)
+    }
+    async fn oauth_health_signals_summary(&self) -> Result<OAuthHealthSignalsSummaryResponse> {
+        let accounts = self.list_upstream_accounts().await?;
+        let statuses = self
+            .oauth_account_statuses(accounts.iter().map(|item| item.id).collect())
+            .await?;
+        let mut summary = OAuthHealthSignalsSummaryResponse {
+            total: statuses.len() as u64,
+            ..Default::default()
+        };
+        for status in statuses {
+            match status.last_live_result_status {
+                Some(OAuthLiveResultStatus::Ok) => {
+                    summary.live_result_ok = summary.live_result_ok.saturating_add(1)
+                }
+                Some(OAuthLiveResultStatus::Failed) => {
+                    summary.live_result_failed = summary.live_result_failed.saturating_add(1)
+                }
+                None => {}
+            }
+
+            if matches!(status.pool_state, OAuthAccountPoolState::PendingPurge) {
+                summary.pending_purge_signals =
+                    summary.pending_purge_signals.saturating_add(1);
+            }
+            if matches!(status.pool_state, OAuthAccountPoolState::Quarantine) {
+                summary.quarantine_signals = summary.quarantine_signals.saturating_add(1);
+            }
+        }
+        Ok(summary)
+    }
     async fn upsert_routing_policy(
         &self,
         _req: UpsertRoutingPolicyRequest,
@@ -1065,6 +1209,18 @@ pub trait ControlPlaneStore: Send + Sync {
     ) -> Result<()> {
         Ok(())
     }
+    async fn record_upstream_account_live_result(
+        &self,
+        _account_id: Uuid,
+        _reported_at: DateTime<Utc>,
+        _status: OAuthLiveResultStatus,
+        _source: OAuthLiveResultSource,
+        _status_code: Option<u16>,
+        _error_code: Option<String>,
+        _error_message_preview: Option<String>,
+    ) -> Result<bool> {
+        Ok(false)
+    }
 }
 
 #[async_trait]
@@ -1164,6 +1320,16 @@ pub trait OAuthRuntimeStore: Send + Sync {
         rate_limits: Vec<OAuthRateLimitSnapshot>,
         observed_at: DateTime<Utc>,
     ) -> Result<()>;
+    async fn record_upstream_account_live_result(
+        &self,
+        account_id: Uuid,
+        reported_at: DateTime<Utc>,
+        status: OAuthLiveResultStatus,
+        source: OAuthLiveResultSource,
+        status_code: Option<u16>,
+        error_code: Option<String>,
+        error_message_preview: Option<String>,
+    ) -> Result<bool>;
 }
 
 #[async_trait]
@@ -1223,6 +1389,29 @@ where
             account_id,
             rate_limits,
             observed_at,
+        )
+        .await
+    }
+
+    async fn record_upstream_account_live_result(
+        &self,
+        account_id: Uuid,
+        reported_at: DateTime<Utc>,
+        status: OAuthLiveResultStatus,
+        source: OAuthLiveResultSource,
+        status_code: Option<u16>,
+        error_code: Option<String>,
+        error_message_preview: Option<String>,
+    ) -> Result<bool> {
+        ControlPlaneStore::record_upstream_account_live_result(
+            self,
+            account_id,
+            reported_at,
+            status,
+            source,
+            status_code,
+            error_code,
+            error_message_preview,
         )
         .await
     }
@@ -1490,6 +1679,18 @@ impl SessionProfileRecord {
 struct UpstreamAccountHealthStateRecord {
     seen_ok_at: Option<DateTime<Utc>>,
     #[serde(default)]
+    last_live_result_at: Option<DateTime<Utc>>,
+    #[serde(default)]
+    last_live_result_status: Option<OAuthLiveResultStatus>,
+    #[serde(default)]
+    last_live_result_source: Option<OAuthLiveResultSource>,
+    #[serde(default)]
+    last_live_result_status_code: Option<u16>,
+    #[serde(default)]
+    last_live_error_code: Option<String>,
+    #[serde(default)]
+    last_live_error_message_preview: Option<String>,
+    #[serde(default)]
     pool_state: AccountPoolState,
     #[serde(default)]
     quarantine_until: Option<DateTime<Utc>>,
@@ -1565,6 +1766,18 @@ struct OAuthRefreshTokenVaultRecord {
     admission_rate_limits: Vec<OAuthRateLimitSnapshot>,
     #[serde(default)]
     admission_rate_limits_expires_at: Option<DateTime<Utc>>,
+    #[serde(default)]
+    failure_stage: Option<OAuthInventoryFailureStage>,
+    #[serde(default)]
+    attempt_count: u32,
+    #[serde(default)]
+    transient_retry_count: u32,
+    #[serde(default)]
+    next_retry_at: Option<DateTime<Utc>>,
+    #[serde(default)]
+    retryable: bool,
+    #[serde(default)]
+    terminal_reason: Option<String>,
     created_at: DateTime<Utc>,
     updated_at: DateTime<Utc>,
 }

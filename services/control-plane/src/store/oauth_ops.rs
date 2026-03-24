@@ -5,7 +5,13 @@ struct InMemoryRateLimitRefreshTarget {
     account_id: Uuid,
     base_url: String,
     chatgpt_account_id: Option<String>,
-    access_token_enc: String,
+    token_source: InMemoryRateLimitRefreshTokenSource,
+}
+
+#[derive(Debug, Clone)]
+enum InMemoryRateLimitRefreshTokenSource {
+    EncryptedAccessToken(String),
+    BearerToken(String),
 }
 
 #[derive(Debug, Default)]
@@ -92,6 +98,74 @@ fn parse_jwt_exp_from_access_token(access_token: &str) -> Option<DateTime<Utc>> 
 }
 
 impl InMemoryStore {
+    fn build_rate_limit_refresh_target_inner(
+        &self,
+        account: &UpstreamAccount,
+        provider: &UpstreamAuthProvider,
+        credential: Option<&OAuthCredentialRecord>,
+        session_profile: Option<&SessionProfileRecord>,
+        cache: Option<&OAuthRateLimitCacheRecord>,
+        now: DateTime<Utc>,
+        due_only: bool,
+    ) -> Option<InMemoryRateLimitRefreshTarget> {
+        if !account.enabled {
+            return None;
+        }
+
+        let token_source = match provider {
+            UpstreamAuthProvider::OAuthRefreshToken => {
+                let credential = credential?;
+                if credential.token_expires_at <= now + Duration::seconds(OAUTH_MIN_VALID_SEC) {
+                    return None;
+                }
+                if credential.refresh_reused_detected {
+                    return None;
+                }
+                if matches!(credential.last_refresh_status, OAuthRefreshStatus::Failed)
+                    && is_fatal_refresh_error_code(
+                        credential.last_refresh_error_code.as_deref(),
+                    )
+                {
+                    return None;
+                }
+
+                InMemoryRateLimitRefreshTokenSource::EncryptedAccessToken(
+                    credential.access_token_enc.clone(),
+                )
+            }
+            UpstreamAuthProvider::LegacyBearer => {
+                let session_profile = session_profile?;
+                if account.mode != UpstreamMode::CodexOauth {
+                    return None;
+                }
+                if session_profile.credential_kind != SessionCredentialKind::OneTimeAccessToken {
+                    return None;
+                }
+                let token_expires_at = session_profile.token_expires_at?;
+                if token_expires_at <= now + Duration::seconds(OAUTH_MIN_VALID_SEC) {
+                    return None;
+                }
+                let bearer_token = account.bearer_token.trim();
+                if bearer_token.is_empty() {
+                    return None;
+                }
+
+                InMemoryRateLimitRefreshTokenSource::BearerToken(bearer_token.to_string())
+            }
+        };
+
+        if due_only && cache.is_some_and(|entry| entry.expires_at.is_some_and(|expires_at| expires_at > now)) {
+            return None;
+        }
+
+        Some(InMemoryRateLimitRefreshTarget {
+            account_id: account.id,
+            base_url: account.base_url.clone(),
+            chatgpt_account_id: account.chatgpt_account_id.clone(),
+            token_source,
+        })
+    }
+
     fn oauth_inventory_summary_inner(&self) -> OAuthInventorySummaryResponse {
         let mut summary = OAuthInventorySummaryResponse::default();
         let vault = self.oauth_refresh_token_vault.read().unwrap();
@@ -136,6 +210,12 @@ impl InMemoryStore {
                 admission_error_message: item.admission_error_message,
                 admission_rate_limits: item.admission_rate_limits,
                 admission_rate_limits_expires_at: item.admission_rate_limits_expires_at,
+                failure_stage: item.failure_stage,
+                attempt_count: item.attempt_count,
+                transient_retry_count: item.transient_retry_count,
+                next_retry_at: item.next_retry_at,
+                retryable: item.retryable,
+                terminal_reason: item.terminal_reason,
                 created_at: item.created_at,
                 updated_at: item.updated_at,
             })
@@ -175,6 +255,10 @@ impl InMemoryStore {
         fallback_token_expires_at: Option<DateTime<Utc>>,
         rate_limits: Vec<OAuthRateLimitSnapshot>,
         rate_limits_expires_at: Option<DateTime<Utc>>,
+        failure_stage: Option<OAuthInventoryFailureStage>,
+        retryable: bool,
+        terminal_reason: Option<String>,
+        increment_transient_retry_count: bool,
     ) {
         if let Some(item) = self.oauth_refresh_token_vault.write().unwrap().get_mut(&record_id) {
             item.status = status;
@@ -188,6 +272,14 @@ impl InMemoryStore {
             }
             item.admission_rate_limits = rate_limits;
             item.admission_rate_limits_expires_at = rate_limits_expires_at;
+            item.failure_stage = failure_stage;
+            item.attempt_count = item.attempt_count.saturating_add(1);
+            if increment_transient_retry_count {
+                item.transient_retry_count = item.transient_retry_count.saturating_add(1);
+            }
+            item.next_retry_at = retry_after;
+            item.retryable = retryable;
+            item.terminal_reason = terminal_reason;
             item.updated_at = checked_at;
         }
         self.revision.fetch_add(1, Ordering::Relaxed);
@@ -217,6 +309,10 @@ impl InMemoryStore {
                 None,
                 Vec::new(),
                 None,
+                Some(OAuthInventoryFailureStage::AdmissionProbe),
+                false,
+                Some("credential_cipher_missing".to_string()),
+                false,
             );
             return Ok(());
         };
@@ -233,6 +329,10 @@ impl InMemoryStore {
                 None,
                 Vec::new(),
                 None,
+                Some(OAuthInventoryFailureStage::AdmissionProbe),
+                true,
+                None,
+                false,
             );
             return Ok(());
         };
@@ -251,6 +351,10 @@ impl InMemoryStore {
                     None,
                     Vec::new(),
                     None,
+                    Some(OAuthInventoryFailureStage::AdmissionProbe),
+                    false,
+                    Some("credential_decrypt_failed".to_string()),
+                    false,
                 );
                 return Ok(());
             }
@@ -266,6 +370,10 @@ impl InMemoryStore {
                     None,
                     Vec::new(),
                     None,
+                    Some(OAuthInventoryFailureStage::AdmissionProbe),
+                    false,
+                    Some("credential_decrypt_failed".to_string()),
+                    false,
                 );
                 return Ok(());
             }
@@ -300,6 +408,10 @@ impl InMemoryStore {
                         None,
                         rate_limits,
                         rate_limits_expires_at,
+                        Some(OAuthInventoryFailureStage::AdmissionProbe),
+                        true,
+                        None,
+                        false,
                     );
                     return Ok(());
                 }
@@ -316,6 +428,10 @@ impl InMemoryStore {
                         fallback_expires_at,
                         rate_limits,
                         rate_limits_expires_at,
+                        Some(OAuthInventoryFailureStage::AdmissionProbe),
+                        true,
+                        None,
+                        false,
                     );
                     return Ok(());
                 }
@@ -330,28 +446,59 @@ impl InMemoryStore {
                     fallback_expires_at,
                     rate_limits,
                     rate_limits_expires_at,
+                    None,
+                    false,
+                    None,
+                    false,
                 );
                 Ok(())
             }
             Err(err) => {
                 let error_code = err.code().as_str().to_string();
                 let error_message = truncate_error_message(err.to_string());
-                let retry_after = if is_quota_error_signal(&error_code, &error_message)
-                    || is_rate_limited_signal(&error_code, &error_message)
+                let transient_signal =
+                    is_transient_upstream_error_signal(&error_code, &error_message);
+                let current_transient_retry_count = record.transient_retry_count;
+                let retry_after = if transient_signal
+                    && can_retry_transient_admission_failure(current_transient_retry_count)
                 {
-                    Some(checked_at + Duration::seconds(rate_limit_failure_backoff_seconds(
+                    admission_probe_retry_after_with_budget(
+                        checked_at,
                         &error_code,
                         &error_message,
-                    )))
-                } else {
+                        current_transient_retry_count,
+                    )
+                } else if transient_signal {
                     None
+                } else {
+                    admission_probe_retry_after_with_budget(
+                        checked_at,
+                        &error_code,
+                        &error_message,
+                        current_transient_retry_count,
+                    )
                 };
-                let status = if retry_after.is_some() {
+                let status = if retry_after.is_some()
+                    && (is_quota_error_signal(&error_code, &error_message)
+                        || is_rate_limited_signal(&error_code, &error_message))
+                {
                     OAuthVaultRecordStatus::NoQuota
                 } else if is_auth_error_signal(&error_code, &error_message) {
                     OAuthVaultRecordStatus::NeedsRefresh
                 } else {
                     OAuthVaultRecordStatus::Failed
+                };
+                let retryable = match status {
+                    OAuthVaultRecordStatus::Ready => false,
+                    OAuthVaultRecordStatus::NeedsRefresh => true,
+                    OAuthVaultRecordStatus::NoQuota => retry_after.is_some(),
+                    OAuthVaultRecordStatus::Failed => retry_after.is_some(),
+                    OAuthVaultRecordStatus::Queued => false,
+                };
+                let terminal_reason = if retryable {
+                    None
+                } else {
+                    Some(error_code.clone())
                 };
                 self.update_oauth_vault_admission_result(
                     record_id,
@@ -364,6 +511,10 @@ impl InMemoryStore {
                     fallback_expires_at,
                     Vec::new(),
                     retry_after,
+                    Some(OAuthInventoryFailureStage::AdmissionProbe),
+                    retryable,
+                    terminal_reason,
+                    transient_signal && retry_after.is_some(),
                 );
                 Ok(())
             }
@@ -388,6 +539,63 @@ impl InMemoryStore {
         match status {
             OAuthVaultRecordStatus::Ready => OAuthVaultRecordStatus::NeedsRefresh,
             other => other,
+        }
+    }
+
+    fn mark_oauth_vault_activation_failed_inner(
+        &self,
+        record_id: Uuid,
+        candidate_status: OAuthVaultRecordStatus,
+        error_code: String,
+        error_message: String,
+    ) {
+        let now = Utc::now();
+        let fatal_auth = is_fatal_refresh_error_code(Some(error_code.as_str()));
+        let terminal_config_error = matches!(
+            normalize_health_error_code(&error_code).as_str(),
+            "credential_cipher_missing" | "credential_decrypt_failed"
+        );
+
+        let mut vault = self.oauth_refresh_token_vault.write().unwrap();
+        if let Some(item) = vault.get_mut(&record_id) {
+            let next_failure_count = item.failure_count.saturating_add(1);
+            let allow_retry = if terminal_config_error {
+                false
+            } else if fatal_auth {
+                can_retry_fatal_activation_failure(next_failure_count)
+            } else {
+                true
+            };
+
+            item.status = if allow_retry {
+                Self::oauth_vault_activation_fallback_status(candidate_status)
+            } else {
+                OAuthVaultRecordStatus::Failed
+            };
+            item.failure_count = next_failure_count;
+            item.last_error_code = Some(error_code.clone());
+            item.last_error_message = Some(error_message);
+            item.failure_stage = Some(OAuthInventoryFailureStage::ActivationRefresh);
+            item.attempt_count = item.attempt_count.saturating_add(1);
+            item.updated_at = now;
+            item.retryable = allow_retry;
+            item.terminal_reason = if allow_retry {
+                None
+            } else {
+                Some(error_code)
+            };
+
+            if allow_retry {
+                let backoff = vault_activation_backoff(item.failure_count);
+                let retry_at = now + backoff;
+                item.backoff_until = Some(retry_at);
+                item.next_attempt_at = Some(retry_at);
+                item.next_retry_at = Some(retry_at);
+            } else {
+                item.backoff_until = None;
+                item.next_attempt_at = None;
+                item.next_retry_at = None;
+            }
         }
     }
 
@@ -776,6 +984,7 @@ impl InMemoryStore {
         let accounts = self.accounts.read().unwrap().clone();
         let providers = self.account_auth_providers.read().unwrap().clone();
         let credentials = self.oauth_credentials.read().unwrap().clone();
+        let session_profiles = self.session_profiles.read().unwrap().clone();
         let caches = self.oauth_rate_limit_caches.read().unwrap().clone();
 
         let mut targets = accounts
@@ -784,42 +993,16 @@ impl InMemoryStore {
                 if after_id.is_some_and(|cursor| account.id <= cursor) {
                     return None;
                 }
-                if !account.enabled {
-                    return None;
-                }
-                if !providers
-                    .get(&account.id)
-                    .is_some_and(|provider| *provider == UpstreamAuthProvider::OAuthRefreshToken)
-                {
-                    return None;
-                }
-
-                let credential = credentials.get(&account.id)?;
-                if credential.token_expires_at <= now + Duration::seconds(OAUTH_MIN_VALID_SEC) {
-                    return None;
-                }
-                if credential.refresh_reused_detected {
-                    return None;
-                }
-                if matches!(credential.last_refresh_status, OAuthRefreshStatus::Failed)
-                    && is_fatal_refresh_error_code(
-                        credential.last_refresh_error_code.as_deref(),
-                    )
-                {
-                    return None;
-                }
-
-                let cache = caches.get(&account.id).cloned().unwrap_or_default();
-                if due_only && cache.expires_at.is_some_and(|expires_at| expires_at > now) {
-                    return None;
-                }
-
-                Some(InMemoryRateLimitRefreshTarget {
-                    account_id: account.id,
-                    base_url: account.base_url.clone(),
-                    chatgpt_account_id: account.chatgpt_account_id.clone(),
-                    access_token_enc: credential.access_token_enc.clone(),
-                })
+                let provider = providers.get(&account.id)?;
+                self.build_rate_limit_refresh_target_inner(
+                    account,
+                    provider,
+                    credentials.get(&account.id),
+                    session_profiles.get(&account.id),
+                    caches.get(&account.id),
+                    now,
+                    due_only,
+                )
             })
             .collect::<Vec<_>>();
 
@@ -833,23 +1016,21 @@ impl InMemoryStore {
         let accounts = self.accounts.read().unwrap().clone();
         let providers = self.account_auth_providers.read().unwrap().clone();
         let credentials = self.oauth_credentials.read().unwrap().clone();
+        let session_profiles = self.session_profiles.read().unwrap().clone();
 
         accounts
             .values()
-            .filter(|account| account.enabled)
-            .filter(|account| {
-                providers
-                    .get(&account.id)
-                    .is_some_and(|provider| *provider == UpstreamAuthProvider::OAuthRefreshToken)
-            })
-            .filter_map(|account| credentials.get(&account.id))
-            .filter(|credential| {
-                credential.token_expires_at > now + Duration::seconds(OAUTH_MIN_VALID_SEC)
-                    && !credential.refresh_reused_detected
-                    && !(matches!(credential.last_refresh_status, OAuthRefreshStatus::Failed)
-                        && is_fatal_refresh_error_code(
-                            credential.last_refresh_error_code.as_deref(),
-                        ))
+            .filter_map(|account| {
+                let provider = providers.get(&account.id)?;
+                self.build_rate_limit_refresh_target_inner(
+                    account,
+                    provider,
+                    credentials.get(&account.id),
+                    session_profiles.get(&account.id),
+                    None,
+                    now,
+                    false,
+                )
             })
             .count() as u64
     }
@@ -858,15 +1039,22 @@ impl InMemoryStore {
         &self,
         target: &InMemoryRateLimitRefreshTarget,
     ) -> Result<Vec<OAuthRateLimitSnapshot>, (String, String)> {
-        let Some(cipher) = self.credential_cipher.as_ref() else {
-            return Err((
-                "credential_cipher_missing".to_string(),
-                "oauth credential cipher is not configured".to_string(),
-            ));
+        let access_token = match &target.token_source {
+            InMemoryRateLimitRefreshTokenSource::EncryptedAccessToken(access_token_enc) => {
+                let Some(cipher) = self.credential_cipher.as_ref() else {
+                    return Err((
+                        "credential_cipher_missing".to_string(),
+                        "oauth credential cipher is not configured".to_string(),
+                    ));
+                };
+                cipher
+                    .decrypt(access_token_enc)
+                    .map_err(|err| ("credential_decrypt_failed".to_string(), err.to_string()))?
+            }
+            InMemoryRateLimitRefreshTokenSource::BearerToken(access_token) => {
+                access_token.clone()
+            }
         };
-        let access_token = cipher
-            .decrypt(&target.access_token_enc)
-            .map_err(|err| ("credential_decrypt_failed".to_string(), err.to_string()))?;
         if access_token.trim().is_empty() {
             return Ok(Vec::new());
         }
@@ -1152,6 +1340,12 @@ impl InMemoryStore {
             admission_error_message: None,
             admission_rate_limits: Vec::new(),
             admission_rate_limits_expires_at: None,
+            failure_stage: None,
+            attempt_count: 0,
+            transient_retry_count: 0,
+            next_retry_at: Some(now),
+            retryable: true,
+            terminal_reason: None,
             created_at,
             updated_at: now,
         };
@@ -1224,10 +1418,57 @@ impl InMemoryStore {
         items
     }
 
+    fn oauth_vault_admission_reprobe_candidates_inner(
+        &self,
+        now: DateTime<Utc>,
+        limit: usize,
+    ) -> Vec<Uuid> {
+        let mut items = self
+            .oauth_refresh_token_vault
+            .read()
+            .unwrap()
+            .values()
+            .filter(|item| {
+                matches!(
+                    item.status,
+                    OAuthVaultRecordStatus::NoQuota | OAuthVaultRecordStatus::Failed
+                ) && item
+                    .admission_retry_after
+                    .is_some_and(|retry_after| retry_after <= now)
+            })
+            .map(|item| (item.admission_retry_after, item.created_at, item.id))
+            .collect::<Vec<_>>();
+        items.sort_by(|left, right| {
+            left.0
+                .cmp(&right.0)
+                .then_with(|| left.1.cmp(&right.1))
+                .then_with(|| left.2.cmp(&right.2))
+        });
+        items.truncate(limit);
+        items.into_iter().map(|item| item.2).collect()
+    }
+
     pub(super) async fn activate_oauth_refresh_token_vault_inner(&self) -> Result<u64> {
+        self.purge_expired_one_time_accounts_inner();
+        let reprobe_limit = oauth_vault_activate_batch_size_from_env();
+        for record_id in self.oauth_vault_admission_reprobe_candidates_inner(Utc::now(), reprobe_limit) {
+            self.probe_oauth_vault_admission_inner(record_id).await?;
+        }
         let active_count = self.oauth_active_account_count_inner();
         let target = active_pool_target_from_env();
         let active_min = active_pool_min_from_env().min(target);
+        let runtime_cap = runtime_pool_cap_from_env();
+        let runtime_count = self.runtime_pool_account_count_inner();
+        if runtime_count >= runtime_cap {
+            tracing::warn!(
+                runtime_count,
+                runtime_cap,
+                active_count,
+                target,
+                "sqlite runtime pool reached configured cap; skipping oauth vault activation"
+            );
+            return Ok(0);
+        }
         if active_count >= target {
             return Ok(0);
         }
@@ -1242,7 +1483,8 @@ impl InMemoryStore {
 
         let needed = target.saturating_sub(active_count);
         let batch_size = oauth_vault_activate_batch_size_from_env();
-        let limit = needed.min(batch_size);
+        let headroom = runtime_cap.saturating_sub(runtime_count);
+        let limit = needed.min(batch_size).min(headroom);
         if limit == 0 {
             return Ok(0);
         }
@@ -1276,27 +1518,12 @@ impl InMemoryStore {
                         Err(err) => {
                             let error_message = truncate_error_message(err.to_string());
                             let error_code = "vault_decrypt_failed".to_string();
-                            let fatal = is_fatal_refresh_error_code(Some(error_code.as_str()));
-                            let mut vault = self.oauth_refresh_token_vault.write().unwrap();
-                            if let Some(item) = vault.get_mut(&candidate.id) {
-                                item.status = if fatal {
-                                    OAuthVaultRecordStatus::Failed
-                                } else {
-                                    Self::oauth_vault_activation_fallback_status(candidate.status)
-                                };
-                                item.failure_count = item.failure_count.saturating_add(1);
-                                item.last_error_code = Some(error_code);
-                                item.last_error_message = Some(error_message);
-                                item.updated_at = Utc::now();
-                                if fatal {
-                                    item.backoff_until = None;
-                                    item.next_attempt_at = None;
-                                } else {
-                                    let backoff = vault_activation_backoff(item.failure_count);
-                                    item.backoff_until = Some(Utc::now() + backoff);
-                                    item.next_attempt_at = item.backoff_until;
-                                }
-                            }
+                            self.mark_oauth_vault_activation_failed_inner(
+                                candidate.id,
+                                candidate.status,
+                                error_code,
+                                error_message,
+                            );
                             continue;
                         }
                     };
@@ -1339,27 +1566,12 @@ impl InMemoryStore {
                     let error_message = truncate_error_message(err.to_string());
                     let error_code =
                         classify_vault_activation_error_code(error_message.as_str()).to_string();
-                    let fatal = is_fatal_refresh_error_code(Some(error_code.as_str()));
-                    let mut vault = self.oauth_refresh_token_vault.write().unwrap();
-                    if let Some(item) = vault.get_mut(&candidate.id) {
-                        item.status = if fatal {
-                            OAuthVaultRecordStatus::Failed
-                        } else {
-                            Self::oauth_vault_activation_fallback_status(candidate.status)
-                        };
-                        item.failure_count = item.failure_count.saturating_add(1);
-                        item.last_error_code = Some(error_code);
-                        item.last_error_message = Some(error_message);
-                        item.updated_at = Utc::now();
-                        if fatal {
-                            item.backoff_until = None;
-                            item.next_attempt_at = None;
-                        } else {
-                            let backoff = vault_activation_backoff(item.failure_count);
-                            item.backoff_until = Some(Utc::now() + backoff);
-                            item.next_attempt_at = item.backoff_until;
-                        }
-                    }
+                    self.mark_oauth_vault_activation_failed_inner(
+                        candidate.id,
+                        candidate.status,
+                        error_code,
+                        error_message,
+                    );
                 }
             }
         }
@@ -1724,7 +1936,7 @@ impl InMemoryStore {
     ) -> Result<OAuthAccountStatusResponse> {
         let provider = self.account_auth_provider(account_id);
         if provider != UpstreamAuthProvider::OAuthRefreshToken {
-            return Err(anyhow!("account is not an oauth account"));
+            return self.oauth_account_status_inner(account_id).await;
         }
 
         let mut account = self

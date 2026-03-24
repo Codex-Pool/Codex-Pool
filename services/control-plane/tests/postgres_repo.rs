@@ -586,9 +586,13 @@ async fn postgres_repo_queue_oauth_refresh_token_marks_ready_inventory_without_r
     let cipher_key = base64::engine::general_purpose::STANDARD.encode([21_u8; 32]);
     let cipher = CredentialCipher::from_base64_key(&cipher_key).unwrap();
     let oauth_client = Arc::new(AdmissionProbeOAuthClient::default());
-    let (repo, database_name) =
-        create_temp_repo_with_oauth(&db_url, "cp_pg_ready_inventory", oauth_client.clone(), cipher)
-            .await;
+    let (repo, database_name) = create_temp_repo_with_oauth(
+        &db_url,
+        "cp_pg_ready_inventory",
+        oauth_client.clone(),
+        cipher,
+    )
+    .await;
 
     let inserted = repo
         .queue_oauth_refresh_token(ImportOAuthRefreshTokenRequest {
@@ -684,7 +688,8 @@ async fn postgres_repo_queue_oauth_refresh_token_marks_no_quota_inventory() {
 }
 
 #[tokio::test]
-async fn postgres_repo_activation_uses_ready_without_refresh_and_needs_refresh_with_single_refresh() {
+async fn postgres_repo_activation_uses_ready_without_refresh_and_needs_refresh_with_single_refresh()
+{
     let Some(db_url) = test_db_url() else {
         eprintln!(
             "skip postgres_repo_activation_uses_ready_without_refresh_and_needs_refresh_with_single_refresh: set CONTROL_PLANE_DATABASE_URL"

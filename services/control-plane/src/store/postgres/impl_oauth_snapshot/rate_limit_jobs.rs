@@ -311,6 +311,12 @@ impl PostgresStore {
             quarantine_reason: None,
             pending_purge_at: None,
             pending_purge_reason: None,
+            last_live_result_at: None,
+            last_live_result_status: None,
+            last_live_result_source: None,
+            last_live_result_status_code: None,
+            last_live_error_code: None,
+            last_live_error_message_preview: None,
             supported_models,
             rate_limits,
             rate_limits_fetched_at,
@@ -610,6 +616,12 @@ impl PostgresStore {
                     quarantine_reason: None,
                     pending_purge_at: None,
                     pending_purge_reason: None,
+                    last_live_result_at: None,
+                    last_live_result_status: None,
+                    last_live_result_source: None,
+                    last_live_result_status_code: None,
+                    last_live_error_code: None,
+                    last_live_error_message_preview: None,
                     supported_models: item.supported_models,
                     rate_limits: item.rate_limits,
                     rate_limits_fetched_at: item.rate_limits_fetched_at,
@@ -641,36 +653,55 @@ impl PostgresStore {
             r#"
             SELECT
                 a.id,
+                a.auth_provider,
                 a.base_url,
                 a.chatgpt_account_id,
-                c.access_token_enc
+                c.access_token_enc,
+                a.bearer_token
             FROM upstream_accounts a
-            INNER JOIN upstream_account_oauth_credentials c ON c.account_id = a.id
+            LEFT JOIN upstream_account_oauth_credentials c ON c.account_id = a.id
+            LEFT JOIN upstream_account_session_profiles p ON p.account_id = a.id
             LEFT JOIN upstream_account_rate_limit_snapshots rl ON rl.account_id = a.id
             WHERE
-                a.auth_provider = $1
-                AND a.pool_state = $2
+                a.pool_state = $2
                 AND a.enabled = true
-                AND c.token_expires_at > $3
-                AND COALESCE(c.refresh_reused_detected, false) = false
-                AND NOT (
-                    c.last_refresh_status = 'failed'
-                    AND LOWER(COALESCE(c.last_refresh_error_code, '')) IN (
-                        'refresh_token_reused',
-                        'refresh_token_revoked',
-                        'invalid_refresh_token',
-                        'missing_client_id',
-                        'unauthorized_client'
+                AND (
+                    (
+                        a.auth_provider = $1
+                        AND c.token_expires_at > $3
+                        AND COALESCE(c.refresh_reused_detected, false) = false
+                        AND NOT (
+                            c.last_refresh_status = 'failed'
+                            AND LOWER(COALESCE(c.last_refresh_error_code, '')) IN (
+                                'refresh_token_reused',
+                                'refresh_token_revoked',
+                                'invalid_refresh_token',
+                                'missing_client_id',
+                                'unauthorized_client'
+                            )
+                        )
+                    )
+                    OR (
+                        a.auth_provider = $4
+                        AND a.mode = $5
+                        AND p.credential_kind = $6
+                        AND p.token_expires_at > $3
+                        AND NULLIF(BTRIM(COALESCE(a.bearer_token, '')), '') IS NOT NULL
                     )
                 )
-                AND (rl.expires_at IS NULL OR rl.expires_at <= $4)
+                AND (rl.expires_at IS NULL OR rl.expires_at <= $7)
             ORDER BY COALESCE(rl.expires_at, 'epoch'::timestamptz) ASC, a.created_at ASC
-            LIMIT $5
+            LIMIT $8
             "#,
         )
         .bind(AUTH_PROVIDER_OAUTH_REFRESH_TOKEN)
         .bind(POOL_STATE_ACTIVE)
         .bind(now + Duration::seconds(OAUTH_MIN_VALID_SEC))
+        .bind(AUTH_PROVIDER_LEGACY_BEARER)
+        .bind(upstream_mode_to_db(&UpstreamMode::CodexOauth))
+        .bind(session_credential_kind_to_db(
+            &SessionCredentialKind::OneTimeAccessToken,
+        ))
         .bind(now)
         .bind(i64::try_from(limit).unwrap_or(i64::MAX))
         .fetch_all(&self.pool)
@@ -681,9 +712,13 @@ impl PostgresStore {
         for row in rows {
             targets.push(RateLimitRefreshTarget {
                 account_id: row.try_get::<Uuid, _>("id")?,
+                auth_provider: parse_upstream_auth_provider(
+                    row.try_get::<String, _>("auth_provider")?.as_str(),
+                )?,
                 base_url: row.try_get::<String, _>("base_url")?,
                 chatgpt_account_id: row.try_get::<Option<String>, _>("chatgpt_account_id")?,
                 access_token_enc: row.try_get::<Option<String>, _>("access_token_enc")?,
+                bearer_token: row.try_get::<Option<String>, _>("bearer_token")?,
             });
         }
         Ok(targets)
@@ -699,35 +734,54 @@ impl PostgresStore {
             r#"
             SELECT
                 a.id,
+                a.auth_provider,
                 a.base_url,
                 a.chatgpt_account_id,
-                c.access_token_enc
+                c.access_token_enc,
+                a.bearer_token
             FROM upstream_accounts a
-            INNER JOIN upstream_account_oauth_credentials c ON c.account_id = a.id
+            LEFT JOIN upstream_account_oauth_credentials c ON c.account_id = a.id
+            LEFT JOIN upstream_account_session_profiles p ON p.account_id = a.id
             WHERE
-                a.auth_provider = $1
-                AND a.pool_state = $2
+                a.pool_state = $2
                 AND a.enabled = true
-                AND c.token_expires_at > $3
-                AND COALESCE(c.refresh_reused_detected, false) = false
-                AND NOT (
-                    c.last_refresh_status = 'failed'
-                    AND LOWER(COALESCE(c.last_refresh_error_code, '')) IN (
-                        'refresh_token_reused',
-                        'refresh_token_revoked',
-                        'invalid_refresh_token',
-                        'missing_client_id',
-                        'unauthorized_client'
+                AND (
+                    (
+                        a.auth_provider = $1
+                        AND c.token_expires_at > $3
+                        AND COALESCE(c.refresh_reused_detected, false) = false
+                        AND NOT (
+                            c.last_refresh_status = 'failed'
+                            AND LOWER(COALESCE(c.last_refresh_error_code, '')) IN (
+                                'refresh_token_reused',
+                                'refresh_token_revoked',
+                                'invalid_refresh_token',
+                                'missing_client_id',
+                                'unauthorized_client'
+                            )
+                        )
+                    )
+                    OR (
+                        a.auth_provider = $4
+                        AND a.mode = $5
+                        AND p.credential_kind = $6
+                        AND p.token_expires_at > $3
+                        AND NULLIF(BTRIM(COALESCE(a.bearer_token, '')), '') IS NOT NULL
                     )
                 )
-                AND ($4::uuid IS NULL OR a.id > $4)
+                AND ($7::uuid IS NULL OR a.id > $7)
             ORDER BY a.id ASC
-            LIMIT $5
+            LIMIT $8
             "#,
         )
         .bind(AUTH_PROVIDER_OAUTH_REFRESH_TOKEN)
         .bind(POOL_STATE_ACTIVE)
         .bind(now + Duration::seconds(OAUTH_MIN_VALID_SEC))
+        .bind(AUTH_PROVIDER_LEGACY_BEARER)
+        .bind(upstream_mode_to_db(&UpstreamMode::CodexOauth))
+        .bind(session_credential_kind_to_db(
+            &SessionCredentialKind::OneTimeAccessToken,
+        ))
         .bind(after_id)
         .bind(i64::try_from(limit).unwrap_or(i64::MAX))
         .fetch_all(&self.pool)
@@ -738,9 +792,13 @@ impl PostgresStore {
         for row in rows {
             targets.push(RateLimitRefreshTarget {
                 account_id: row.try_get::<Uuid, _>("id")?,
+                auth_provider: parse_upstream_auth_provider(
+                    row.try_get::<String, _>("auth_provider")?.as_str(),
+                )?,
                 base_url: row.try_get::<String, _>("base_url")?,
                 chatgpt_account_id: row.try_get::<Option<String>, _>("chatgpt_account_id")?,
                 access_token_enc: row.try_get::<Option<String>, _>("access_token_enc")?,
+                bearer_token: row.try_get::<Option<String>, _>("bearer_token")?,
             });
         }
         Ok(targets)
@@ -927,21 +985,53 @@ impl PostgresStore {
             r#"
             SELECT
                 a.id,
+                a.auth_provider,
                 a.base_url,
                 a.chatgpt_account_id,
-                c.access_token_enc
+                c.access_token_enc,
+                a.bearer_token
             FROM upstream_accounts a
-            INNER JOIN upstream_account_oauth_credentials c ON c.account_id = a.id
+            LEFT JOIN upstream_account_oauth_credentials c ON c.account_id = a.id
+            LEFT JOIN upstream_account_session_profiles p ON p.account_id = a.id
             WHERE
                 a.id = $1
-                AND a.auth_provider = $2
-                AND a.pool_state = $3
+                AND a.pool_state = $2
                 AND a.enabled = true
+                AND (
+                    (
+                        a.auth_provider = $3
+                        AND c.token_expires_at > $4
+                        AND COALESCE(c.refresh_reused_detected, false) = false
+                        AND NOT (
+                            c.last_refresh_status = 'failed'
+                            AND LOWER(COALESCE(c.last_refresh_error_code, '')) IN (
+                                'refresh_token_reused',
+                                'refresh_token_revoked',
+                                'invalid_refresh_token',
+                                'missing_client_id',
+                                'unauthorized_client'
+                            )
+                        )
+                    )
+                    OR (
+                        a.auth_provider = $5
+                        AND a.mode = $6
+                        AND p.credential_kind = $7
+                        AND p.token_expires_at > $4
+                        AND NULLIF(BTRIM(COALESCE(a.bearer_token, '')), '') IS NOT NULL
+                    )
+                )
             "#,
         )
         .bind(account_id)
-        .bind(AUTH_PROVIDER_OAUTH_REFRESH_TOKEN)
         .bind(POOL_STATE_ACTIVE)
+        .bind(AUTH_PROVIDER_OAUTH_REFRESH_TOKEN)
+        .bind(Utc::now() + Duration::seconds(OAUTH_MIN_VALID_SEC))
+        .bind(AUTH_PROVIDER_LEGACY_BEARER)
+        .bind(upstream_mode_to_db(&UpstreamMode::CodexOauth))
+        .bind(session_credential_kind_to_db(
+            &SessionCredentialKind::OneTimeAccessToken,
+        ))
         .fetch_optional(&self.pool)
         .await
         .context("failed to load oauth rate-limit refresh target by account id")?
@@ -949,9 +1039,13 @@ impl PostgresStore {
 
         Ok(RateLimitRefreshTarget {
             account_id: row.try_get::<Uuid, _>("id")?,
+            auth_provider: parse_upstream_auth_provider(
+                row.try_get::<String, _>("auth_provider")?.as_str(),
+            )?,
             base_url: row.try_get::<String, _>("base_url")?,
             chatgpt_account_id: row.try_get::<Option<String>, _>("chatgpt_account_id")?,
             access_token_enc: row.try_get::<Option<String>, _>("access_token_enc")?,
+            bearer_token: row.try_get::<Option<String>, _>("bearer_token")?,
         })
     }
 
@@ -964,29 +1058,64 @@ impl PostgresStore {
             r#"
             SELECT
                 a.id,
+                a.auth_provider,
+                a.mode,
                 a.base_url,
                 a.chatgpt_account_id,
+                a.bearer_token,
                 c.access_token_enc,
                 c.token_expires_at,
                 c.last_refresh_status,
                 c.refresh_reused_detected,
                 c.last_refresh_error_code,
+                p.credential_kind,
+                p.token_expires_at AS profile_token_expires_at,
                 rl.expires_at AS rate_limits_expires_at,
                 rl.last_error_code AS rate_limits_last_error_code,
                 rl.last_error_message AS rate_limits_last_error
             FROM upstream_accounts a
-            INNER JOIN upstream_account_oauth_credentials c ON c.account_id = a.id
+            LEFT JOIN upstream_account_oauth_credentials c ON c.account_id = a.id
+            LEFT JOIN upstream_account_session_profiles p ON p.account_id = a.id
             LEFT JOIN upstream_account_rate_limit_snapshots rl ON rl.account_id = a.id
             WHERE
                 a.id = $1
-                AND a.auth_provider = $2
-                AND a.pool_state = $3
+                AND a.pool_state = $2
                 AND a.enabled = true
+                AND (
+                    (
+                        a.auth_provider = $3
+                        AND c.token_expires_at > $4
+                        AND COALESCE(c.refresh_reused_detected, false) = false
+                        AND NOT (
+                            c.last_refresh_status = 'failed'
+                            AND LOWER(COALESCE(c.last_refresh_error_code, '')) IN (
+                                'refresh_token_reused',
+                                'refresh_token_revoked',
+                                'invalid_refresh_token',
+                                'missing_client_id',
+                                'unauthorized_client'
+                            )
+                        )
+                    )
+                    OR (
+                        a.auth_provider = $5
+                        AND a.mode = $6
+                        AND p.credential_kind = $7
+                        AND p.token_expires_at > $4
+                        AND NULLIF(BTRIM(COALESCE(a.bearer_token, '')), '') IS NOT NULL
+                    )
+                )
             "#,
         )
         .bind(account_id)
-        .bind(AUTH_PROVIDER_OAUTH_REFRESH_TOKEN)
         .bind(POOL_STATE_ACTIVE)
+        .bind(AUTH_PROVIDER_OAUTH_REFRESH_TOKEN)
+        .bind(now + Duration::seconds(OAUTH_MIN_VALID_SEC))
+        .bind(AUTH_PROVIDER_LEGACY_BEARER)
+        .bind(upstream_mode_to_db(&UpstreamMode::CodexOauth))
+        .bind(session_credential_kind_to_db(
+            &SessionCredentialKind::OneTimeAccessToken,
+        ))
         .fetch_optional(&self.pool)
         .await
         .context("failed to load seen_ok oauth rate-limit refresh target")?;
@@ -995,16 +1124,42 @@ impl PostgresStore {
             return Ok(());
         };
 
-        let token_expires_at = row.try_get::<Option<DateTime<Utc>>, _>("token_expires_at")?;
-        let refresh_reused_detected = row
-            .try_get::<Option<bool>, _>("refresh_reused_detected")?
-            .unwrap_or(false);
-        let last_refresh_status = parse_oauth_refresh_status(
-            row.try_get::<Option<String>, _>("last_refresh_status")?
-                .unwrap_or_else(|| "never".to_string())
-                .as_str(),
+        let auth_provider = parse_upstream_auth_provider(
+            row.try_get::<String, _>("auth_provider")?.as_str(),
         )?;
-        let last_refresh_error_code = row.try_get::<Option<String>, _>("last_refresh_error_code")?;
+        let mode = parse_upstream_mode(row.try_get::<String, _>("mode")?.as_str())?;
+        let profile_credential_kind = row
+            .try_get::<Option<String>, _>("credential_kind")?
+            .map(|raw| parse_session_credential_kind(raw.as_str()))
+            .transpose()?;
+        let (token_expires_at, last_refresh_status, refresh_reused_detected, last_refresh_error_code) =
+            match auth_provider {
+                UpstreamAuthProvider::OAuthRefreshToken => (
+                    row.try_get::<Option<DateTime<Utc>>, _>("token_expires_at")?,
+                    parse_oauth_refresh_status(
+                        row.try_get::<Option<String>, _>("last_refresh_status")?
+                            .unwrap_or_else(|| "never".to_string())
+                            .as_str(),
+                    )?,
+                    row.try_get::<Option<bool>, _>("refresh_reused_detected")?
+                        .unwrap_or(false),
+                    row.try_get::<Option<String>, _>("last_refresh_error_code")?,
+                ),
+                UpstreamAuthProvider::LegacyBearer => {
+                    if mode != UpstreamMode::CodexOauth
+                        || profile_credential_kind
+                            != Some(SessionCredentialKind::OneTimeAccessToken)
+                    {
+                        return Ok(());
+                    }
+                    (
+                        row.try_get::<Option<DateTime<Utc>>, _>("profile_token_expires_at")?,
+                        OAuthRefreshStatus::Never,
+                        false,
+                        None,
+                    )
+                }
+            };
         let rate_limits_expires_at =
             row.try_get::<Option<DateTime<Utc>>, _>("rate_limits_expires_at")?;
         let rate_limits_last_error_code =
@@ -1027,9 +1182,11 @@ impl PostgresStore {
 
         let target = RateLimitRefreshTarget {
             account_id,
+            auth_provider,
             base_url: row.try_get::<String, _>("base_url")?,
             chatgpt_account_id: row.try_get::<Option<String>, _>("chatgpt_account_id")?,
             access_token_enc: row.try_get::<Option<String>, _>("access_token_enc")?,
+            bearer_token: row.try_get::<Option<String>, _>("bearer_token")?,
         };
 
         let stats = self
@@ -1073,8 +1230,9 @@ impl PostgresStore {
                     let fetched_at = Utc::now();
                     match self
                         .fetch_live_rate_limits_result(
-                            &UpstreamAuthProvider::OAuthRefreshToken,
+                            &target.auth_provider,
                             target.access_token_enc,
+                            target.bearer_token,
                             Some(target.base_url),
                             target.chatgpt_account_id,
                         )
@@ -1089,10 +1247,12 @@ impl PostgresStore {
                             .await
                         }
                         Err((error_code, error_message)) => {
-                            let should_try_refresh = should_trigger_refresh_after_rate_limit_failure(
-                                &error_code,
-                                &error_message,
-                            );
+                            let should_try_refresh =
+                                target.auth_provider == UpstreamAuthProvider::OAuthRefreshToken
+                                    && should_trigger_refresh_after_rate_limit_failure(
+                                        &error_code,
+                                        &error_message,
+                                    );
                             if should_try_refresh {
                                 tracing::info!(
                                     account_id = %account_id,
@@ -1129,8 +1289,9 @@ impl PostgresStore {
                                     let refetched_at = Utc::now();
                                     return match self
                                         .fetch_live_rate_limits_result(
-                                            &UpstreamAuthProvider::OAuthRefreshToken,
+                                            &refreshed_target.auth_provider,
                                             refreshed_target.access_token_enc,
+                                            refreshed_target.bearer_token,
                                             Some(refreshed_target.base_url),
                                             refreshed_target.chatgpt_account_id,
                                         )

@@ -1560,6 +1560,32 @@ async fn get_oauth_inventory_records(
         .map_err(internal_error)
 }
 
+async fn get_oauth_runtime_pool_summary(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<OAuthRuntimePoolSummaryResponse>, (StatusCode, Json<ErrorEnvelope>)> {
+    let _principal = require_admin_principal(&state, &headers)?;
+    state
+        .store
+        .oauth_runtime_pool_summary()
+        .await
+        .map(Json)
+        .map_err(internal_error)
+}
+
+async fn get_oauth_health_signals_summary(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<OAuthHealthSignalsSummaryResponse>, (StatusCode, Json<ErrorEnvelope>)> {
+    let _principal = require_admin_principal(&state, &headers)?;
+    state
+        .store
+        .oauth_health_signals_summary()
+        .await
+        .map(Json)
+        .map_err(internal_error)
+}
+
 fn map_oauth_rate_limit_refresh_job_error(
     err: anyhow::Error,
 ) -> (StatusCode, Json<ErrorEnvelope>) {

@@ -76,6 +76,12 @@ impl OAuthImportJobStore for PostgresOAuthImportJobStore {
                     admission_status,
                     admission_source,
                     admission_reason,
+                    failure_stage,
+                    attempt_count,
+                    transient_retry_count,
+                    next_retry_at,
+                    retryable,
+                    terminal_reason,
                     request_json,
                     raw_record,
                     normalized_record,
@@ -84,7 +90,7 @@ impl OAuthImportJobStore for PostgresOAuthImportJobStore {
                     updated_at
                 )
                 VALUES (
-                    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, now(), now()
+                    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, now(), now()
                 )
                 "#,
             )
@@ -102,6 +108,12 @@ impl OAuthImportJobStore for PostgresOAuthImportJobStore {
             .bind(persisted.item.admission_status.map(admission_status_to_db))
             .bind(persisted.item.admission_source)
             .bind(persisted.item.admission_reason)
+            .bind(persisted.item.failure_stage.map(failure_stage_to_db))
+            .bind(i32::try_from(persisted.item.attempt_count).unwrap_or(i32::MAX))
+            .bind(i32::try_from(persisted.item.transient_retry_count).unwrap_or(i32::MAX))
+            .bind(persisted.item.next_retry_at)
+            .bind(persisted.item.retryable)
+            .bind(persisted.item.terminal_reason)
             .bind(request_json)
             .bind(persisted.raw_record)
             .bind(normalized_record)
@@ -152,7 +164,13 @@ impl OAuthImportJobStore for PostgresOAuthImportJobStore {
                         error_message,
                         admission_status,
                         admission_source,
-                        admission_reason
+                        admission_reason,
+                        failure_stage,
+                        attempt_count,
+                        transient_retry_count,
+                        next_retry_at,
+                        retryable,
+                        terminal_reason
                     FROM oauth_import_job_items
                     WHERE job_id = $1 AND status = $2 AND item_id > $3
                     ORDER BY item_id ASC
@@ -181,7 +199,13 @@ impl OAuthImportJobStore for PostgresOAuthImportJobStore {
                         error_message,
                         admission_status,
                         admission_source,
-                        admission_reason
+                        admission_reason,
+                        failure_stage,
+                        attempt_count,
+                        transient_retry_count,
+                        next_retry_at,
+                        retryable,
+                        terminal_reason
                     FROM oauth_import_job_items
                     WHERE job_id = $1 AND item_id > $2
                     ORDER BY item_id ASC
@@ -215,6 +239,23 @@ impl OAuthImportJobStore for PostgresOAuthImportJobStore {
                     .transpose()?,
                 admission_source: row.try_get("admission_source")?,
                 admission_reason: row.try_get("admission_reason")?,
+                failure_stage: row
+                    .try_get::<Option<String>, _>("failure_stage")?
+                    .map(|raw| parse_failure_stage(raw.as_str()))
+                    .transpose()?,
+                attempt_count: row
+                    .try_get::<i32, _>("attempt_count")?
+                    .max(0)
+                    .try_into()
+                    .unwrap_or_default(),
+                transient_retry_count: row
+                    .try_get::<i32, _>("transient_retry_count")?
+                    .max(0)
+                    .try_into()
+                    .unwrap_or_default(),
+                next_retry_at: row.try_get("next_retry_at")?,
+                retryable: row.try_get("retryable")?,
+                terminal_reason: row.try_get("terminal_reason")?,
             });
         }
 
@@ -382,12 +423,18 @@ impl OAuthImportJobStore for PostgresOAuthImportJobStore {
                 admission_status = $6,
                 admission_source = $7,
                 admission_reason = $8,
+                failure_stage = $9,
+                attempt_count = $10,
+                transient_retry_count = $11,
+                next_retry_at = $12,
+                retryable = $13,
+                terminal_reason = $14,
                 error_code = NULL,
                 error_message = NULL,
                 updated_at = now()
             WHERE job_id = $1
               AND item_id = $2
-              AND status = $9
+              AND status = $15
             "#,
         )
         .bind(job_id)
@@ -398,6 +445,12 @@ impl OAuthImportJobStore for PostgresOAuthImportJobStore {
         .bind(outcome.admission_status.map(admission_status_to_db))
         .bind(outcome.admission_source.clone())
         .bind(outcome.admission_reason.clone())
+        .bind(outcome.failure_stage.map(failure_stage_to_db))
+        .bind(i32::try_from(outcome.attempt_count).unwrap_or(i32::MAX))
+        .bind(i32::try_from(outcome.transient_retry_count).unwrap_or(i32::MAX))
+        .bind(outcome.next_retry_at)
+        .bind(outcome.retryable)
+        .bind(outcome.terminal_reason.clone())
         .bind(DB_ITEM_PROCESSING)
         .execute(tx.as_mut())
         .await
@@ -449,6 +502,12 @@ impl OAuthImportJobStore for PostgresOAuthImportJobStore {
                 admission_status = $6,
                 admission_source = NULL,
                 admission_reason = $7,
+                failure_stage = NULL,
+                attempt_count = 0,
+                transient_retry_count = 0,
+                next_retry_at = NULL,
+                retryable = false,
+                terminal_reason = $7,
                 updated_at = now()
             WHERE job_id = $1
               AND item_id = $2
@@ -757,6 +816,15 @@ impl OAuthImportJobStore for PostgresOAuthImportJobStore {
                 error_code = NULL,
                 error_message = NULL,
                 account_id = NULL,
+                admission_status = NULL,
+                admission_source = NULL,
+                admission_reason = NULL,
+                failure_stage = NULL,
+                attempt_count = 0,
+                transient_retry_count = 0,
+                next_retry_at = NULL,
+                retryable = false,
+                terminal_reason = NULL,
                 retry_count = retry_count + 1,
                 updated_at = now()
             WHERE job_id = $1

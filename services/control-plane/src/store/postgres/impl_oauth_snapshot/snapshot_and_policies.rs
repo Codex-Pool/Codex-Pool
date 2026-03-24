@@ -286,21 +286,33 @@ impl PostgresStore {
                 r#"
                 SELECT COUNT(1)
                 FROM upstream_accounts a
-                INNER JOIN upstream_account_oauth_credentials c ON c.account_id = a.id
+                LEFT JOIN upstream_account_oauth_credentials c ON c.account_id = a.id
+                LEFT JOIN upstream_account_session_profiles p ON p.account_id = a.id
                 WHERE
-                    a.auth_provider = $1
-                    AND a.pool_state = $2
+                    a.pool_state = $2
                     AND a.enabled = true
-                    AND c.token_expires_at > $3
-                    AND COALESCE(c.refresh_reused_detected, false) = false
-                    AND NOT (
-                        c.last_refresh_status = 'failed'
-                        AND LOWER(COALESCE(c.last_refresh_error_code, '')) IN (
-                            'refresh_token_reused',
-                            'refresh_token_revoked',
-                            'invalid_refresh_token',
-                            'missing_client_id',
-                            'unauthorized_client'
+                    AND (
+                        (
+                            a.auth_provider = $1
+                            AND c.token_expires_at > $3
+                            AND COALESCE(c.refresh_reused_detected, false) = false
+                            AND NOT (
+                                c.last_refresh_status = 'failed'
+                                AND LOWER(COALESCE(c.last_refresh_error_code, '')) IN (
+                                    'refresh_token_reused',
+                                    'refresh_token_revoked',
+                                    'invalid_refresh_token',
+                                    'missing_client_id',
+                                    'unauthorized_client'
+                                )
+                            )
+                        )
+                        OR (
+                            a.auth_provider = $4
+                            AND a.mode = $5
+                            AND p.credential_kind = $6
+                            AND p.token_expires_at > $3
+                            AND NULLIF(BTRIM(COALESCE(a.bearer_token, '')), '') IS NOT NULL
                         )
                     )
                 "#,
@@ -308,6 +320,11 @@ impl PostgresStore {
             .bind(AUTH_PROVIDER_OAUTH_REFRESH_TOKEN)
             .bind(POOL_STATE_ACTIVE)
             .bind(Utc::now() + Duration::seconds(OAUTH_MIN_VALID_SEC))
+            .bind(AUTH_PROVIDER_LEGACY_BEARER)
+            .bind(upstream_mode_to_db(&UpstreamMode::CodexOauth))
+            .bind(session_credential_kind_to_db(
+                &SessionCredentialKind::OneTimeAccessToken,
+            ))
             .fetch_one(&self.pool)
             .await
             .context("failed to count oauth rate-limit refresh targets")?;

@@ -151,6 +151,36 @@ struct InternalObservedRateLimitWindow {
     resets_at: Option<DateTime<Utc>>,
 }
 
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+enum InternalLiveResultStatus {
+    Ok,
+    Failed,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+enum InternalLiveResultSource {
+    Active,
+    Passive,
+}
+
+#[derive(Debug, Deserialize)]
+struct InternalLiveResultRequest {
+    status: InternalLiveResultStatus,
+    source: InternalLiveResultSource,
+    #[serde(default)]
+    status_code: Option<u16>,
+    #[serde(default)]
+    error_code: Option<String>,
+    #[serde(default)]
+    error_message: Option<String>,
+    #[serde(default)]
+    upstream_request_id: Option<String>,
+    #[serde(default)]
+    model: Option<String>,
+}
+
 #[derive(Debug, Serialize)]
 struct InternalSeenOkResponse {
     ok: bool,
@@ -176,13 +206,24 @@ struct InternalObservedRateLimitResponse {
     persisted_limits: usize,
 }
 
-async fn internal_mark_upstream_account_seen_ok(
-    Path(account_id): Path<Uuid>,
-    State(state): State<AppState>,
-    headers: HeaderMap,
-) -> Result<Json<InternalSeenOkResponse>, (StatusCode, Json<ErrorEnvelope>)> {
-    require_internal_service_token(&state, &headers)?;
+#[derive(Debug, Serialize)]
+struct InternalLiveResultResponse {
+    ok: bool,
+    accepted: bool,
+    account_id: Uuid,
+    status: InternalLiveResultStatus,
+    source: InternalLiveResultSource,
+    reported_at: DateTime<Utc>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    status_code: Option<u16>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error_code: Option<String>,
+}
 
+async fn apply_seen_ok_signal(
+    state: &AppState,
+    account_id: Uuid,
+) -> Result<(DateTime<Utc>, bool), (StatusCode, Json<ErrorEnvelope>)> {
     let seen_ok_at = Utc::now();
     let accepted = state
         .store
@@ -221,11 +262,115 @@ async fn internal_mark_upstream_account_seen_ok(
         }
     }
 
+    Ok((seen_ok_at, accepted))
+}
+
+async fn internal_mark_upstream_account_seen_ok(
+    Path(account_id): Path<Uuid>,
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<InternalSeenOkResponse>, (StatusCode, Json<ErrorEnvelope>)> {
+    require_internal_service_token(&state, &headers)?;
+
+    let (seen_ok_at, accepted) = apply_seen_ok_signal(&state, account_id).await?;
+
     Ok(Json(InternalSeenOkResponse {
         ok: true,
         accepted,
         account_id,
         seen_ok_at,
+    }))
+}
+
+async fn internal_report_upstream_account_live_result(
+    Path(account_id): Path<Uuid>,
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(req): Json<InternalLiveResultRequest>,
+) -> Result<Json<InternalLiveResultResponse>, (StatusCode, Json<ErrorEnvelope>)> {
+    require_internal_service_token(&state, &headers)?;
+
+    let reported_at = Utc::now();
+    let normalized_error_code = req.error_code.as_ref().and_then(|raw| {
+        let normalized = raw.trim().to_ascii_lowercase().replace([' ', '-'], "_");
+        if normalized.is_empty() {
+            None
+        } else {
+            Some(normalized)
+        }
+    });
+    let accepted = match req.status {
+        InternalLiveResultStatus::Ok => state
+            .store
+            .record_upstream_account_live_result(
+                account_id,
+                reported_at,
+                crate::contracts::OAuthLiveResultStatus::Ok,
+                match req.source {
+                    InternalLiveResultSource::Active => crate::contracts::OAuthLiveResultSource::Active,
+                    InternalLiveResultSource::Passive => {
+                        crate::contracts::OAuthLiveResultSource::Passive
+                    }
+                },
+                req.status_code,
+                None,
+                None,
+            )
+            .await
+            .map_err(|err| {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(ErrorEnvelope::new("store_error", err.to_string())),
+                )
+            })?,
+        InternalLiveResultStatus::Failed => {
+            tracing::info!(
+                account_id = %account_id,
+                source = ?req.source,
+                status_code = req.status_code,
+                error_code = normalized_error_code.as_deref().unwrap_or_default(),
+                error_message = req.error_message.as_deref().unwrap_or_default(),
+                upstream_request_id = req.upstream_request_id.as_deref().unwrap_or_default(),
+                model = req.model.as_deref().unwrap_or_default(),
+                "received upstream live-result failure signal"
+            );
+            state
+                .store
+                .record_upstream_account_live_result(
+                    account_id,
+                    reported_at,
+                    crate::contracts::OAuthLiveResultStatus::Failed,
+                    match req.source {
+                        InternalLiveResultSource::Active => {
+                            crate::contracts::OAuthLiveResultSource::Active
+                        }
+                        InternalLiveResultSource::Passive => {
+                            crate::contracts::OAuthLiveResultSource::Passive
+                        }
+                    },
+                    req.status_code,
+                    normalized_error_code.clone(),
+                    req.error_message.clone(),
+                )
+                .await
+                .map_err(|err| {
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(ErrorEnvelope::new("store_error", err.to_string())),
+                    )
+                })?
+        }
+    };
+
+    Ok(Json(InternalLiveResultResponse {
+        ok: true,
+        accepted,
+        account_id,
+        status: req.status,
+        source: req.source,
+        reported_at,
+        status_code: req.status_code,
+        error_code: normalized_error_code,
     }))
 }
 

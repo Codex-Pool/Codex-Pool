@@ -729,6 +729,12 @@ impl ControlPlaneStore for InMemoryStore {
             .unwrap()
             .get(&account_id)
             .cloned();
+        let session_profile = self
+            .session_profiles
+            .read()
+            .unwrap()
+            .get(&account_id)
+            .cloned();
         let cache = self
             .oauth_rate_limit_caches
             .read()
@@ -737,20 +743,49 @@ impl ControlPlaneStore for InMemoryStore {
             .cloned()
             .unwrap_or_default();
 
-        let (Some(account), Some(provider), Some(credential)) = (account, provider, credential)
-        else {
+        let (Some(account), Some(provider)) = (account, provider) else {
             return Ok(());
         };
-        if !account.enabled || provider != UpstreamAuthProvider::OAuthRefreshToken {
+        if !account.enabled {
             return Ok(());
         }
+        let (token_expires_at, last_refresh_status, refresh_reused_detected, last_refresh_error_code) =
+            match provider {
+                UpstreamAuthProvider::OAuthRefreshToken => {
+                    let Some(credential) = credential.as_ref() else {
+                        return Ok(());
+                    };
+                    (
+                        Some(credential.token_expires_at),
+                        credential.last_refresh_status.clone(),
+                        credential.refresh_reused_detected,
+                        credential.last_refresh_error_code.clone(),
+                    )
+                }
+                UpstreamAuthProvider::LegacyBearer => {
+                    let Some(profile) = session_profile.as_ref() else {
+                        return Ok(());
+                    };
+                    if account.mode != UpstreamMode::CodexOauth
+                        || profile.credential_kind != SessionCredentialKind::OneTimeAccessToken
+                    {
+                        return Ok(());
+                    }
+                    (
+                        profile.token_expires_at,
+                        OAuthRefreshStatus::Never,
+                        false,
+                        None,
+                    )
+                }
+            };
         if !should_refresh_rate_limit_cache_on_seen_ok(
             now,
             SeenOkRateLimitRefreshContext {
-                token_expires_at: Some(credential.token_expires_at),
-                last_refresh_status: &credential.last_refresh_status,
-                refresh_reused_detected: credential.refresh_reused_detected,
-                last_refresh_error_code: credential.last_refresh_error_code.as_deref(),
+                token_expires_at,
+                last_refresh_status: &last_refresh_status,
+                refresh_reused_detected,
+                last_refresh_error_code: last_refresh_error_code.as_deref(),
                 rate_limits_expires_at: cache.expires_at,
                 rate_limits_last_error_code: cache.last_error_code.as_deref(),
                 rate_limits_last_error: cache.last_error.as_deref(),
@@ -759,11 +794,16 @@ impl ControlPlaneStore for InMemoryStore {
             return Ok(());
         }
 
-        let target = InMemoryRateLimitRefreshTarget {
-            account_id,
-            base_url: account.base_url,
-            chatgpt_account_id: account.chatgpt_account_id,
-            access_token_enc: credential.access_token_enc,
+        let Some(target) = self.build_rate_limit_refresh_target_inner(
+            &account,
+            &provider,
+            credential.as_ref(),
+            session_profile.as_ref(),
+            Some(&cache),
+            now,
+            false,
+        ) else {
+            return Ok(());
         };
         let _ = self.refresh_rate_limit_targets_batch(vec![target], 1).await;
 
@@ -778,6 +818,27 @@ impl ControlPlaneStore for InMemoryStore {
     ) -> Result<()> {
         self.persist_rate_limit_cache_success_inner(account_id, rate_limits, observed_at);
         Ok(())
+    }
+
+    async fn record_upstream_account_live_result(
+        &self,
+        account_id: Uuid,
+        reported_at: DateTime<Utc>,
+        status: OAuthLiveResultStatus,
+        source: OAuthLiveResultSource,
+        status_code: Option<u16>,
+        error_code: Option<String>,
+        error_message_preview: Option<String>,
+    ) -> Result<bool> {
+        self.record_upstream_account_live_result_inner(
+            account_id,
+            reported_at,
+            status,
+            source,
+            status_code,
+            error_code,
+            error_message_preview,
+        )
     }
 }
 
@@ -813,9 +874,9 @@ mod tests {
     use chrono::{DateTime, Duration, Utc};
     use crate::contracts::{
         CreateApiKeyRequest, CreateTenantRequest, CreateUpstreamAccountRequest,
-        ImportOAuthRefreshTokenRequest, OAuthAccountPoolState, OAuthRateLimitRefreshJobStatus,
-        OAuthRateLimitSnapshot, OAuthRateLimitWindow, OAuthVaultRecordStatus,
-        RefreshCredentialState,
+        ImportOAuthRefreshTokenRequest, OAuthAccountPoolState, OAuthInventoryFailureStage,
+        OAuthRateLimitRefreshJobStatus, OAuthRateLimitSnapshot, OAuthRateLimitWindow,
+        OAuthRefreshStatus, OAuthVaultRecordStatus, RefreshCredentialState,
         SessionCredentialKind, UpsertModelRoutingPolicyRequest, UpsertRoutingProfileRequest,
     };
     use codex_pool_core::model::{
@@ -1057,6 +1118,34 @@ mod tests {
             _chatgpt_account_id: Option<&str>,
         ) -> Result<Vec<OAuthRateLimitSnapshot>, crate::oauth::OAuthTokenClientError> {
             Ok(self.rate_limits.clone())
+        }
+    }
+
+    #[derive(Clone)]
+    struct TransientAdmissionFailureOAuthTokenClient;
+
+    #[async_trait]
+    impl OAuthTokenClient for TransientAdmissionFailureOAuthTokenClient {
+        async fn refresh_token(
+            &self,
+            refresh_token: &str,
+            base_url: Option<&str>,
+        ) -> Result<OAuthTokenInfo, crate::oauth::OAuthTokenClientError> {
+            StaticOAuthTokenClient
+                .refresh_token(refresh_token, base_url)
+                .await
+        }
+
+        async fn fetch_rate_limits(
+            &self,
+            _access_token: &str,
+            _base_url: Option<&str>,
+            _chatgpt_account_id: Option<&str>,
+        ) -> Result<Vec<OAuthRateLimitSnapshot>, crate::oauth::OAuthTokenClientError> {
+            Err(crate::oauth::OAuthTokenClientError::Upstream {
+                code: crate::oauth::OAuthRefreshErrorCode::UpstreamUnavailable,
+                message: "upstream unavailable".to_string(),
+            })
         }
     }
 
@@ -1710,6 +1799,155 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn in_memory_rate_limit_refresh_job_includes_legacy_bearer_codex_accounts() {
+        let store = InMemoryStore::new_with_oauth(Arc::new(RateLimitAwareOAuthTokenClient), None);
+
+        let account = store
+            .upsert_one_time_session_account(UpsertOneTimeSessionAccountRequest {
+                label: "legacy-codex-rate-limit".to_string(),
+                mode: UpstreamMode::CodexOauth,
+                base_url: "https://chatgpt.com/backend-api/codex".to_string(),
+                access_token: "legacy-access-token".to_string(),
+                chatgpt_account_id: Some("acct_legacy_rate_limit".to_string()),
+                enabled: Some(true),
+                priority: Some(100),
+                token_expires_at: Some(Utc::now() + Duration::hours(2)),
+                chatgpt_plan_type: Some("free".to_string()),
+                source_type: Some("codex".to_string()),
+            })
+            .await
+            .expect("upsert one-time codex account")
+            .account;
+
+        let created = store
+            .create_oauth_rate_limit_refresh_job()
+            .await
+            .expect("create rate-limit refresh job");
+        assert_eq!(created.total, 1);
+
+        store
+            .run_oauth_rate_limit_refresh_job(created.job_id)
+            .await
+            .expect("run rate-limit refresh job");
+
+        let status = store
+            .oauth_account_status(account.id)
+            .await
+            .expect("legacy bearer oauth status");
+        assert_eq!(status.auth_provider, UpstreamAuthProvider::LegacyBearer);
+        assert_eq!(status.rate_limits.len(), 1);
+        assert_eq!(status.rate_limits[0].limit_id.as_deref(), Some("five_hours"));
+        assert!(status.rate_limits_fetched_at.is_some());
+    }
+
+    #[tokio::test]
+    async fn in_memory_due_rate_limit_refresh_includes_legacy_bearer_codex_accounts() {
+        let store = InMemoryStore::new_with_oauth(Arc::new(RateLimitAwareOAuthTokenClient), None);
+
+        let account = store
+            .upsert_one_time_session_account(UpsertOneTimeSessionAccountRequest {
+                label: "legacy-codex-due-rate-limit".to_string(),
+                mode: UpstreamMode::CodexOauth,
+                base_url: "https://chatgpt.com/backend-api/codex".to_string(),
+                access_token: "legacy-access-token-due".to_string(),
+                chatgpt_account_id: Some("acct_legacy_due_rate_limit".to_string()),
+                enabled: Some(true),
+                priority: Some(100),
+                token_expires_at: Some(Utc::now() + Duration::hours(2)),
+                chatgpt_plan_type: Some("free".to_string()),
+                source_type: Some("codex".to_string()),
+            })
+            .await
+            .expect("upsert one-time codex account")
+            .account;
+
+        let refreshed = store
+            .refresh_due_oauth_rate_limit_caches()
+            .await
+            .expect("refresh due rate-limit caches");
+        assert_eq!(refreshed, 1);
+
+        let status = store
+            .oauth_account_status(account.id)
+            .await
+            .expect("legacy bearer oauth status");
+        assert_eq!(status.auth_provider, UpstreamAuthProvider::LegacyBearer);
+        assert_eq!(status.rate_limits.len(), 1);
+        assert_eq!(status.rate_limits[0].limit_id.as_deref(), Some("five_hours"));
+        assert!(status.rate_limits_fetched_at.is_some());
+    }
+
+    #[tokio::test]
+    async fn in_memory_seen_ok_refresh_includes_legacy_bearer_codex_accounts() {
+        let store = InMemoryStore::new_with_oauth(Arc::new(RateLimitAwareOAuthTokenClient), None);
+
+        let account = store
+            .upsert_one_time_session_account(UpsertOneTimeSessionAccountRequest {
+                label: "legacy-codex-seen-ok-rate-limit".to_string(),
+                mode: UpstreamMode::CodexOauth,
+                base_url: "https://chatgpt.com/backend-api/codex".to_string(),
+                access_token: "legacy-access-token-seen-ok".to_string(),
+                chatgpt_account_id: Some("acct_legacy_seen_ok_rate_limit".to_string()),
+                enabled: Some(true),
+                priority: Some(100),
+                token_expires_at: Some(Utc::now() + Duration::hours(2)),
+                chatgpt_plan_type: Some("free".to_string()),
+                source_type: Some("codex".to_string()),
+            })
+            .await
+            .expect("upsert one-time codex account")
+            .account;
+
+        store
+            .maybe_refresh_oauth_rate_limit_cache_on_seen_ok(account.id)
+            .await
+            .expect("refresh rate-limit cache on seen_ok");
+
+        let status = store
+            .oauth_account_status(account.id)
+            .await
+            .expect("legacy bearer oauth status");
+        assert_eq!(status.auth_provider, UpstreamAuthProvider::LegacyBearer);
+        assert_eq!(status.rate_limits.len(), 1);
+        assert_eq!(status.rate_limits[0].limit_id.as_deref(), Some("five_hours"));
+        assert!(status.rate_limits_fetched_at.is_some());
+    }
+
+    #[tokio::test]
+    async fn in_memory_refresh_oauth_account_returns_status_for_legacy_bearer() {
+        let store = InMemoryStore::new_with_oauth(Arc::new(RateLimitAwareOAuthTokenClient), None);
+
+        let account = store
+            .upsert_one_time_session_account(UpsertOneTimeSessionAccountRequest {
+                label: "legacy-codex-refresh-noop".to_string(),
+                mode: UpstreamMode::CodexOauth,
+                base_url: "https://chatgpt.com/backend-api/codex".to_string(),
+                access_token: "legacy-access-token-refresh-noop".to_string(),
+                chatgpt_account_id: Some("acct_legacy_refresh_noop".to_string()),
+                enabled: Some(true),
+                priority: Some(100),
+                token_expires_at: Some(Utc::now() + Duration::hours(2)),
+                chatgpt_plan_type: Some("free".to_string()),
+                source_type: Some("codex".to_string()),
+            })
+            .await
+            .expect("upsert one-time codex account")
+            .account;
+
+        let status = store
+            .refresh_oauth_account(account.id)
+            .await
+            .expect("legacy bearer refresh should no-op");
+        assert_eq!(status.auth_provider, UpstreamAuthProvider::LegacyBearer);
+        assert_eq!(
+            status.credential_kind,
+            Some(SessionCredentialKind::OneTimeAccessToken)
+        );
+        assert!(!status.has_refresh_credential);
+        assert_eq!(status.last_refresh_status, OAuthRefreshStatus::Never);
+    }
+
+    #[tokio::test]
     async fn in_memory_oauth_status_exposes_team_workspace_name() {
         let cipher = CredentialCipher::from_base64_key(
             &base64::engine::general_purpose::STANDARD.encode([10_u8; 32]),
@@ -2319,5 +2557,124 @@ mod tests {
             record.admission_error_code.as_deref(),
             Some("expiry_unknown")
         );
+    }
+
+    #[tokio::test]
+    async fn in_memory_queue_oauth_refresh_token_marks_transient_probe_failure_retryable() {
+        let cipher = CredentialCipher::from_base64_key(
+            &base64::engine::general_purpose::STANDARD.encode([24_u8; 32]),
+        )
+        .unwrap();
+        let store = InMemoryStore::new_with_oauth(
+            Arc::new(TransientAdmissionFailureOAuthTokenClient),
+            Some(cipher),
+        );
+
+        store
+            .queue_oauth_refresh_token(ImportOAuthRefreshTokenRequest {
+                label: "oauth-admission-transient".to_string(),
+                base_url: "https://chatgpt.com/backend-api/codex".to_string(),
+                refresh_token: "rt-admission-transient".to_string(),
+                fallback_access_token: Some("ak-admission-transient".to_string()),
+                fallback_token_expires_at: Some(Utc::now() + Duration::hours(2)),
+                chatgpt_account_id: Some("acct_admission_transient".to_string()),
+                mode: Some(UpstreamMode::CodexOauth),
+                enabled: Some(true),
+                priority: Some(100),
+                chatgpt_plan_type: Some("pro".to_string()),
+                source_type: Some("codex".to_string()),
+            })
+            .await
+            .expect("queue oauth refresh token");
+
+        let records = store
+            .oauth_inventory_records()
+            .await
+            .expect("inventory records");
+        let record = records.first().expect("inventory record");
+        assert_eq!(record.vault_status, OAuthVaultRecordStatus::Failed);
+        assert_eq!(
+            record.failure_stage,
+            Some(OAuthInventoryFailureStage::AdmissionProbe)
+        );
+        assert_eq!(record.attempt_count, 1);
+        assert_eq!(record.transient_retry_count, 1);
+        assert!(record.next_retry_at.is_some());
+        assert!(record.retryable);
+        assert_eq!(record.terminal_reason, None);
+    }
+
+    #[tokio::test]
+    async fn in_memory_oauth_vault_auth_fatal_retries_then_marks_terminal_failed() {
+        let cipher = CredentialCipher::from_base64_key(
+            &base64::engine::general_purpose::STANDARD.encode([25_u8; 32]),
+        )
+        .unwrap();
+        let store = InMemoryStore::new_with_oauth(
+            Arc::new(TerminalRefreshFailureOAuthTokenClient),
+            Some(cipher),
+        );
+
+        store
+            .queue_oauth_refresh_token(ImportOAuthRefreshTokenRequest {
+                label: "oauth-auth-fatal".to_string(),
+                base_url: "https://chatgpt.com/backend-api/codex".to_string(),
+                refresh_token: "rt-auth-fatal".to_string(),
+                fallback_access_token: None,
+                fallback_token_expires_at: None,
+                chatgpt_account_id: Some("acct_auth_fatal".to_string()),
+                mode: Some(UpstreamMode::CodexOauth),
+                enabled: Some(true),
+                priority: Some(100),
+                chatgpt_plan_type: Some("pro".to_string()),
+                source_type: Some("codex".to_string()),
+            })
+            .await
+            .expect("queue oauth refresh token");
+
+        let record_id = store
+            .oauth_inventory_records()
+            .await
+            .expect("inventory records")
+            .into_iter()
+            .next()
+            .expect("inventory record")
+            .id;
+
+        for attempt in 0..3 {
+            store.mark_oauth_vault_activation_failed_inner(
+                record_id,
+                OAuthVaultRecordStatus::NeedsRefresh,
+                "invalid_refresh_token".to_string(),
+                "invalid refresh token".to_string(),
+            );
+            let record = store
+                .oauth_inventory_records()
+                .await
+                .expect("inventory records")
+                .into_iter()
+                .next()
+                .expect("inventory record");
+
+            assert_eq!(
+                record.failure_stage,
+                Some(OAuthInventoryFailureStage::ActivationRefresh)
+            );
+
+            if attempt < 2 {
+                assert_eq!(record.vault_status, OAuthVaultRecordStatus::NeedsRefresh);
+                assert!(record.retryable);
+                assert!(record.next_retry_at.is_some());
+                assert_eq!(record.terminal_reason, None);
+            } else {
+                assert_eq!(record.vault_status, OAuthVaultRecordStatus::Failed);
+                assert!(!record.retryable);
+                assert_eq!(
+                    record.terminal_reason.as_deref(),
+                    Some("invalid_refresh_token")
+                );
+                assert!(record.next_retry_at.is_none());
+            }
+        }
     }
 }

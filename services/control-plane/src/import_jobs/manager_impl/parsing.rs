@@ -115,6 +115,12 @@ fn build_item_state(
         admission_status: None,
         admission_source: None,
         admission_reason: None,
+        failure_stage: None,
+        attempt_count: 0,
+        transient_retry_count: 0,
+        next_retry_at: None,
+        retryable: false,
+        terminal_reason: None,
     };
 
     let request = match parsed {
@@ -310,6 +316,12 @@ fn build_failed_line_item(
             admission_status: Some(OAuthVaultRecordStatus::Failed),
             admission_source: None,
             admission_reason: Some(error_code.to_string()),
+            failure_stage: None,
+            attempt_count: 0,
+            transient_retry_count: 0,
+            next_retry_at: None,
+            retryable: false,
+            terminal_reason: Some(error_code.to_string()),
         },
         request: None,
         raw_record,

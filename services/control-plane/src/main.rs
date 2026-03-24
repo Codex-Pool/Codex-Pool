@@ -11,7 +11,7 @@ use control_plane::app::{
 };
 use control_plane::config::ControlPlaneConfig;
 use control_plane::crypto::CredentialCipher;
-use control_plane::import_jobs::InMemoryOAuthImportJobStore;
+use control_plane::import_jobs::{InMemoryOAuthImportJobStore, SqliteOAuthImportJobStore};
 #[cfg(feature = "postgres-backend")]
 use control_plane::import_jobs::PostgresOAuthImportJobStore;
 use control_plane::oauth::OpenAiOAuthClient;
@@ -144,7 +144,9 @@ async fn build_store_bundle(
             );
             Ok(RuntimeStoreBundle {
                 store: sqlite_store.clone(),
-                import_job_store: Arc::new(InMemoryOAuthImportJobStore::default()),
+                import_job_store: Arc::new(
+                    SqliteOAuthImportJobStore::new(sqlite_store.clone_pool()).await?,
+                ),
                 admin_auth: AdminAuthService::from_env()?,
                 tenant_auth_service: None,
                 personal_runtime_store: Some(sqlite_store),

@@ -197,6 +197,29 @@ pub enum RefreshCredentialState {
     TerminalInvalid,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum OAuthLiveResultStatus {
+    Ok,
+    Failed,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum OAuthLiveResultSource {
+    Active,
+    Passive,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum OAuthInventoryFailureStage {
+    AdmissionProbe,
+    ActivationRefresh,
+    ActivationRateLimits,
+    RuntimeRefresh,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OAuthAccountStatusResponse {
     pub account_id: Uuid,
@@ -264,6 +287,18 @@ pub struct OAuthAccountStatusResponse {
     pub pending_purge_at: Option<DateTime<Utc>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub pending_purge_reason: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_live_result_at: Option<DateTime<Utc>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_live_result_status: Option<OAuthLiveResultStatus>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_live_result_source: Option<OAuthLiveResultSource>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_live_result_status_code: Option<u16>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_live_error_code: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_live_error_message_preview: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub supported_models: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -288,6 +323,26 @@ pub struct OAuthInventorySummaryResponse {
     pub needs_refresh: u64,
     pub no_quota: u64,
     pub failed: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct OAuthRuntimePoolSummaryResponse {
+    pub total: u64,
+    pub active: u64,
+    pub quarantine: u64,
+    pub pending_purge: u64,
+    pub oauth_refresh_token: u64,
+    pub legacy_bearer: u64,
+    pub rate_limits_ready: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct OAuthHealthSignalsSummaryResponse {
+    pub total: u64,
+    pub live_result_ok: u64,
+    pub live_result_failed: u64,
+    pub pending_purge_signals: u64,
+    pub quarantine_signals: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -319,6 +374,18 @@ pub struct OAuthInventoryRecord {
     pub admission_rate_limits: Vec<OAuthRateLimitSnapshot>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub admission_rate_limits_expires_at: Option<DateTime<Utc>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub failure_stage: Option<OAuthInventoryFailureStage>,
+    #[serde(default)]
+    pub attempt_count: u32,
+    #[serde(default)]
+    pub transient_retry_count: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub next_retry_at: Option<DateTime<Utc>>,
+    #[serde(default)]
+    pub retryable: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub terminal_reason: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -768,6 +835,18 @@ pub struct OAuthImportJobItem {
     pub admission_source: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub admission_reason: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub failure_stage: Option<OAuthInventoryFailureStage>,
+    #[serde(default)]
+    pub attempt_count: u32,
+    #[serde(default)]
+    pub transient_retry_count: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub next_retry_at: Option<DateTime<Utc>>,
+    #[serde(default)]
+    pub retryable: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub terminal_reason: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
