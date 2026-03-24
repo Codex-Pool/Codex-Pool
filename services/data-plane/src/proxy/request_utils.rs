@@ -1083,6 +1083,12 @@ fn log_failover_decision(
     action: &str,
 ) {
     let decision = error_context.map(|context| decide_upstream_error(source, Some(context)));
+    let sanitized_error_message = sanitize_upstream_error_log_value(
+        error_context.and_then(|context| context.error_message.as_deref()),
+    );
+    let sanitized_error_raw = sanitize_upstream_error_log_value(
+        error_context.and_then(|context| context.raw_error.as_deref()),
+    );
     warn!(
         account_id = ?account_id,
         status_code = ?status.map(|item| item.as_u16()),
@@ -1099,11 +1105,6 @@ fn log_failover_decision(
             .and_then(|context| context.upstream_request_id.as_deref())
             .unwrap_or("none"),
         retry_after_seconds = error_context.and_then(|context| context.retry_after.map(|value| value.as_secs())),
-    let sanitized_error_message = sanitize_upstream_error_log_value(
-        error_context.and_then(|context| context.error_message.as_deref()),
-    );
-    let sanitized_error_raw =
-        sanitize_upstream_error_log_value(error_context.and_then(|context| context.raw_error.as_deref()));
         retry_scope = decision
             .as_ref()
             .map(|value| retry_scope_label(value.retry_scope))
@@ -1128,6 +1129,13 @@ fn log_failover_decision(
     );
 }
 
+fn sanitize_upstream_error_log_value(value: Option<&str>) -> String {
+    let Some(value) = value.map(str::trim).filter(|value| !value.is_empty()) else {
+        return "none".to_string();
+    };
+    sanitize_upstream_error_raw(Some(value), None).unwrap_or_else(|| "none".to_string())
+}
+
 #[allow(clippy::too_many_arguments)]
 async fn emit_request_log_event(
     state: &AppState,
@@ -1150,13 +1158,6 @@ async fn emit_request_log_event(
         method,
         status,
         started,
-fn sanitize_upstream_error_log_value(value: Option<&str>) -> String {
-    let Some(value) = value.map(str::trim).filter(|value| !value.is_empty()) else {
-        return "none".to_string();
-    };
-    sanitize_upstream_error_raw(Some(value), None).unwrap_or_else(|| "none".to_string())
-}
-
         is_stream,
         request_id,
         model,
@@ -2459,6 +2460,7 @@ mod request_utils_tests {
         build_upstream_error_context, classify_upstream_error, decide_upstream_error,
         ejection_ttl_for_response, maybe_adapt_openai_responses_request_for_codex_profile,
         oauth_refresh_recovery_succeeded, parse_request_policy_context,
+        sanitize_upstream_error_log_value,
         InternalOAuthRefreshPayload, LearnedTemplateResolution, ProxyRecoveryOutcome,
         RetryScope, UpstreamErrorClass, UpstreamErrorContext, UpstreamErrorSource,
     };
@@ -2481,7 +2483,6 @@ mod request_utils_tests {
     #[test]
     fn classifies_known_auth_refresh_403_as_auth_expired() {
         let class = classify_upstream_error(
-        sanitize_upstream_error_log_value,
             StatusCode::FORBIDDEN,
             None,
             Some("Your access token could not be refreshed because you have since logged out."),
@@ -2771,7 +2772,6 @@ mod request_utils_tests {
             serde_json::from_slice(&adapted.body).expect("adapted body should stay json");
         assert_eq!(value["service_tier"], "priority");
     }
-}
 
     #[test]
     fn sanitize_upstream_error_log_value_redacts_large_response_event_payloads() {
@@ -2784,3 +2784,4 @@ mod request_utils_tests {
         assert!(!sanitized.contains("\"messages\":["));
         assert!(!sanitized.contains("\"response\":{\"id\""));
     }
+}
