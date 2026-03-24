@@ -14,6 +14,7 @@ use axum::extract::State;
 use axum::http::header::{AUTHORIZATION, CACHE_CONTROL, CONTENT_LENGTH, ETAG, HOST, IF_NONE_MATCH};
 use axum::http::{HeaderMap, HeaderName, HeaderValue, Request, StatusCode};
 use axum::response::Response;
+use bytes::Bytes;
 use codex_pool_core::api::ErrorEnvelope;
 use codex_pool_core::events::RequestLogEvent;
 use codex_pool_core::model::{UpstreamAccount, UpstreamMode};
@@ -114,6 +115,7 @@ struct ParsedRequestPolicyContext {
     continuation_key_hint: Option<String>,
     sticky_key_hint: Option<String>,
     session_key_hint: Option<String>,
+    conversation_id: Option<String>,
 }
 
 #[derive(Debug)]
@@ -365,7 +367,7 @@ pub async fn proxy_handler(
     let max_request_body_bytes =
         max_request_body_bytes_for_path(state.max_request_body_bytes, &path);
     let header_locale = detect_request_locale(&parts.headers, &bytes::Bytes::new());
-    let body_bytes = match axum::body::to_bytes(body, max_request_body_bytes).await {
+    let mut body_bytes = match axum::body::to_bytes(body, max_request_body_bytes).await {
         Ok(bytes) => bytes,
         Err(err) => {
             warn!(
@@ -392,7 +394,45 @@ pub async fn proxy_handler(
             );
         }
     };
-    let parsed_policy_context = parse_request_policy_context(&parts.headers, &body_bytes);
+    let mut parsed_policy_context = parse_request_policy_context(&parts.headers, &body_bytes);
+    if path == "/v1/responses" {
+        if let Some(mut request_value) = parse_request_json_body(&parts.headers, &body_bytes) {
+            let owner_key = response_owner_key(principal.as_ref());
+            let prior_conversation_response_id = parsed_policy_context
+                .conversation_id
+                .as_deref()
+                .map(|conversation_id| conversation_id.to_string());
+            let prior_conversation_response_id = match prior_conversation_response_id {
+                Some(conversation_id) => {
+                    state
+                        .background_responses
+                        .current_conversation_response_id(
+                            owner_key.as_str(),
+                            conversation_id.as_str(),
+                        )
+                        .await
+                }
+                None => None,
+            };
+            if let Err(err) = apply_conversation_semantics_to_request(
+                &mut request_value,
+                &mut parsed_policy_context,
+                prior_conversation_response_id,
+            ) {
+                let message = err.to_string();
+                return localized_json_error_with_state(
+                    state.as_ref(),
+                    parsed_policy_context.detected_locale.as_str(),
+                    StatusCode::BAD_REQUEST,
+                    "invalid_request",
+                    message.as_str(),
+                );
+            }
+            if let Ok(serialized) = serde_json::to_vec(&request_value) {
+                body_bytes = Bytes::from(serialized);
+            }
+        }
+    }
     let sticky_key = parsed_policy_context
         .continuation_key_hint
         .clone()
@@ -404,6 +444,19 @@ pub async fn proxy_handler(
         return *response;
     }
     if let Some(response) = enforce_invalid_request_guard(&state, principal.as_ref()) {
+        return response;
+    }
+    if let Some(response) = maybe_handle_background_response_request(
+        state.clone(),
+        principal.as_ref(),
+        &path,
+        &method,
+        &parts.headers,
+        &body_bytes,
+        &parsed_policy_context,
+    )
+    .await
+    {
         return response;
     }
     let mut pending_billing_session = match build_pending_billing_session(
@@ -628,7 +681,7 @@ pub async fn proxy_handler(
             &parts.headers,
             &body_bytes,
         );
-        let upstream_request_body = upstream_request_adaptation
+        let mut upstream_request_body = upstream_request_adaptation
             .as_ref()
             .map(|item| item.body.clone())
             .unwrap_or_else(|| body_bytes.clone());
@@ -1112,6 +1165,17 @@ pub async fn proxy_handler(
                         Some(started.elapsed().as_millis() as u64),
                     )
                     .await;
+                    if path == "/v1/responses" {
+                        store_completed_response_from_proxy(
+                            &state,
+                            principal.as_ref(),
+                            &body_bytes,
+                            &body,
+                            &parsed_policy_context,
+                            false,
+                        )
+                        .await;
+                    }
                     spawn_seen_ok_reports(&state, account.id, parsed_policy_context.model.clone());
                     record_failover_success_if_needed(&state, did_cross_account_failover);
                     return response;
@@ -1142,6 +1206,12 @@ pub async fn proxy_handler(
                     && same_account_retryable
                     && Instant::now() < failover_deadline
                 {
+                    if let Some(rewritten_body) = rewrite_http_retry_request_body(
+                        &upstream_request_body,
+                        upstream_error_context.as_ref(),
+                    ) {
+                        upstream_request_body = rewritten_body;
+                    }
                     log_failover_decision(
                         UpstreamErrorSource::Http,
                         Some(account.id),
@@ -1401,6 +1471,12 @@ pub async fn proxy_handler(
                             && should_retry_same_account
                             && Instant::now() < failover_deadline
                         {
+                            if let Some(rewritten_body) = rewrite_http_retry_request_body(
+                                &upstream_request_body,
+                                error_context.as_ref(),
+                            ) {
+                                upstream_request_body = rewritten_body;
+                            }
                             log_failover_decision(
                                 UpstreamErrorSource::SsePrelude,
                                 Some(account.id),
@@ -1541,6 +1617,7 @@ pub async fn proxy_handler(
             let mut non_stream_estimated_usage: Option<UsageTokens> = None;
             let mut non_stream_effective_service_tier =
                 parsed_policy_context.requested_service_tier.clone();
+            let mut non_stream_response_body: Option<Bytes> = None;
 
             let (response, upstream_error_context, is_503_overloaded) = if status
                 == StatusCode::SERVICE_UNAVAILABLE
@@ -1567,6 +1644,7 @@ pub async fn proxy_handler(
                     upstream_response,
                 )
                 .await;
+                non_stream_response_body = Some(body.clone());
                 non_stream_observed_usage = extract_usage_tokens(&body);
                 non_stream_effective_service_tier = extract_response_service_tier(&body)
                     .or_else(|| parsed_policy_context.requested_service_tier.clone());
@@ -1744,6 +1822,19 @@ pub async fn proxy_handler(
                     (!is_stream).then_some(started.elapsed().as_millis() as u64),
                 )
                 .await;
+                if path == "/v1/responses" && !is_stream {
+                    if let Some(response_body) = non_stream_response_body.as_ref() {
+                        store_completed_response_from_proxy(
+                            &state,
+                            principal.as_ref(),
+                            &body_bytes,
+                            response_body,
+                            &parsed_policy_context,
+                            false,
+                        )
+                        .await;
+                    }
+                }
                 spawn_seen_ok_reports(&state, account.id, parsed_policy_context.model.clone());
                 record_failover_success_if_needed(&state, did_cross_account_failover);
                 return response;
@@ -1774,6 +1865,11 @@ pub async fn proxy_handler(
                 && same_account_retryable
                 && Instant::now() < failover_deadline
             {
+                if let Some(rewritten_body) =
+                    rewrite_http_retry_request_body(&upstream_request_body, upstream_error_context.as_ref())
+                {
+                    upstream_request_body = rewritten_body;
+                }
                 log_failover_decision(
                     UpstreamErrorSource::Http,
                     Some(account.id),
@@ -3041,6 +3137,9 @@ mod entry_route_selection_tests {
             invalid_request_guard_block_ttl: Duration::from_secs(120),
             invalid_request_guard: std::sync::RwLock::new(HashMap::new()),
             invalid_request_guard_block_total: AtomicU64::new(0),
+            background_responses: Arc::new(BackgroundResponsesRuntime::from_env(
+                "127.0.0.1:0".parse().unwrap(),
+            )),
         })
     }
 

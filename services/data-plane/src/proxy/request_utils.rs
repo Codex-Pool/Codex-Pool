@@ -162,7 +162,6 @@ fn maybe_adapt_openai_responses_request_for_codex_profile(
         .get("stream")
         .and_then(Value::as_bool)
         .unwrap_or(false);
-
     if !matches!(object.get("instructions"), Some(Value::String(_))) {
         object.insert("instructions".to_string(), Value::String(String::new()));
         changed = true;
@@ -175,6 +174,10 @@ fn maybe_adapt_openai_responses_request_for_codex_profile(
         }
     }
 
+    if object.remove("conversation").is_some() {
+        changed = true;
+    }
+
     if is_compact {
         if object.remove("store").is_some() {
             changed = true;
@@ -183,19 +186,10 @@ fn maybe_adapt_openai_responses_request_for_codex_profile(
             changed = true;
         }
     } else {
-        if object.get("store").and_then(Value::as_bool) != Some(false) {
-            object.insert("store".to_string(), Value::Bool(false));
-            changed = true;
-        }
-
         if !original_stream {
             object.insert("stream".to_string(), Value::Bool(true));
             changed = true;
         }
-    }
-
-    if object.remove("max_output_tokens").is_some() {
-        changed = true;
     }
 
     if !changed {
@@ -208,6 +202,28 @@ fn maybe_adapt_openai_responses_request_for_codex_profile(
         strip_content_encoding: headers.contains_key(axum::http::header::CONTENT_ENCODING),
         bridge_stream_response: !is_compact && !original_stream,
     })
+}
+
+fn rewrite_http_retry_request_body(
+    original_request_body: &bytes::Bytes,
+    error_context: Option<&UpstreamErrorContext>,
+) -> Option<bytes::Bytes> {
+    if !matches!(
+        error_context.and_then(|context| context.error_code.as_deref()),
+        Some("previous_response_not_found")
+    ) {
+        return Some(original_request_body.clone());
+    }
+
+    let mut value = serde_json::from_slice::<Value>(original_request_body).ok()?;
+    let object = value.as_object_mut()?;
+    if object.remove("previous_response_id").is_none() {
+        return Some(original_request_body.clone());
+    }
+
+    serde_json::to_vec(&value)
+        .ok()
+        .map(bytes::Bytes::from)
 }
 
 fn adapt_codex_input_value(input: Value) -> Value {
@@ -579,11 +595,13 @@ fn decide_upstream_error(
         );
     }
 
-    if matches!(source, UpstreamErrorSource::WsPrelude)
-        && matches!(
-            context.error_code.as_deref(),
-            Some("previous_response_not_found")
-        )
+    if matches!(
+        source,
+        UpstreamErrorSource::Http | UpstreamErrorSource::SsePrelude | UpstreamErrorSource::WsPrelude
+    ) && matches!(
+        context.error_code.as_deref(),
+        Some("previous_response_not_found")
+    )
     {
         return build_upstream_error_decision(
             RetryScope::SameAccount,
@@ -592,7 +610,7 @@ fn decide_upstream_error(
             "previous_response_not_found",
             "upstream continuation anchor expired",
             recovery_action,
-            "ws_previous_response_reset_same_account_reconnect",
+            "previous_response_reset_same_account_retry",
         );
     }
 
@@ -791,9 +809,13 @@ fn should_retry_same_account_on_status(
     if !matches!(decision.retry_scope, RetryScope::SameAccount) {
         return false;
     }
-    status.is_server_error()
-        && status != StatusCode::UNAUTHORIZED
-        && status != StatusCode::FORBIDDEN
+    if matches!(
+        error_context.and_then(|context| context.error_code.as_deref()),
+        Some("previous_response_not_found")
+    ) {
+        return true;
+    }
+    status.is_server_error() && status != StatusCode::UNAUTHORIZED && status != StatusCode::FORBIDDEN
 }
 
 fn has_untried_cross_account_candidate(
@@ -2068,6 +2090,12 @@ fn parse_request_policy_context(
         .unwrap_or(false);
     let requested_service_tier = extract_service_tier_from_value(&value);
     let estimated_input_tokens = estimate_request_input_tokens(&value);
+    let conversation_id = value
+        .get("conversation")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToString::to_string);
     let sticky_key_hint = value
         .get("prompt_cache_key")
         .and_then(Value::as_str)
@@ -2095,7 +2123,7 @@ fn parse_request_policy_context(
         detected_locale: detect_request_locale(headers, body),
         estimated_input_tokens,
         continuation_key_hint: previous_response_id.clone(),
-        sticky_key_hint,
+        sticky_key_hint: sticky_key_hint.or_else(|| conversation_id.clone()),
         session_key_hint: sticky_session_key_from_headers(headers)
             .or_else(|| {
                 value
@@ -2106,7 +2134,9 @@ fn parse_request_policy_context(
                     .filter(|value| !value.is_empty())
                     .map(ToString::to_string)
             })
+            .or_else(|| conversation_id.clone())
             .or(previous_response_id),
+        conversation_id,
     }
 }
 

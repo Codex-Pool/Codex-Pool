@@ -1604,6 +1604,7 @@ fn parse_ws_request_policy_context(
             .clone()
             .or(header_or_metadata_session_key.clone()),
         session_key_hint: previous_response_id.or(header_or_metadata_session_key),
+        conversation_id: None,
     }
 }
 

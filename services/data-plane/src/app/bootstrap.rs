@@ -32,7 +32,10 @@ use crate::event::http_sink::ControlPlaneHttpEventSink;
 use crate::event::redis_sink::RedisStreamEventSink;
 use crate::event::{EventSink, NoopEventSink};
 use crate::outbound_proxy_runtime::OutboundProxyRuntime;
-use crate::proxy::{proxy_handler, proxy_websocket_handler};
+use crate::proxy::{
+    proxy_handler, proxy_websocket_handler, responses_cancel_handler,
+    responses_input_tokens_handler, responses_retrieve_handler, BackgroundResponsesRuntime,
+};
 use crate::router::RoundRobinRouter;
 #[cfg(feature = "redis-backend")]
 use crate::routing_cache::HybridRoutingCache;
@@ -176,6 +179,7 @@ pub struct AppState {
     pub invalid_request_guard_block_ttl: Duration,
     pub invalid_request_guard: RwLock<InvalidRequestGuardState>,
     pub invalid_request_guard_block_total: AtomicU64,
+    pub background_responses: Arc<BackgroundResponsesRuntime>,
 }
 
 impl AppState {
@@ -633,6 +637,7 @@ async fn build_app_with_options(
         invalid_request_guard_block_ttl: Duration::from_secs(invalid_request_guard_block_sec),
         invalid_request_guard: RwLock::new(HashMap::new()),
         invalid_request_guard_block_total: AtomicU64::new(0),
+        background_responses: Arc::new(BackgroundResponsesRuntime::from_env(config.listen_addr)),
     });
 
     if matches!(snapshot_poller_mode, SnapshotPollerMode::Enabled) {
@@ -643,10 +648,28 @@ async fn build_app_with_options(
         }
     }
 
+    {
+        let runtime = state.background_responses.clone();
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(runtime.cleanup_interval());
+            interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+            loop {
+                interval.tick().await;
+                runtime.cleanup_expired().await;
+            }
+        });
+    }
+
     let protected_routes = Router::new()
         .route(
             "/v1/responses",
             post(proxy_handler).get(proxy_websocket_handler),
+        )
+        .route("/v1/responses/input_tokens", post(responses_input_tokens_handler))
+        .route("/v1/responses/{response_id}", get(responses_retrieve_handler))
+        .route(
+            "/v1/responses/{response_id}/cancel",
+            post(responses_cancel_handler),
         )
         .route("/v1/responses/compact", post(proxy_handler))
         .route("/v1/memories/trace_summarize", post(proxy_handler))

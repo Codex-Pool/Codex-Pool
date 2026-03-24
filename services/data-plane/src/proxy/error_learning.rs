@@ -749,6 +749,9 @@ mod ai_error_learning_tests {
             invalid_request_guard_block_ttl: Duration::from_secs(120),
             invalid_request_guard: std::sync::RwLock::new(HashMap::new()),
             invalid_request_guard_block_total: AtomicU64::new(0),
+            background_responses: Arc::new(crate::proxy::BackgroundResponsesRuntime::from_env(
+                "127.0.0.1:0".parse().unwrap(),
+            )),
         })
     }
 
