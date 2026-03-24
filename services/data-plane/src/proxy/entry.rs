@@ -2364,6 +2364,15 @@ pub async fn proxy_websocket_handler(
                         upstream_error_class = upstream_error_class_label(error_context.as_ref()),
                         "failed to connect upstream websocket"
                     );
+                    // Keep websocket handshake failures aligned with HTTP failures so
+                    // upstream auth/quota signals can drive runtime pool state changes.
+                    spawn_failed_live_report(
+                        &state,
+                        account.id,
+                        None,
+                        status,
+                        error_context.as_ref(),
+                    );
                     if state.enable_request_failover
                         && should_retry_same_account
                         && Instant::now() < failover_deadline
