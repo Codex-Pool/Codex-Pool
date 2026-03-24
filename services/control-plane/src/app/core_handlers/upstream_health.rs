@@ -12,6 +12,7 @@ const DEFAULT_UPSTREAM_SEEN_OK_MIN_WRITE_INTERVAL_SEC: i64 = 10;
 const UPSTREAM_SEEN_OK_RATE_LIMIT_REFRESH_ENABLED_ENV: &str =
     "CONTROL_PLANE_UPSTREAM_SEEN_OK_RATE_LIMIT_REFRESH_ENABLED";
 const DEFAULT_UPSTREAM_SEEN_OK_RATE_LIMIT_REFRESH_ENABLED: bool = true;
+const LIVE_RESULT_LOG_MESSAGE_MAX_CHARS: usize = 240;
 
 #[cfg(feature = "redis-backend")]
 #[derive(Clone)]
@@ -113,6 +114,57 @@ fn upstream_seen_ok_rate_limit_refresh_enabled_from_env() -> bool {
         .ok()
         .and_then(|raw| parse_bool_flag(&raw))
         .unwrap_or(DEFAULT_UPSTREAM_SEEN_OK_RATE_LIMIT_REFRESH_ENABLED)
+}
+
+fn summarize_live_result_error_message_for_log(value: Option<&str>) -> String {
+    let Some(value) = value.map(str::trim).filter(|value| !value.is_empty()) else {
+        return "none".to_string();
+    };
+
+    if let Ok(json) = serde_json::from_str::<serde_json::Value>(value) {
+        if let Some(event_type) = json.get("type").and_then(|item| item.as_str()) {
+            return format!("upstream_event:{event_type}");
+        }
+        if let Some(error_code) = json
+            .get("error")
+            .and_then(|error| error.get("code"))
+            .and_then(|item| item.as_str())
+            .filter(|value| !value.trim().is_empty())
+        {
+            return format!("upstream_error:{error_code}");
+        }
+        if let Some(error_message) = json
+            .get("error")
+            .and_then(|error| error.get("message"))
+            .and_then(|item| item.as_str())
+        {
+            return truncate_live_result_log_text(error_message);
+        }
+        if let Some(object) = json.as_object() {
+            let mut keys = object.keys().cloned().collect::<Vec<_>>();
+            keys.sort();
+            let keys = keys.into_iter().take(6).collect::<Vec<_>>().join(",");
+            if !keys.is_empty() {
+                return format!("json_payload:{keys}");
+            }
+        }
+    }
+
+    truncate_live_result_log_text(value)
+}
+
+fn truncate_live_result_log_text(value: &str) -> String {
+    let collapsed = value.split_whitespace().collect::<Vec<_>>().join(" ");
+    let mut chars = collapsed.chars();
+    let truncated = chars
+        .by_ref()
+        .take(LIVE_RESULT_LOG_MESSAGE_MAX_CHARS)
+        .collect::<String>();
+    if chars.next().is_some() {
+        format!("{truncated}...[truncated]")
+    } else {
+        truncated
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -324,12 +376,14 @@ async fn internal_report_upstream_account_live_result(
                 )
             })?,
         InternalLiveResultStatus::Failed => {
+            let error_message_for_log =
+                summarize_live_result_error_message_for_log(req.error_message.as_deref());
             tracing::info!(
                 account_id = %account_id,
                 source = ?req.source,
                 status_code = req.status_code,
                 error_code = normalized_error_code.as_deref().unwrap_or_default(),
-                error_message = req.error_message.as_deref().unwrap_or_default(),
+                error_message = error_message_for_log.as_str(),
                 upstream_request_id = req.upstream_request_id.as_deref().unwrap_or_default(),
                 model = req.model.as_deref().unwrap_or_default(),
                 "received upstream live-result failure signal"
@@ -453,4 +507,21 @@ async fn internal_update_observed_rate_limits(
         observed_at,
         persisted_limits,
     }))
+}
+
+#[cfg(test)]
+mod upstream_health_logging_tests {
+    use super::summarize_live_result_error_message_for_log;
+
+    #[test]
+    fn summarize_live_result_error_message_for_log_collapses_large_response_payload() {
+        let summary = summarize_live_result_error_message_for_log(Some(
+            r#"{"type":"response.created","response":{"id":"resp_123","model":"gpt-5.4","messages":[{"role":"user","content":"secret prompt"}]}}"#,
+        ));
+
+        assert!(summary.contains("response.created"));
+        assert!(!summary.contains("secret prompt"));
+        assert!(!summary.contains("\"messages\":["));
+        assert!(!summary.contains("\"response\":{\"id\""));
+    }
 }

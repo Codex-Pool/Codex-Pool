@@ -1069,20 +1069,19 @@ fn log_failover_decision(
         upstream_error_code = error_context
             .and_then(|context| context.error_code.as_deref())
             .unwrap_or("none"),
-        upstream_error_message = error_context
-            .and_then(|context| context.error_message.as_deref())
-            .unwrap_or("none"),
-        upstream_error_message_preview = error_context
-            .and_then(|context| context.error_message.as_deref())
-            .unwrap_or("none"),
-        upstream_error_raw = error_context
-            .and_then(|context| context.raw_error.as_deref())
-            .unwrap_or("none"),
+        upstream_error_message = sanitized_error_message.as_str(),
+        upstream_error_message_preview = sanitized_error_message.as_str(),
+        upstream_error_raw = sanitized_error_raw.as_str(),
         upstream_error_class = upstream_error_class_label(error_context),
         upstream_request_id = error_context
             .and_then(|context| context.upstream_request_id.as_deref())
             .unwrap_or("none"),
         retry_after_seconds = error_context.and_then(|context| context.retry_after.map(|value| value.as_secs())),
+    let sanitized_error_message = sanitize_upstream_error_log_value(
+        error_context.and_then(|context| context.error_message.as_deref()),
+    );
+    let sanitized_error_raw =
+        sanitize_upstream_error_log_value(error_context.and_then(|context| context.raw_error.as_deref()));
         retry_scope = decision
             .as_ref()
             .map(|value| retry_scope_label(value.retry_scope))
@@ -1129,6 +1128,13 @@ async fn emit_request_log_event(
         method,
         status,
         started,
+fn sanitize_upstream_error_log_value(value: Option<&str>) -> String {
+    let Some(value) = value.map(str::trim).filter(|value| !value.is_empty()) else {
+        return "none".to_string();
+    };
+    sanitize_upstream_error_raw(Some(value), None).unwrap_or_else(|| "none".to_string())
+}
+
         is_stream,
         request_id,
         model,
@@ -2445,6 +2451,7 @@ mod request_utils_tests {
     #[test]
     fn classifies_known_auth_refresh_403_as_auth_expired() {
         let class = classify_upstream_error(
+        sanitize_upstream_error_log_value,
             StatusCode::FORBIDDEN,
             None,
             Some("Your access token could not be refreshed because you have since logged out."),
@@ -2735,3 +2742,15 @@ mod request_utils_tests {
         assert_eq!(value["service_tier"], "priority");
     }
 }
+
+    #[test]
+    fn sanitize_upstream_error_log_value_redacts_large_response_event_payloads() {
+        let sanitized = sanitize_upstream_error_log_value(Some(
+            r#"{"type":"response.created","response":{"id":"resp_123","model":"gpt-5.4","messages":[{"role":"user","content":"sensitive prompt"}]}}"#,
+        ));
+
+        assert!(sanitized.contains("response.created"));
+        assert!(!sanitized.contains("sensitive prompt"));
+        assert!(!sanitized.contains("\"messages\":["));
+        assert!(!sanitized.contains("\"response\":{\"id\""));
+    }

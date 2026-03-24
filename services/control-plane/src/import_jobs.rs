@@ -21,8 +21,8 @@ use uuid::Uuid;
 use crate::contracts::{
     ImportOAuthRefreshTokenRequest, OAuthImportAdmissionCounts, OAuthImportErrorSummary,
     OAuthImportItemStatus, OAuthImportJobActionResponse, OAuthImportJobItem,
-    OAuthImportJobItemsResponse, OAuthImportJobStatus, OAuthImportJobSummary, OAuthInventoryRecord,
-    OAuthInventoryFailureStage, OAuthVaultRecordStatus,
+    OAuthImportJobItemsResponse, OAuthImportJobStatus, OAuthImportJobSummary,
+    OAuthInventoryFailureStage, OAuthInventoryRecord, OAuthVaultRecordStatus,
 };
 use crate::store::ControlPlaneStore;
 #[cfg(feature = "postgres-backend")]
@@ -938,8 +938,7 @@ impl SqliteOAuthImportJobStore {
                 .unwrap_or_default(),
             updated_count: u64::try_from(row.try_get::<i64, _>("updated_count")?)
                 .unwrap_or_default(),
-            failed_count: u64::try_from(row.try_get::<i64, _>("failed_count")?)
-                .unwrap_or_default(),
+            failed_count: u64::try_from(row.try_get::<i64, _>("failed_count")?).unwrap_or_default(),
             skipped_count: u64::try_from(row.try_get::<i64, _>("skipped_count")?)
                 .unwrap_or_default(),
             started_at,
@@ -1507,7 +1506,13 @@ impl OAuthImportJobStore for SqliteOAuthImportJobStore {
                     error_message,
                     admission_status,
                     admission_source,
-                    admission_reason
+                    admission_reason,
+                    failure_stage,
+                    attempt_count,
+                    transient_retry_count,
+                    next_retry_at,
+                    retryable,
+                    terminal_reason
                 FROM oauth_import_job_items
                 WHERE job_id = ?1 AND status = ?2 AND item_id > ?3
                 ORDER BY item_id ASC
@@ -1585,10 +1590,8 @@ impl OAuthImportJobStore for SqliteOAuthImportJobStore {
                     .try_get::<Option<String>, _>("failure_stage")?
                     .map(|raw| parse_failure_stage(raw.as_str()))
                     .transpose()?,
-                attempt_count: u32::try_from(
-                    row.try_get::<i64, _>("attempt_count")?.max(0),
-                )
-                .unwrap_or_default(),
+                attempt_count: u32::try_from(row.try_get::<i64, _>("attempt_count")?.max(0))
+                    .unwrap_or_default(),
                 transient_retry_count: u32::try_from(
                     row.try_get::<i64, _>("transient_retry_count")?.max(0),
                 )
@@ -2319,19 +2322,21 @@ mod sqlite_store_tests {
                     retryable: false,
                     terminal_reason: None,
                 },
-                request: Some(ImportTaskRequest::OAuthRefresh(ImportOAuthRefreshTokenRequest {
-                    label: "sqlite-import-1".to_string(),
-                    base_url: DEFAULT_BASE_URL.to_string(),
-                    refresh_token: "rt-sqlite-import-1".to_string(),
-                    fallback_access_token: Some("ak-sqlite-import-1".to_string()),
-                    fallback_token_expires_at: Some(Utc::now() + chrono::Duration::hours(1)),
-                    chatgpt_account_id: Some("acct_sqlite_1".to_string()),
-                    mode: Some(UpstreamMode::CodexOauth),
-                    enabled: Some(true),
-                    priority: Some(100),
-                    chatgpt_plan_type: Some("free".to_string()),
-                    source_type: Some("codex".to_string()),
-                })),
+                request: Some(ImportTaskRequest::OAuthRefresh(
+                    ImportOAuthRefreshTokenRequest {
+                        label: "sqlite-import-1".to_string(),
+                        base_url: DEFAULT_BASE_URL.to_string(),
+                        refresh_token: "rt-sqlite-import-1".to_string(),
+                        fallback_access_token: Some("ak-sqlite-import-1".to_string()),
+                        fallback_token_expires_at: Some(Utc::now() + chrono::Duration::hours(1)),
+                        chatgpt_account_id: Some("acct_sqlite_1".to_string()),
+                        mode: Some(UpstreamMode::CodexOauth),
+                        enabled: Some(true),
+                        priority: Some(100),
+                        chatgpt_plan_type: Some("free".to_string()),
+                        source_type: Some("codex".to_string()),
+                    },
+                )),
                 raw_record: Some(serde_json::json!({"raw": 1})),
                 normalized_record: None,
                 retry_count: 0,
@@ -2358,19 +2363,21 @@ mod sqlite_store_tests {
                     retryable: false,
                     terminal_reason: None,
                 },
-                request: Some(ImportTaskRequest::OAuthRefresh(ImportOAuthRefreshTokenRequest {
-                    label: "sqlite-import-2".to_string(),
-                    base_url: DEFAULT_BASE_URL.to_string(),
-                    refresh_token: "rt-sqlite-import-2".to_string(),
-                    fallback_access_token: None,
-                    fallback_token_expires_at: None,
-                    chatgpt_account_id: Some("acct_sqlite_2".to_string()),
-                    mode: Some(UpstreamMode::CodexOauth),
-                    enabled: Some(true),
-                    priority: Some(100),
-                    chatgpt_plan_type: Some("plus".to_string()),
-                    source_type: Some("codex".to_string()),
-                })),
+                request: Some(ImportTaskRequest::OAuthRefresh(
+                    ImportOAuthRefreshTokenRequest {
+                        label: "sqlite-import-2".to_string(),
+                        base_url: DEFAULT_BASE_URL.to_string(),
+                        refresh_token: "rt-sqlite-import-2".to_string(),
+                        fallback_access_token: None,
+                        fallback_token_expires_at: None,
+                        chatgpt_account_id: Some("acct_sqlite_2".to_string()),
+                        mode: Some(UpstreamMode::CodexOauth),
+                        enabled: Some(true),
+                        priority: Some(100),
+                        chatgpt_plan_type: Some("plus".to_string()),
+                        source_type: Some("codex".to_string()),
+                    },
+                )),
                 raw_record: Some(serde_json::json!({"raw": 2})),
                 normalized_record: Some(serde_json::json!({"normalized": 2})),
                 retry_count: 0,
@@ -2421,7 +2428,10 @@ mod sqlite_store_tests {
             .expect("load sqlite job items after reopen");
         assert_eq!(items.items.len(), 2);
         assert_eq!(items.items[0].label, "sqlite-import-1");
-        assert_eq!(items.items[1].chatgpt_account_id.as_deref(), Some("acct_sqlite_2"));
+        assert_eq!(
+            items.items[1].chatgpt_account_id.as_deref(),
+            Some("acct_sqlite_2")
+        );
     }
 
     #[tokio::test]
@@ -2463,5 +2473,58 @@ mod sqlite_store_tests {
             .await
             .expect("load sqlite recoverable job ids");
         assert_eq!(recoverable, vec![job_id]);
+    }
+
+    #[tokio::test]
+    async fn sqlite_import_job_store_filters_items_by_status_without_losing_extended_fields() {
+        let database_url = temp_sqlite_url("oauth-import-job-store-filter-status");
+        let pool = PoolOptions::new()
+            .max_connections(1)
+            .connect(&database_url)
+            .await
+            .expect("connect sqlite import job filter pool");
+        let store = SqliteOAuthImportJobStore::new(pool)
+            .await
+            .expect("create sqlite import job filter store");
+        let job_id = Uuid::new_v4();
+
+        let mut items = sample_items();
+        items[0].item.status = OAuthImportItemStatus::Created;
+        items[0].item.admission_status = Some(OAuthVaultRecordStatus::Ready);
+        items[0].item.admission_source = Some("fallback_access_token".to_string());
+        items[0].item.attempt_count = 1;
+        items[1].item.status = OAuthImportItemStatus::Failed;
+        items[1].item.error_code = Some("invalid_refresh_token".to_string());
+        items[1].item.error_message = Some("invalid_refresh_token".to_string());
+        items[1].item.admission_status = Some(OAuthVaultRecordStatus::Failed);
+        items[1].item.admission_reason = Some("invalid_refresh_token".to_string());
+        items[1].item.failure_stage = Some(OAuthInventoryFailureStage::AdmissionProbe);
+        items[1].item.attempt_count = 2;
+        items[1].item.transient_retry_count = 1;
+        items[1].item.retryable = false;
+        items[1].item.terminal_reason = Some("invalid_refresh_token".to_string());
+
+        store
+            .create_job(sample_summary(job_id), items)
+            .await
+            .expect("create sqlite import job for status filter");
+
+        let failed = store
+            .get_job_items(job_id, Some(OAuthImportItemStatus::Failed), None, 50)
+            .await
+            .expect("load sqlite failed items by status");
+        assert_eq!(failed.items.len(), 1);
+        assert_eq!(failed.items[0].status, OAuthImportItemStatus::Failed);
+        assert_eq!(
+            failed.items[0].failure_stage,
+            Some(OAuthInventoryFailureStage::AdmissionProbe)
+        );
+        assert_eq!(failed.items[0].attempt_count, 2);
+        assert_eq!(failed.items[0].transient_retry_count, 1);
+        assert!(!failed.items[0].retryable);
+        assert_eq!(
+            failed.items[0].terminal_reason.as_deref(),
+            Some("invalid_refresh_token")
+        );
     }
 }
