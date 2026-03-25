@@ -2103,15 +2103,24 @@ fn parse_request_policy_context(
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(ToString::to_string);
+    let prompt_cache_key = value
+        .get("prompt_cache_key")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToString::to_string);
+    let metadata_session_id = value
+        .get("metadata")
+        .and_then(|meta| meta.get("session_id"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToString::to_string);
+    let header_session_key = sticky_session_key_from_headers(headers);
     let sticky_key_hint = value
         .get("prompt_cache_key")
         .and_then(Value::as_str)
-        .or_else(|| {
-            value
-                .get("metadata")
-                .and_then(|meta| meta.get("session_id"))
-                .and_then(Value::as_str)
-        })
+        .or_else(|| metadata_session_id.as_deref())
         .or_else(|| value.get("previous_response_id").and_then(Value::as_str))
         .map(str::trim)
         .filter(|value| !value.is_empty())
@@ -2129,18 +2138,15 @@ fn parse_request_policy_context(
         request_id,
         detected_locale: detect_request_locale(headers, body),
         estimated_input_tokens,
+        continuation_cursor_key: conversation_id
+            .clone()
+            .or(prompt_cache_key.clone())
+            .or(metadata_session_id.clone())
+            .or(header_session_key.clone()),
         continuation_key_hint: previous_response_id.clone(),
         sticky_key_hint: sticky_key_hint.or_else(|| conversation_id.clone()),
-        session_key_hint: sticky_session_key_from_headers(headers)
-            .or_else(|| {
-                value
-                    .get("metadata")
-                    .and_then(|meta| meta.get("session_id"))
-                    .and_then(Value::as_str)
-                    .map(str::trim)
-                    .filter(|value| !value.is_empty())
-                    .map(ToString::to_string)
-            })
+        session_key_hint: header_session_key
+            .or(metadata_session_id)
             .or_else(|| conversation_id.clone())
             .or(previous_response_id),
         conversation_id,
@@ -2738,6 +2744,41 @@ mod request_utils_tests {
 
         assert_eq!(context.model.as_deref(), Some("gpt-5.4"));
         assert_eq!(context.detected_locale, "zh-CN");
+    }
+
+    #[test]
+    fn parse_request_policy_context_extracts_prompt_cache_key_as_continuation_cursor_key() {
+        let headers = HeaderMap::new();
+        let body = bytes::Bytes::from(
+            json!({
+                "model": "gpt-5.4",
+                "store": false,
+                "prompt_cache_key": "codex-restart-smoke-001",
+                "input": [
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "input_text",
+                                "text": "Reply with OK"
+                            }
+                        ]
+                    }
+                ]
+            })
+            .to_string(),
+        );
+
+        let context = parse_request_policy_context(&headers, &body);
+
+        assert_eq!(
+            context.continuation_cursor_key.as_deref(),
+            Some("codex-restart-smoke-001")
+        );
+        assert_eq!(
+            context.sticky_key_hint.as_deref(),
+            Some("codex-restart-smoke-001")
+        );
     }
 
     #[test]

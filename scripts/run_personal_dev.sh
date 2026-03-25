@@ -5,6 +5,7 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 RUNTIME_ENV_FILE="${PERSONAL_DEV_ENV_FILE:-${REPO_ROOT}/.env.runtime}"
 PERSONAL_DATA_DIR="${REPO_ROOT}/.codex/data/personal"
 PERSONAL_DB_PATH="${PERSONAL_DATA_DIR}/codex-pool-personal.sqlite"
+PERSONAL_RESPONSES_CURSOR_PATH="${PERSONAL_DATA_DIR}/responses-continuation-cursors.json"
 
 incoming_admin_username="${ADMIN_USERNAME-}"
 incoming_admin_password="${ADMIN_PASSWORD-}"
@@ -48,6 +49,7 @@ fi
 
 export CODEX_POOL_EDITION=personal
 export CONTROL_PLANE_DATABASE_URL="sqlite://${PERSONAL_DB_PATH}?mode=rwc"
+export DATA_PLANE_RESPONSES_CURSOR_STORE_PATH="${DATA_PLANE_RESPONSES_CURSOR_STORE_PATH:-$PERSONAL_RESPONSES_CURSOR_PATH}"
 export RUST_LOG="${RUST_LOG:-debug}"
 
 cd "$REPO_ROOT"
@@ -56,6 +58,7 @@ cat <<EOF
 [run_personal_dev] repo root: $REPO_ROOT
 [run_personal_dev] runtime env: $RUNTIME_ENV_FILE
 [run_personal_dev] sqlite path: $PERSONAL_DB_PATH
+[run_personal_dev] responses cursor path: ${DATA_PLANE_RESPONSES_CURSOR_STORE_PATH:-unset}
 [run_personal_dev] control plane base url: ${CONTROL_PLANE_BASE_URL:-http://127.0.0.1:8090}
 [run_personal_dev] admin username: ${ADMIN_USERNAME:-admin}
 [run_personal_dev] RUST_LOG=$RUST_LOG

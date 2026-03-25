@@ -1,7 +1,10 @@
 use std::collections::HashMap;
 use std::convert::Infallible;
+use std::fs;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::path::{Path as FsPath, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::SystemTime;
 
 use axum::extract::{Path, Query};
 use axum::http::header::CONTENT_TYPE;
@@ -16,6 +19,8 @@ const BACKGROUND_RESPONSES_CLEANUP_INTERVAL_SEC_ENV: &str =
     "DATA_PLANE_RESPONSES_CLEANUP_INTERVAL_SEC";
 const BACKGROUND_RESPONSES_MAX_CONCURRENCY_ENV: &str = "DATA_PLANE_RESPONSES_MAX_CONCURRENCY";
 const BACKGROUND_RESPONSES_MAX_RPS_ENV: &str = "DATA_PLANE_RESPONSES_MAX_RPS";
+const BACKGROUND_RESPONSES_CURSOR_STORE_PATH_ENV: &str =
+    "DATA_PLANE_RESPONSES_CURSOR_STORE_PATH";
 const DATA_PLANE_BASE_URL_ENV: &str = "DATA_PLANE_BASE_URL";
 const DEFAULT_BACKGROUND_RESPONSES_RETENTION_SEC: u64 = 24 * 60 * 60;
 const DEFAULT_BACKGROUND_RESPONSES_CLEANUP_INTERVAL_SEC: u64 = 60;
@@ -41,6 +46,7 @@ pub struct BackgroundResponsesRuntime {
     cleanup_interval: Duration,
     max_rps: u32,
     in_flight_total: Arc<AtomicU64>,
+    continuation_cursor_store_path: Option<PathBuf>,
 }
 
 #[derive(Debug)]
@@ -61,6 +67,14 @@ struct ConversationCursor {
     owner_key: String,
     response_id: String,
     expires_at: Instant,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+struct PersistedConversationCursor {
+    key: String,
+    owner_key: String,
+    response_id: String,
+    expires_at_unix_ms: u64,
 }
 
 #[derive(Debug, Clone)]
@@ -201,10 +215,37 @@ impl BackgroundResponsesRuntime {
                 let host = loopback_host_for_listen_addr(listen_addr);
                 format!("http://{host}:{}", listen_addr.port())
             });
+        let continuation_cursor_store_path = std::env::var(BACKGROUND_RESPONSES_CURSOR_STORE_PATH_ENV)
+            .ok()
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty())
+            .map(PathBuf::from);
 
+        Self::new(
+            retention,
+            cleanup_interval,
+            max_concurrency,
+            max_rps,
+            self_base_url,
+            continuation_cursor_store_path,
+        )
+    }
+
+    fn new(
+        retention: Duration,
+        cleanup_interval: Duration,
+        max_concurrency: usize,
+        max_rps: u32,
+        self_base_url: String,
+        continuation_cursor_store_path: Option<PathBuf>,
+    ) -> Self {
+        let conversations = continuation_cursor_store_path
+            .as_deref()
+            .and_then(load_persisted_conversations)
+            .unwrap_or_default();
         Self {
             entries: Arc::new(RwLock::new(HashMap::new())),
-            conversations: Arc::new(RwLock::new(HashMap::new())),
+            conversations: Arc::new(RwLock::new(conversations)),
             permits: Arc::new(Semaphore::new(max_concurrency)),
             next_dispatch_at: Arc::new(Mutex::new(Instant::now())),
             self_base_url: Arc::from(self_base_url),
@@ -212,7 +253,20 @@ impl BackgroundResponsesRuntime {
             cleanup_interval,
             max_rps,
             in_flight_total: Arc::new(AtomicU64::new(0)),
+            continuation_cursor_store_path,
         }
+    }
+
+    #[cfg(test)]
+    fn new_for_test(continuation_cursor_store_path: Option<PathBuf>) -> Self {
+        Self::new(
+            Duration::from_secs(DEFAULT_BACKGROUND_RESPONSES_RETENTION_SEC),
+            Duration::from_secs(DEFAULT_BACKGROUND_RESPONSES_CLEANUP_INTERVAL_SEC),
+            DEFAULT_BACKGROUND_RESPONSES_MAX_CONCURRENCY,
+            DEFAULT_BACKGROUND_RESPONSES_MAX_RPS,
+            "http://127.0.0.1:8090".to_string(),
+            continuation_cursor_store_path,
+        )
     }
 
     pub fn cleanup_interval(&self) -> Duration {
@@ -227,6 +281,8 @@ impl BackgroundResponsesRuntime {
 
         let mut conversations = self.conversations.write().await;
         conversations.retain(|_, cursor| cursor.expires_at > now);
+        drop(conversations);
+        self.persist_conversations_if_configured().await;
     }
 
     async fn lookup_response(&self, owner_key: &str, response_id: &str) -> Option<Value> {
@@ -320,13 +376,13 @@ impl BackgroundResponsesRuntime {
         CancelResponseOutcome::Response(record.response.clone())
     }
 
-    async fn current_conversation_response_id(
+    async fn current_continuation_response_id(
         &self,
         owner_key: &str,
-        conversation_id: &str,
+        continuation_key: &str,
     ) -> Option<String> {
         let conversations = self.conversations.read().await;
-        let cursor = conversations.get(conversation_id)?;
+        let cursor = conversations.get(continuation_key)?;
         if cursor.owner_key != owner_key || cursor.expires_at <= Instant::now() {
             return None;
         }
@@ -508,7 +564,7 @@ impl BackgroundResponsesRuntime {
         owner_key: String,
         request_body: &Value,
         response_body: &Bytes,
-        conversation_id: Option<String>,
+        continuation_cursor_key: Option<String>,
         force_store: bool,
     ) {
         let Some(mut response_value) = serde_json::from_slice::<Value>(response_body).ok() else {
@@ -521,10 +577,8 @@ impl BackgroundResponsesRuntime {
         else {
             return;
         };
-        if !force_store && request_explicitly_disables_store(request_body) {
-            return;
-        }
-        if let Some(conversation_id_value) = conversation_id.as_deref() {
+        let allow_retrieve = !request_explicitly_disables_store(request_body) || force_store;
+        if let Some(conversation_id_value) = continuation_cursor_key.as_deref() {
             if let Some(object) = response_value.as_object_mut() {
                 object
                     .entry("conversation".to_string())
@@ -533,22 +587,24 @@ impl BackgroundResponsesRuntime {
         }
 
         let expires_at = Instant::now() + self.retention;
-        self.entries.write().await.insert(
-            response_id.clone(),
-            StoredResponseRecord {
-                owner_key: owner_key.clone(),
-                response: response_value.clone(),
-                allow_retrieve: !request_explicitly_disables_store(request_body) || force_store,
-                input_items: derive_input_items(request_body, response_id.as_str()),
-                request_body: None,
-                cancelled: false,
-                background: false,
-                stream_state: None,
-                expires_at,
-            },
-        );
+        if allow_retrieve {
+            self.entries.write().await.insert(
+                response_id.clone(),
+                StoredResponseRecord {
+                    owner_key: owner_key.clone(),
+                    response: response_value.clone(),
+                    allow_retrieve,
+                    input_items: derive_input_items(request_body, response_id.as_str()),
+                    request_body: None,
+                    cancelled: false,
+                    background: false,
+                    stream_state: None,
+                    expires_at,
+                },
+            );
+        }
 
-        if let Some(conversation_id) = conversation_id {
+        if let Some(conversation_id) = continuation_cursor_key {
             self.conversations.write().await.insert(
                 conversation_id,
                 ConversationCursor {
@@ -557,6 +613,34 @@ impl BackgroundResponsesRuntime {
                     expires_at,
                 },
             );
+            self.persist_conversations_if_configured().await;
+        }
+    }
+
+    async fn persist_conversations_if_configured(&self) {
+        let Some(path) = self.continuation_cursor_store_path.as_deref() else {
+            return;
+        };
+        let now = Instant::now();
+        let persisted = {
+            let conversations = self.conversations.read().await;
+            conversations
+                .iter()
+                .filter_map(|(key, cursor)| {
+                    if cursor.expires_at <= now {
+                        return None;
+                    }
+                    Some(PersistedConversationCursor {
+                        key: key.clone(),
+                        owner_key: cursor.owner_key.clone(),
+                        response_id: cursor.response_id.clone(),
+                        expires_at_unix_ms: instant_to_epoch_millis(cursor.expires_at),
+                    })
+                })
+                .collect::<Vec<_>>()
+        };
+        if let Err(err) = persist_conversations_snapshot(path, &persisted) {
+            warn!(error = %err, path = %path.display(), "failed to persist responses continuation cursors");
         }
     }
 
@@ -1084,13 +1168,13 @@ async fn store_completed_response_from_proxy(
     };
     state
         .background_responses
-        .store_completed_response(
-            response_owner_key(principal),
-            &request_value,
-            response_body,
-            parsed_policy_context.conversation_id.clone(),
-            force_store,
-        )
+            .store_completed_response(
+                response_owner_key(principal),
+                &request_value,
+                response_body,
+                parsed_policy_context.continuation_cursor_key.clone(),
+                force_store,
+            )
         .await;
 }
 
@@ -1117,12 +1201,9 @@ fn apply_conversation_semantics_to_request(
         anyhow::bail!("previous_response_id cannot be used together with conversation");
     }
 
-    if let Some(conversation_id) = conversation_id.clone() {
-        parsed_policy_context.conversation_id = Some(conversation_id.clone());
-        parsed_policy_context.sticky_key_hint = Some(conversation_id.clone());
-        parsed_policy_context.session_key_hint = Some(conversation_id.clone());
-        if !has_previous_response_id {
-            if let Some(previous_response_id) = previous_response_id {
+    if !has_previous_response_id {
+        if let Some(previous_response_id) = previous_response_id {
+            if parsed_policy_context.continuation_cursor_key.is_some() {
                 object.insert(
                     "previous_response_id".to_string(),
                     Value::String(previous_response_id.clone()),
@@ -1130,6 +1211,12 @@ fn apply_conversation_semantics_to_request(
                 parsed_policy_context.continuation_key_hint = Some(previous_response_id);
             }
         }
+    }
+
+    if let Some(conversation_id) = conversation_id.clone() {
+        parsed_policy_context.conversation_id = Some(conversation_id.clone());
+        parsed_policy_context.sticky_key_hint = Some(conversation_id.clone());
+        parsed_policy_context.session_key_hint = Some(conversation_id.clone());
     }
 
     Ok(())
@@ -1527,4 +1614,141 @@ fn stable_token_hash(token: &str) -> String {
     let mut hasher = sha2::Sha256::new();
     hasher.update(token.as_bytes());
     hex::encode(hasher.finalize())
+}
+
+fn load_persisted_conversations(path: &FsPath) -> Option<HashMap<String, ConversationCursor>> {
+    let raw = fs::read(path).ok()?;
+    let persisted = serde_json::from_slice::<Vec<PersistedConversationCursor>>(&raw).ok()?;
+    let now_unix_ms = current_epoch_millis();
+    let now = Instant::now();
+    let mut conversations = HashMap::new();
+    for item in persisted {
+        if item.expires_at_unix_ms <= now_unix_ms {
+            continue;
+        }
+        let remaining_ms = item.expires_at_unix_ms.saturating_sub(now_unix_ms);
+        conversations.insert(
+            item.key,
+            ConversationCursor {
+                owner_key: item.owner_key,
+                response_id: item.response_id,
+                expires_at: now + Duration::from_millis(remaining_ms),
+            },
+        );
+    }
+    Some(conversations)
+}
+
+fn persist_conversations_snapshot(
+    path: &FsPath,
+    persisted: &[PersistedConversationCursor],
+) -> std::io::Result<()> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let tmp_path = path.with_extension("tmp");
+    let payload = serde_json::to_vec_pretty(persisted)
+        .map_err(|err| std::io::Error::other(err.to_string()))?;
+    fs::write(&tmp_path, payload)?;
+    fs::rename(tmp_path, path)?;
+    Ok(())
+}
+
+fn current_epoch_millis() -> u64 {
+    SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis()
+        .min(u128::from(u64::MAX)) as u64
+}
+
+fn instant_to_epoch_millis(target: Instant) -> u64 {
+    let now = Instant::now();
+    let delta = target.saturating_duration_since(now);
+    current_epoch_millis().saturating_add(
+        delta.as_millis().min(u128::from(u64::MAX)) as u64,
+    )
+}
+
+#[cfg(test)]
+mod responses_api_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn store_disabled_requests_still_persist_continuation_cursor() {
+        let tempdir = std::env::temp_dir().join(format!(
+            "codex-pool-responses-api-test-{}",
+            uuid::Uuid::new_v4()
+        ));
+        fs::create_dir_all(&tempdir).expect("tempdir");
+        let cursor_path = tempdir.join("responses-cursors.json");
+        let runtime = BackgroundResponsesRuntime::new_for_test(Some(cursor_path.clone()));
+
+        let request = json!({
+            "model": "gpt-5.4",
+            "store": false,
+            "prompt_cache_key": "conv-1",
+            "input": []
+        });
+        let response_body = Bytes::from_static(
+            br#"{"id":"resp_123","object":"response","status":"completed"}"#,
+        );
+
+        runtime
+            .store_completed_response(
+                "owner-1".to_string(),
+                &request,
+                &response_body,
+                Some("conv-1".to_string()),
+                false,
+            )
+            .await;
+
+        assert_eq!(
+            runtime
+                .current_continuation_response_id("owner-1", "conv-1")
+                .await
+                .as_deref(),
+            Some("resp_123")
+        );
+        assert!(runtime.lookup_response("owner-1", "resp_123").await.is_none());
+
+        let reloaded = BackgroundResponsesRuntime::new_for_test(Some(cursor_path));
+        assert_eq!(
+            reloaded
+                .current_continuation_response_id("owner-1", "conv-1")
+                .await
+                .as_deref(),
+            Some("resp_123")
+        );
+    }
+
+    #[test]
+    fn load_persisted_conversations_skips_expired_entries() {
+        let tempdir = std::env::temp_dir().join(format!(
+            "codex-pool-responses-api-test-{}",
+            uuid::Uuid::new_v4()
+        ));
+        fs::create_dir_all(&tempdir).expect("tempdir");
+        let cursor_path = tempdir.join("responses-cursors.json");
+        let payload = vec![
+            PersistedConversationCursor {
+                key: "fresh".to_string(),
+                owner_key: "owner".to_string(),
+                response_id: "resp_fresh".to_string(),
+                expires_at_unix_ms: current_epoch_millis() + 60_000,
+            },
+            PersistedConversationCursor {
+                key: "expired".to_string(),
+                owner_key: "owner".to_string(),
+                response_id: "resp_expired".to_string(),
+                expires_at_unix_ms: current_epoch_millis().saturating_sub(1),
+            },
+        ];
+        persist_conversations_snapshot(&cursor_path, &payload).expect("persist");
+
+        let loaded = load_persisted_conversations(&cursor_path).expect("load");
+        assert!(loaded.contains_key("fresh"));
+        assert!(!loaded.contains_key("expired"));
+    }
 }

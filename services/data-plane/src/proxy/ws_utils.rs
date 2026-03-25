@@ -1597,6 +1597,12 @@ fn parse_ws_request_policy_context(
         .map(str::trim)
         .filter(|item| !item.is_empty())
         .map(ToString::to_string);
+    let prompt_cache_key = request_value
+        .get("prompt_cache_key")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToString::to_string);
     let header_or_metadata_session_key = sticky_session_key_from_headers(headers).or_else(|| {
         request_value
             .get("metadata")
@@ -1621,9 +1627,13 @@ fn parse_ws_request_policy_context(
         request_id,
         detected_locale: detect_request_locale(headers, &bytes::Bytes::new()),
         estimated_input_tokens,
+        continuation_cursor_key: prompt_cache_key
+            .clone()
+            .or(header_or_metadata_session_key.clone()),
         continuation_key_hint: previous_response_id.clone(),
         sticky_key_hint: previous_response_id
             .clone()
+            .or(prompt_cache_key)
             .or(header_or_metadata_session_key.clone()),
         session_key_hint: previous_response_id.or(header_or_metadata_session_key),
         conversation_id: None,

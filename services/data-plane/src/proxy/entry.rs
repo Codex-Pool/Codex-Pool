@@ -112,6 +112,7 @@ struct ParsedRequestPolicyContext {
     request_id: Option<String>,
     detected_locale: String,
     estimated_input_tokens: Option<i64>,
+    continuation_cursor_key: Option<String>,
     continuation_key_hint: Option<String>,
     sticky_key_hint: Option<String>,
     session_key_hint: Option<String>,
@@ -399,16 +400,16 @@ pub async fn proxy_handler(
         if let Some(mut request_value) = parse_request_json_body(&parts.headers, &body_bytes) {
             let owner_key = response_owner_key(principal.as_ref());
             let prior_conversation_response_id = parsed_policy_context
-                .conversation_id
+                .continuation_cursor_key
                 .as_deref()
-                .map(|conversation_id| conversation_id.to_string());
+                .map(|continuation_key| continuation_key.to_string());
             let prior_conversation_response_id = match prior_conversation_response_id {
-                Some(conversation_id) => {
+                Some(continuation_key) => {
                     state
                         .background_responses
-                        .current_conversation_response_id(
+                        .current_continuation_response_id(
                             owner_key.as_str(),
-                            conversation_id.as_str(),
+                            continuation_key.as_str(),
                         )
                         .await
                 }
