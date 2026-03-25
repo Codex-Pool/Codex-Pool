@@ -182,16 +182,18 @@ fn maybe_adapt_openai_responses_request_for_codex_profile(
         changed = true;
     }
 
-    if object.get("store").and_then(Value::as_bool) != Some(false) {
-        object.insert("store".to_string(), Value::Bool(false));
-        changed = true;
-    }
-
     if is_compact {
+        if object.remove("store").is_some() {
+            changed = true;
+        }
         if object.remove("stream").is_some() {
             changed = true;
         }
     } else {
+        if object.get("store").and_then(Value::as_bool) != Some(false) {
+            object.insert("store".to_string(), Value::Bool(false));
+            changed = true;
+        }
         if !original_stream {
             object.insert("stream".to_string(), Value::Bool(true));
             changed = true;
@@ -2818,6 +2820,34 @@ mod request_utils_tests {
         let value: serde_json::Value =
             serde_json::from_slice(&adapted.body).expect("adapted body should stay json");
         assert_eq!(value["service_tier"], "priority");
+        assert_eq!(value["store"], false);
+    }
+
+    #[test]
+    fn codex_profile_compact_request_omits_store_parameter() {
+        let headers = HeaderMap::new();
+        let body = bytes::Bytes::from(
+            json!({
+                "model": "gpt-5.4",
+                "instructions": "",
+                "input": "compress this history",
+                "store": true
+            })
+            .to_string(),
+        );
+
+        let adapted = maybe_adapt_openai_responses_request_for_codex_profile(
+            &UpstreamMode::ChatGptSession,
+            "https://chatgpt.com/backend-api/codex",
+            "/v1/responses/compact",
+            &headers,
+            &body,
+        )
+        .expect("compact requests should be adapted for codex profile");
+
+        let value: serde_json::Value =
+            serde_json::from_slice(&adapted.body).expect("adapted body should stay json");
+        assert!(value.get("store").is_none());
     }
 
     #[test]

@@ -1386,14 +1386,19 @@ fn maybe_adapt_ws_downstream_message_for_codex_profile(
     {
         changed = true;
     }
+    let normalized_path = normalize_input_path(request_path);
     if value
         .as_object_mut()
         .and_then(|object| {
-            let current = object.get("store").and_then(Value::as_bool);
-            if current == Some(false) {
-                None
+            if normalized_path == "/v1/responses/compact" {
+                object.remove("store")
             } else {
-                object.insert("store".to_string(), Value::Bool(false))
+                let current = object.get("store").and_then(Value::as_bool);
+                if current == Some(false) {
+                    None
+                } else {
+                    object.insert("store".to_string(), Value::Bool(false))
+                }
             }
         })
         .is_some()
@@ -2438,6 +2443,24 @@ mod tests {
         let value = serde_json::from_str::<Value>(text.as_ref()).unwrap();
         assert!(value.get("max_output_tokens").is_none());
         assert_eq!(value["store"], false);
+    }
+
+    #[test]
+    fn ws_codex_profile_compact_request_omits_store_parameter() {
+        let adapted = maybe_adapt_ws_downstream_message_for_codex_profile(
+            AxumWsMessage::Text(
+                r#"{"type":"response.create","model":"gpt-5.4","store":true,"input":[]}"#
+                    .into(),
+            ),
+            true,
+            "/v1/responses/compact",
+        );
+
+        let AxumWsMessage::Text(text) = adapted else {
+            panic!("expected text websocket message");
+        };
+        let value = serde_json::from_str::<Value>(text.as_ref()).unwrap();
+        assert!(value.get("store").is_none());
     }
 
     #[test]
