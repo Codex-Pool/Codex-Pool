@@ -1018,59 +1018,6 @@ fn parse_routing_plan_version_row(row: &sqlx_postgres::PgRow) -> Result<RoutingP
     })
 }
 
-fn derive_rate_limit_block(
-    snapshots: &[OAuthRateLimitSnapshot],
-    now: DateTime<Utc>,
-) -> (Option<DateTime<Utc>>, Option<String>) {
-    if let Some(blocked_until) =
-        find_blocked_until_for_window(snapshots, true, Some(SECONDARY_RATE_LIMIT_WINDOW_MINUTES), now)
-    {
-        return (
-            Some(blocked_until),
-            Some("secondary_window_exhausted".to_string()),
-        );
-    }
-    if let Some(blocked_until) =
-        find_blocked_until_for_window(snapshots, false, Some(PRIMARY_RATE_LIMIT_WINDOW_MINUTES), now)
-    {
-        return (
-            Some(blocked_until),
-            Some("primary_window_exhausted".to_string()),
-        );
-    }
-    (None, None)
-}
-
-fn find_blocked_until_for_window(
-    snapshots: &[OAuthRateLimitSnapshot],
-    secondary: bool,
-    window_minutes: Option<i64>,
-    now: DateTime<Utc>,
-) -> Option<DateTime<Utc>> {
-    snapshots
-        .iter()
-        .filter_map(|snapshot| {
-            let window = if secondary {
-                snapshot.secondary.as_ref()
-            } else {
-                snapshot.primary.as_ref()
-            }?;
-            if window.used_percent < 100.0 {
-                return None;
-            }
-            if let Some(expected_minutes) = window_minutes {
-                if let Some(actual_minutes) = window.window_minutes {
-                    if actual_minutes != expected_minutes {
-                        return None;
-                    }
-                }
-            }
-            let resets_at = window.resets_at?;
-            (resets_at > now).then_some(resets_at)
-        })
-        .max()
-}
-
 fn compile_routing_plan_from_state(
     accounts: &[UpstreamAccount],
     account_traits: &HashMap<Uuid, AccountRoutingTraits>,

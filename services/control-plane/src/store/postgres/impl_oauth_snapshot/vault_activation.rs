@@ -199,7 +199,7 @@ impl PostgresStore {
             true
         };
         let backoff = if allow_retry {
-            Some(vault_activation_backoff(next_failure_count as u32))
+            Some(vault_activation_backoff(next_failure_count))
         } else {
             None
         };

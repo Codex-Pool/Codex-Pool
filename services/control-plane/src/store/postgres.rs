@@ -26,6 +26,7 @@ use crate::contracts::{
     CreateApiKeyRequest, CreateApiKeyResponse, CreateOutboundProxyNodeRequest,
     CreateTenantRequest, CreateUpstreamAccountRequest, ImportOAuthRefreshTokenRequest,
     OAuthAccountStatusResponse, OAuthFamilyActionResponse, OAuthInventoryRecord,
+    OAuthInventoryFailureStage,
     OAuthInventorySummaryResponse, OAuthRateLimitRefreshErrorSummary,
     OAuthRateLimitRefreshJobStatus, OAuthRateLimitRefreshJobSummary, OAuthRateLimitSnapshot,
     OAuthRefreshStatus, OAuthVaultRecordStatus, SessionCredentialKind,
@@ -36,8 +37,12 @@ use crate::contracts::{
     ValidateOAuthRefreshTokenRequest, ValidateOAuthRefreshTokenResponse,
 };
 use super::{
-    has_refresh_credential, normalize_upstream_account_base_url, refresh_credential_state,
-    OAuthRefreshTokenVaultRecord, SessionProfileRecord, UpsertOneTimeSessionAccountRequest,
+    admission_probe_retry_after_with_budget, can_retry_fatal_activation_failure,
+    can_retry_transient_admission_failure, has_refresh_credential,
+    is_transient_upstream_error_signal, normalize_health_error_code,
+    normalize_upstream_account_base_url, pending_purge_delay_sec_from_env,
+    refresh_credential_state, runtime_pool_cap_from_env, OAuthRefreshTokenVaultRecord,
+    SessionProfileRecord, UpsertOneTimeSessionAccountRequest,
 };
 use super::{ControlPlaneStore, OAuthUpsertResult, RuntimeStorePorts, ValidatedPrincipal};
 use crate::crypto::CredentialCipher;
