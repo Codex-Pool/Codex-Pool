@@ -148,6 +148,8 @@ async fn build_system_event_repo(
             ))),
             None => Ok(None),
         },
+        #[cfg(not(feature = "postgres-backend"))]
+        StoreBackendFamily::Postgres => Ok(None),
         StoreBackendFamily::InMemory => Ok(None),
     }
 }
