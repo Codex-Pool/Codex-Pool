@@ -1183,16 +1183,39 @@ async fn store_completed_response_from_proxy(
     let Some(request_value) = serde_json::from_slice::<Value>(request_body).ok() else {
         return;
     };
+    let response_id = serde_json::from_slice::<Value>(response_body)
+        .ok()
+        .and_then(|value| value.get("id").and_then(Value::as_str).map(ToString::to_string));
+    let owner_key = response_owner_key(principal);
     state
         .background_responses
             .store_completed_response(
-                response_owner_key(principal),
+                owner_key.clone(),
                 &request_value,
                 response_body,
                 parsed_policy_context.continuation_cursor_key.clone(),
                 force_store,
             )
         .await;
+    if let Some(continuation_cursor_key) =
+        parsed_policy_context.continuation_cursor_key.as_deref()
+    {
+        emit_continuation_cursor_system_event(
+            state,
+            "continuation_cursor_saved",
+            SystemEventSeverity::Info,
+            None,
+            parsed_policy_context.request_id.as_deref(),
+            parsed_policy_context.model.as_deref(),
+            Some("/v1/responses"),
+            Some("POST"),
+            continuation_cursor_key,
+            response_id.as_deref(),
+            Some(owner_key.as_str()),
+            Some("saved continuation cursor for HTTP responses replay"),
+        )
+        .await;
+    }
 }
 
 fn apply_conversation_semantics_to_request(

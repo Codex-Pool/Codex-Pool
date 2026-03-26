@@ -220,6 +220,10 @@ enum WsPendingAction {
         owner_key: String,
         continuation_cursor_key: String,
         response_id: String,
+        request_id: Option<String>,
+        model: Option<String>,
+        account_id: Uuid,
+        request_path: String,
     },
 }
 
@@ -436,6 +440,10 @@ impl WsLogicalResponseTracker {
                     owner_key: response_owner_key(context.principal.as_ref()),
                     continuation_cursor_key,
                     response_id,
+                    request_id: tracked.seed.request_id.clone(),
+                    model: tracked.seed.model.clone(),
+                    account_id: context.account_id,
+                    request_path: context.request_path.clone(),
                 });
         }
 
@@ -1788,15 +1796,34 @@ async fn process_ws_pending_actions(
                 owner_key,
                 continuation_cursor_key,
                 response_id,
+                request_id,
+                model,
+                account_id,
+                request_path,
             } => {
                 state
                     .background_responses
                     .store_continuation_cursor(
-                        owner_key,
-                        continuation_cursor_key,
-                        response_id,
+                        owner_key.clone(),
+                        continuation_cursor_key.clone(),
+                        response_id.clone(),
                     )
                     .await;
+                emit_continuation_cursor_system_event(
+                    state.as_ref(),
+                    "continuation_cursor_saved",
+                    SystemEventSeverity::Info,
+                    Some(account_id),
+                    request_id.as_deref(),
+                    model.as_deref(),
+                    Some(request_path.as_str()),
+                    Some(WS_LOGICAL_REQUEST_METHOD),
+                    continuation_cursor_key.as_str(),
+                    Some(response_id.as_str()),
+                    Some(owner_key.as_str()),
+                    Some("saved continuation cursor for websocket responses replay"),
+                )
+                .await;
             }
         }
     }
@@ -2407,10 +2434,17 @@ mod tests {
                 owner_key,
                 continuation_cursor_key,
                 response_id,
+                request_id,
+                model,
+                request_path,
+                ..
             } => {
                 assert_eq!(owner_key, "anonymous");
                 assert_eq!(continuation_cursor_key, "conv-1");
                 assert_eq!(response_id, "resp-1");
+                assert_eq!(request_id.as_deref(), Some("req-1"));
+                assert_eq!(model.as_deref(), Some("gpt-5.4"));
+                assert_eq!(request_path, "/v1/responses");
             }
             other => panic!("unexpected pending action: {other:?}"),
         }

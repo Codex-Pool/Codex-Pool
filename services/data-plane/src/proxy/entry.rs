@@ -16,7 +16,9 @@ use axum::http::{HeaderMap, HeaderName, HeaderValue, Request, StatusCode};
 use axum::response::Response;
 use bytes::Bytes;
 use codex_pool_core::api::ErrorEnvelope;
-use codex_pool_core::events::RequestLogEvent;
+use codex_pool_core::events::{
+    RequestLogEvent, SystemEventCategory, SystemEventSeverity, SystemEventWrite,
+};
 use codex_pool_core::model::{UpstreamAccount, UpstreamMode};
 use futures_util::{SinkExt, Stream, StreamExt};
 use serde::{Deserialize, Serialize};
@@ -405,13 +407,47 @@ pub async fn proxy_handler(
                 .map(|continuation_key| continuation_key.to_string());
             let prior_conversation_response_id = match prior_conversation_response_id {
                 Some(continuation_key) => {
-                    state
+                    let restored = state
                         .background_responses
                         .current_continuation_response_id(
                             owner_key.as_str(),
                             continuation_key.as_str(),
                         )
-                        .await
+                        .await;
+                    if let Some(response_id) = restored.as_deref() {
+                        emit_continuation_cursor_system_event(
+                            &state,
+                            "continuation_cursor_restored",
+                            SystemEventSeverity::Info,
+                            None,
+                            parsed_policy_context.request_id.as_deref(),
+                            parsed_policy_context.model.as_deref(),
+                            Some(path.as_str()),
+                            Some(method.as_str()),
+                            continuation_key.as_str(),
+                            Some(response_id),
+                            Some(owner_key.as_str()),
+                            Some("restored continuation cursor for follow-up responses request"),
+                        )
+                        .await;
+                    } else {
+                        emit_continuation_cursor_system_event(
+                            &state,
+                            "continuation_cursor_missed",
+                            SystemEventSeverity::Warn,
+                            None,
+                            parsed_policy_context.request_id.as_deref(),
+                            parsed_policy_context.model.as_deref(),
+                            Some(path.as_str()),
+                            Some(method.as_str()),
+                            continuation_key.as_str(),
+                            None,
+                            Some(owner_key.as_str()),
+                            Some("continuation cursor was not found for follow-up responses request"),
+                        )
+                        .await;
+                    }
+                    restored
                 }
                 None => None,
             };
@@ -447,6 +483,21 @@ pub async fn proxy_handler(
     if let Some(response) = enforce_invalid_request_guard(&state, principal.as_ref()) {
         return response;
     }
+    emit_request_received_system_event(
+        &state,
+        principal.as_ref(),
+        path.as_str(),
+        method.as_str(),
+        parsed_policy_context.request_id.as_deref(),
+        parsed_policy_context.model.as_deref(),
+        Some(serde_json::json!({
+            "stream": parsed_policy_context.stream,
+            "sticky_key_present": sticky_key.is_some(),
+            "continuation_cursor_key": parsed_policy_context.continuation_cursor_key,
+            "client_version": client_version_header,
+        })),
+    )
+    .await;
     if let Some(response) = maybe_handle_background_response_request(
         state.clone(),
         principal.as_ref(),
@@ -494,6 +545,7 @@ pub async fn proxy_handler(
         } else {
             None
         };
+        let selected_from_alive_ring = alive_ring_account.is_some();
         let account = match alive_ring_account.or_else(|| {
             state.router.pick_for_model(
                 parsed_policy_context.model.as_deref(),
@@ -595,6 +647,29 @@ pub async fn proxy_handler(
                 );
             }
         };
+        let routing_decision = if selected_from_alive_ring {
+            "alive_ring"
+        } else if sticky_key.is_some() {
+            "router_with_sticky"
+        } else {
+            "router_round_robin"
+        };
+        emit_routing_candidate_selected_system_event(
+            &state,
+            principal.as_ref(),
+            &account,
+            path.as_str(),
+            method.as_str(),
+            parsed_policy_context.request_id.as_deref(),
+            parsed_policy_context.model.as_deref(),
+            routing_decision,
+            Some(serde_json::json!({
+                "tried_account_count": tried_account_ids.len(),
+                "sticky_key_present": sticky_key.is_some(),
+                "prefer_non_conflicting": state.sticky_prefer_non_conflicting,
+            })),
+        )
+        .await;
 
         if state.shared_routing_cache_enabled {
             if let Ok(true) = state.routing_cache.is_unhealthy(account.id).await {
@@ -722,6 +797,25 @@ pub async fn proxy_handler(
                             account_id = %account.id,
                             "failed to select outbound proxy route for upstream request"
                         );
+                        emit_infra_system_event(
+                            &state,
+                            principal.as_ref(),
+                            Some(account.id),
+                            Some(&path),
+                            Some(method.as_str()),
+                            parsed_policy_context.request_id.as_deref(),
+                            parsed_policy_context.model.as_deref(),
+                            "proxy_selection_failed",
+                            SystemEventSeverity::Warn,
+                            "proxy_unavailable",
+                            None,
+                            Some("failed to select outbound proxy route for upstream request"),
+                            Some(serde_json::json!({
+                                "transport": "http",
+                                "error": err.to_string(),
+                            })),
+                        )
+                        .await;
                         if state.enable_request_failover
                             && should_retry_same_account_on_transport(
                                 same_account_retry_attempt,
@@ -740,7 +834,18 @@ pub async fn proxy_handler(
                                 "retry_same_account",
                             );
                             same_account_retry_attempt += 1;
-                            record_same_account_retry(&state);
+                            record_same_account_retry_and_emit(
+                                &state,
+                                principal.as_ref(),
+                                account.id,
+                                &path,
+                                method.as_str(),
+                                parsed_policy_context.request_id.as_deref(),
+                                parsed_policy_context.model.as_deref(),
+                                same_account_retry_attempt,
+                                "proxy_unavailable",
+                            )
+                            .await;
                             tokio::time::sleep(state.retry_poll_interval).await;
                             continue;
                         }
@@ -842,6 +947,27 @@ pub async fn proxy_handler(
                         used_direct_fallback = selected_upstream_client.used_direct_fallback,
                         "upstream request failed"
                     );
+                    emit_infra_system_event(
+                        &state,
+                        principal.as_ref(),
+                        Some(account.id),
+                        Some(&path),
+                        Some(method.as_str()),
+                        parsed_policy_context.request_id.as_deref(),
+                        parsed_policy_context.model.as_deref(),
+                        "upstream_transport_error",
+                        SystemEventSeverity::Warn,
+                        "transport_error",
+                        selected_upstream_client.proxy_id,
+                        Some("upstream request failed before receiving a response"),
+                        Some(serde_json::json!({
+                            "transport": "http",
+                            "proxy_label": selected_upstream_client.proxy_label.as_deref(),
+                            "used_direct_fallback": selected_upstream_client.used_direct_fallback,
+                            "error": err.to_string(),
+                        })),
+                    )
+                    .await;
                     if state.enable_request_failover
                         && should_retry_same_account_on_transport(
                             same_account_retry_attempt,
@@ -860,7 +986,18 @@ pub async fn proxy_handler(
                             "retry_same_account",
                         );
                         same_account_retry_attempt += 1;
-                        record_same_account_retry(&state);
+                        record_same_account_retry_and_emit(
+                            &state,
+                            principal.as_ref(),
+                            account.id,
+                            &path,
+                            method.as_str(),
+                            parsed_policy_context.request_id.as_deref(),
+                            parsed_policy_context.model.as_deref(),
+                            same_account_retry_attempt,
+                            "transport_error",
+                        )
+                        .await;
                         tokio::time::sleep(state.retry_poll_interval).await;
                         continue;
                     }
@@ -915,12 +1052,19 @@ pub async fn proxy_handler(
                             "transport_error",
                         )
                         .await;
-                        record_cross_account_failover_attempt(
+                        record_cross_account_failover_attempt_and_emit(
                             &state,
+                            principal.as_ref(),
                             &mut tried_account_ids,
                             account.id,
                             &mut did_cross_account_failover,
-                        );
+                            &path,
+                            method.as_str(),
+                            parsed_policy_context.request_id.as_deref(),
+                            parsed_policy_context.model.as_deref(),
+                            "transport_error",
+                        )
+                        .await;
                         last_failure = Some((response, StatusCode::BAD_GATEWAY, account.id));
                         break;
                     }
@@ -1224,7 +1368,21 @@ pub async fn proxy_handler(
                         "retry_same_account",
                     );
                     same_account_retry_attempt += 1;
-                    record_same_account_retry(&state);
+                    record_same_account_retry_and_emit(
+                        &state,
+                        principal.as_ref(),
+                        account.id,
+                        &path,
+                        method.as_str(),
+                        parsed_policy_context.request_id.as_deref(),
+                        parsed_policy_context.model.as_deref(),
+                        same_account_retry_attempt,
+                        upstream_error_context
+                            .as_ref()
+                            .and_then(|context| context.error_code.as_deref())
+                            .unwrap_or("retryable_status"),
+                    )
+                    .await;
                     tokio::time::sleep(state.retry_poll_interval).await;
                     continue;
                 }
@@ -1303,12 +1461,22 @@ pub async fn proxy_handler(
                         "retryable_status",
                     )
                     .await;
-                    record_cross_account_failover_attempt(
+                    record_cross_account_failover_attempt_and_emit(
                         &state,
+                        principal.as_ref(),
                         &mut tried_account_ids,
                         account.id,
                         &mut did_cross_account_failover,
-                    );
+                        &path,
+                        method.as_str(),
+                        parsed_policy_context.request_id.as_deref(),
+                        parsed_policy_context.model.as_deref(),
+                        upstream_error_context
+                            .as_ref()
+                            .and_then(|context| context.error_code.as_deref())
+                            .unwrap_or("retryable_status"),
+                    )
+                    .await;
                     last_failure = Some((response, status, account.id));
                     break;
                 }
@@ -1489,7 +1657,21 @@ pub async fn proxy_handler(
                                 "retry_same_account",
                             );
                             same_account_retry_attempt += 1;
-                            record_same_account_retry(&state);
+                            record_same_account_retry_and_emit(
+                                &state,
+                                principal.as_ref(),
+                                account.id,
+                                &path,
+                                method.as_str(),
+                                parsed_policy_context.request_id.as_deref(),
+                                parsed_policy_context.model.as_deref(),
+                                same_account_retry_attempt,
+                                error_context
+                                    .as_ref()
+                                    .and_then(|context| context.error_code.as_deref())
+                                    .unwrap_or(reason_class),
+                            )
+                            .await;
                             tokio::time::sleep(state.retry_poll_interval).await;
                             continue;
                         }
@@ -1550,12 +1732,22 @@ pub async fn proxy_handler(
                                 reason_class,
                             )
                             .await;
-                            record_cross_account_failover_attempt(
+                            record_cross_account_failover_attempt_and_emit(
                                 &state,
+                                principal.as_ref(),
                                 &mut tried_account_ids,
                                 account.id,
                                 &mut did_cross_account_failover,
-                            );
+                                &path,
+                                method.as_str(),
+                                parsed_policy_context.request_id.as_deref(),
+                                parsed_policy_context.model.as_deref(),
+                                error_context
+                                    .as_ref()
+                                    .and_then(|context| context.error_code.as_deref())
+                                    .unwrap_or(reason_class),
+                            )
+                            .await;
                             last_failure = Some((response, status, account.id));
                             break;
                         }
@@ -1882,7 +2074,21 @@ pub async fn proxy_handler(
                     "retry_same_account",
                 );
                 same_account_retry_attempt += 1;
-                record_same_account_retry(&state);
+                record_same_account_retry_and_emit(
+                    &state,
+                    principal.as_ref(),
+                    account.id,
+                    &path,
+                    method.as_str(),
+                    parsed_policy_context.request_id.as_deref(),
+                    parsed_policy_context.model.as_deref(),
+                    same_account_retry_attempt,
+                    upstream_error_context
+                        .as_ref()
+                        .and_then(|context| context.error_code.as_deref())
+                        .unwrap_or("retryable_status"),
+                )
+                .await;
                 tokio::time::sleep(state.retry_poll_interval).await;
                 continue;
             }
@@ -1961,12 +2167,22 @@ pub async fn proxy_handler(
                     "retryable_status",
                 )
                 .await;
-                record_cross_account_failover_attempt(
+                record_cross_account_failover_attempt_and_emit(
                     &state,
+                    principal.as_ref(),
                     &mut tried_account_ids,
                     account.id,
                     &mut did_cross_account_failover,
-                );
+                    &path,
+                    method.as_str(),
+                    parsed_policy_context.request_id.as_deref(),
+                    parsed_policy_context.model.as_deref(),
+                    upstream_error_context
+                        .as_ref()
+                        .and_then(|context| context.error_code.as_deref())
+                        .unwrap_or("retryable_status"),
+                )
+                .await;
                 last_failure = Some((response, status, account.id));
                 break;
             }
@@ -2304,12 +2520,19 @@ pub async fn proxy_websocket_handler(
                         account.id,
                         true,
                     ) {
-                        record_cross_account_failover_attempt(
+                        record_cross_account_failover_attempt_and_emit(
                             &state,
+                            principal.as_ref(),
                             &mut tried_account_ids,
                             account.id,
                             &mut did_cross_account_failover,
-                        );
+                            &path,
+                            request_method.as_str(),
+                            None,
+                            None,
+                            "invalid_upstream_url",
+                        )
+                        .await;
                         last_failure = Some(response);
                         break;
                     }
@@ -2345,6 +2568,25 @@ pub async fn proxy_websocket_handler(
                             account_id = %account.id,
                             "failed to select outbound proxy route for upstream websocket"
                         );
+                        emit_infra_system_event(
+                            &state,
+                            principal.as_ref(),
+                            Some(account.id),
+                            Some(&path),
+                            Some(request_method.as_str()),
+                            None,
+                            None,
+                            "proxy_selection_failed",
+                            SystemEventSeverity::Warn,
+                            "proxy_unavailable",
+                            None,
+                            Some("failed to select outbound proxy route for upstream websocket"),
+                            Some(serde_json::json!({
+                                "transport": "websocket",
+                                "error": err.to_string(),
+                            })),
+                        )
+                        .await;
                         if state.enable_request_failover
                             && should_retry_same_account_on_transport(
                                 same_account_retry_attempt,
@@ -2363,7 +2605,18 @@ pub async fn proxy_websocket_handler(
                                 "retry_same_account",
                             );
                             same_account_retry_attempt += 1;
-                            record_same_account_retry(&state);
+                            record_same_account_retry_and_emit(
+                                &state,
+                                principal.as_ref(),
+                                account.id,
+                                &path,
+                                request_method.as_str(),
+                                None,
+                                None,
+                                same_account_retry_attempt,
+                                "proxy_unavailable",
+                            )
+                            .await;
                             tokio::time::sleep(state.retry_poll_interval).await;
                             continue;
                         }
@@ -2461,6 +2714,40 @@ pub async fn proxy_websocket_handler(
                         upstream_error_class = upstream_error_class_label(error_context.as_ref()),
                         "failed to connect upstream websocket"
                     );
+                    let tls_reason_code = websocket_tls_reason_code(&err);
+                    emit_infra_system_event(
+                        &state,
+                        principal.as_ref(),
+                        Some(account.id),
+                        Some(&path),
+                        Some(request_method.as_str()),
+                        None,
+                        None,
+                        if tls_reason_code.is_some() {
+                            "upstream_websocket_tls_error"
+                        } else {
+                            "upstream_websocket_handshake_error"
+                        },
+                        if tls_reason_code.is_some() {
+                            SystemEventSeverity::Error
+                        } else {
+                            SystemEventSeverity::Warn
+                        },
+                        tls_reason_code.unwrap_or(if is_http_handshake_error {
+                            "websocket_handshake_error"
+                        } else {
+                            "transport_error"
+                        }),
+                        None,
+                        Some("failed to connect upstream websocket"),
+                        Some(serde_json::json!({
+                            "transport": "websocket",
+                            "error": err.to_string(),
+                            "status_code": status.as_u16(),
+                            "upstream_error_class": upstream_error_class_label(error_context.as_ref()),
+                        })),
+                    )
+                    .await;
                     // Keep websocket handshake failures aligned with HTTP failures so
                     // upstream auth/quota signals can drive runtime pool state changes.
                     spawn_failed_live_report(
@@ -2489,7 +2776,25 @@ pub async fn proxy_websocket_handler(
                             "retry_same_account",
                         );
                         same_account_retry_attempt += 1;
-                        record_same_account_retry(&state);
+                        record_same_account_retry_and_emit(
+                            &state,
+                            principal.as_ref(),
+                            account.id,
+                            &path,
+                            request_method.as_str(),
+                            None,
+                            None,
+                            same_account_retry_attempt,
+                            error_context
+                                .as_ref()
+                                .and_then(|context| context.error_code.as_deref())
+                                .unwrap_or(if is_http_handshake_error {
+                                    "websocket_handshake_error"
+                                } else {
+                                    "transport_error"
+                                }),
+                        )
+                        .await;
                         tokio::time::sleep(state.retry_poll_interval).await;
                         continue;
                     }
@@ -2569,12 +2874,22 @@ pub async fn proxy_websocket_handler(
                             recovery_outcome_label(recovery_outcome),
                             "cross_account_failover",
                         );
-                        record_cross_account_failover_attempt(
+                        record_cross_account_failover_attempt_and_emit(
                             &state,
+                            principal.as_ref(),
                             &mut tried_account_ids,
                             account.id,
                             &mut did_cross_account_failover,
-                        );
+                            &path,
+                            request_method.as_str(),
+                            None,
+                            None,
+                            error_context
+                                .as_ref()
+                                .and_then(|context| context.error_code.as_deref())
+                                .unwrap_or(failover_reason_class),
+                        )
+                        .await;
                         last_failure = Some(response);
                         break;
                     }

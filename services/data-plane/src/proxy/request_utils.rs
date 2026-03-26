@@ -880,17 +880,64 @@ fn record_same_account_retry(state: &AppState) {
         .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
 }
 
-fn record_cross_account_failover_attempt(
+#[allow(clippy::too_many_arguments)]
+async fn record_same_account_retry_and_emit(
     state: &AppState,
+    principal: Option<&ApiPrincipal>,
+    account_id: Uuid,
+    path: &str,
+    method: &str,
+    request_id: Option<&str>,
+    model: Option<&str>,
+    same_account_retry_attempt: u32,
+    reason_code: &str,
+) {
+    record_same_account_retry(state);
+    emit_same_account_retry_system_event(
+        state,
+        principal,
+        account_id,
+        path,
+        method,
+        request_id,
+        model,
+        same_account_retry_attempt,
+        reason_code,
+    )
+    .await;
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn record_cross_account_failover_attempt_and_emit(
+    state: &AppState,
+    principal: Option<&ApiPrincipal>,
     tried_account_ids: &mut HashSet<Uuid>,
     account_id: Uuid,
     did_cross_account_failover: &mut bool,
+    path: &str,
+    method: &str,
+    request_id: Option<&str>,
+    model: Option<&str>,
+    reason_code: &str,
 ) {
-    if tried_account_ids.insert(account_id) {
+    let inserted = tried_account_ids.insert(account_id);
+    if inserted {
         *did_cross_account_failover = true;
         state
             .failover_attempt_total
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        emit_cross_account_failover_system_event(
+            state,
+            principal,
+            account_id,
+            path,
+            method,
+            request_id,
+            model,
+            tried_account_ids.len(),
+            reason_code,
+        )
+        .await;
     }
 }
 
@@ -908,6 +955,502 @@ fn record_failover_exhausted_if_needed(state: &AppState, did_cross_account_failo
             .failover_exhausted_total
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     }
+}
+
+async fn emit_system_event_best_effort(state: &AppState, event: SystemEventWrite) {
+    state.event_sink.emit_system_event(event).await;
+}
+
+fn request_reason_class(reason_code: &str) -> Option<&'static str> {
+    match reason_code {
+        "rate_limited" | "quota_exhausted" => Some("quota"),
+        "token_invalidated" | "account_deactivated" | "invalid_refresh_token" => Some("fatal"),
+        _ => Some("transient"),
+    }
+}
+
+fn compact_secret_preview(raw: Option<&str>) -> Option<String> {
+    let value = raw?.trim();
+    if value.is_empty() {
+        return None;
+    }
+    if value.len() <= 10 {
+        return Some(value.to_string());
+    }
+    Some(format!("{}...{}", &value[..7], &value[value.len() - 4..]))
+}
+
+fn build_infra_system_event(
+    tenant_id: Option<Uuid>,
+    account_id: Option<Uuid>,
+    path: Option<&str>,
+    method: Option<&str>,
+    request_id: Option<&str>,
+    model: Option<&str>,
+    event_type: &str,
+    severity: SystemEventSeverity,
+    reason_code: &str,
+    selected_proxy_id: Option<Uuid>,
+    message: Option<&str>,
+    payload_json: Option<serde_json::Value>,
+) -> SystemEventWrite {
+    SystemEventWrite {
+        event_id: None,
+        ts: None,
+        category: SystemEventCategory::Infra,
+        event_type: event_type.to_string(),
+        severity,
+        source: "data-plane".to_string(),
+        tenant_id,
+        account_id,
+        request_id: request_id.map(ToString::to_string),
+        trace_request_id: None,
+        job_id: None,
+        account_label: None,
+        auth_provider: None,
+        operator_state_from: None,
+        operator_state_to: None,
+        reason_class: Some("transient".to_string()),
+        reason_code: Some(reason_code.to_string()),
+        next_action_at: None,
+        path: path.map(ToString::to_string),
+        method: method.map(ToString::to_string),
+        model: model.map(ToString::to_string),
+        selected_account_id: account_id,
+        selected_proxy_id,
+        routing_decision: None,
+        failover_scope: None,
+        status_code: None,
+        upstream_status_code: None,
+        latency_ms: None,
+        message: message.map(ToString::to_string),
+        preview_text: None,
+        payload_json,
+        secret_preview: None,
+    }
+}
+
+fn build_request_received_system_event(
+    tenant_id: Option<Uuid>,
+    path: &str,
+    method: &str,
+    request_id: Option<&str>,
+    model: Option<&str>,
+    payload_json: Option<serde_json::Value>,
+) -> SystemEventWrite {
+    SystemEventWrite {
+        event_id: None,
+        ts: None,
+        category: SystemEventCategory::Request,
+        event_type: "request_received".to_string(),
+        severity: SystemEventSeverity::Info,
+        source: "data-plane".to_string(),
+        tenant_id,
+        account_id: None,
+        request_id: request_id.map(ToString::to_string),
+        trace_request_id: None,
+        job_id: None,
+        account_label: None,
+        auth_provider: None,
+        operator_state_from: None,
+        operator_state_to: None,
+        reason_class: Some("healthy".to_string()),
+        reason_code: Some("request_received".to_string()),
+        next_action_at: None,
+        path: Some(path.to_string()),
+        method: Some(method.to_string()),
+        model: model.map(ToString::to_string),
+        selected_account_id: None,
+        selected_proxy_id: None,
+        routing_decision: Some("request_received".to_string()),
+        failover_scope: None,
+        status_code: None,
+        upstream_status_code: None,
+        latency_ms: None,
+        message: Some("received upstream proxy request".to_string()),
+        preview_text: None,
+        payload_json,
+        secret_preview: None,
+    }
+}
+
+fn build_routing_candidate_selected_system_event(
+    tenant_id: Option<Uuid>,
+    account: &UpstreamAccount,
+    path: &str,
+    method: &str,
+    request_id: Option<&str>,
+    model: Option<&str>,
+    routing_decision: &str,
+    payload_json: Option<serde_json::Value>,
+) -> SystemEventWrite {
+    SystemEventWrite {
+        event_id: None,
+        ts: None,
+        category: SystemEventCategory::Request,
+        event_type: "routing_candidate_selected".to_string(),
+        severity: SystemEventSeverity::Info,
+        source: "data-plane".to_string(),
+        tenant_id,
+        account_id: Some(account.id),
+        request_id: request_id.map(ToString::to_string),
+        trace_request_id: None,
+        job_id: None,
+        account_label: Some(account.label.clone()),
+        auth_provider: None,
+        operator_state_from: None,
+        operator_state_to: None,
+        reason_class: Some("healthy".to_string()),
+        reason_code: Some("routing_candidate_selected".to_string()),
+        next_action_at: None,
+        path: Some(path.to_string()),
+        method: Some(method.to_string()),
+        model: model.map(ToString::to_string),
+        selected_account_id: Some(account.id),
+        selected_proxy_id: None,
+        routing_decision: Some(routing_decision.to_string()),
+        failover_scope: None,
+        status_code: None,
+        upstream_status_code: None,
+        latency_ms: None,
+        message: Some("selected upstream account for request routing".to_string()),
+        preview_text: None,
+        payload_json,
+        secret_preview: None,
+    }
+}
+
+fn build_same_account_retry_system_event(
+    tenant_id: Option<Uuid>,
+    account_id: Uuid,
+    path: &str,
+    method: &str,
+    request_id: Option<&str>,
+    model: Option<&str>,
+    attempt: u32,
+    reason_code: &str,
+) -> SystemEventWrite {
+    SystemEventWrite {
+        event_id: None,
+        ts: None,
+        category: SystemEventCategory::Request,
+        event_type: "same_account_retry".to_string(),
+        severity: SystemEventSeverity::Warn,
+        source: "data-plane".to_string(),
+        tenant_id,
+        account_id: Some(account_id),
+        request_id: request_id.map(ToString::to_string),
+        trace_request_id: None,
+        job_id: None,
+        account_label: None,
+        auth_provider: None,
+        operator_state_from: None,
+        operator_state_to: None,
+        reason_class: request_reason_class(reason_code).map(ToString::to_string),
+        reason_code: Some(reason_code.to_string()),
+        next_action_at: None,
+        path: Some(path.to_string()),
+        method: Some(method.to_string()),
+        model: model.map(ToString::to_string),
+        selected_account_id: Some(account_id),
+        selected_proxy_id: None,
+        routing_decision: Some("same_account_retry".to_string()),
+        failover_scope: Some("same_account".to_string()),
+        status_code: None,
+        upstream_status_code: None,
+        latency_ms: None,
+        message: Some("retrying request on the same account after a retryable upstream failure".to_string()),
+        preview_text: None,
+        payload_json: Some(serde_json::json!({
+            "attempt": attempt,
+            "reason_code": reason_code,
+        })),
+        secret_preview: None,
+    }
+}
+
+fn build_cross_account_failover_system_event(
+    tenant_id: Option<Uuid>,
+    account_id: Uuid,
+    path: &str,
+    method: &str,
+    request_id: Option<&str>,
+    model: Option<&str>,
+    tried_accounts: usize,
+    reason_code: &str,
+) -> SystemEventWrite {
+    SystemEventWrite {
+        event_id: None,
+        ts: None,
+        category: SystemEventCategory::Request,
+        event_type: "cross_account_failover".to_string(),
+        severity: SystemEventSeverity::Warn,
+        source: "data-plane".to_string(),
+        tenant_id,
+        account_id: Some(account_id),
+        request_id: request_id.map(ToString::to_string),
+        trace_request_id: None,
+        job_id: None,
+        account_label: None,
+        auth_provider: None,
+        operator_state_from: None,
+        operator_state_to: None,
+        reason_class: request_reason_class(reason_code).map(ToString::to_string),
+        reason_code: Some(reason_code.to_string()),
+        next_action_at: None,
+        path: Some(path.to_string()),
+        method: Some(method.to_string()),
+        model: model.map(ToString::to_string),
+        selected_account_id: Some(account_id),
+        selected_proxy_id: None,
+        routing_decision: Some("cross_account_failover".to_string()),
+        failover_scope: Some("cross_account".to_string()),
+        status_code: None,
+        upstream_status_code: None,
+        latency_ms: None,
+        message: Some("switching to a different account after a retryable upstream failure".to_string()),
+        preview_text: None,
+        payload_json: Some(serde_json::json!({
+            "tried_accounts": tried_accounts,
+            "reason_code": reason_code,
+        })),
+        secret_preview: None,
+    }
+}
+
+fn build_continuation_cursor_system_event(
+    event_type: &str,
+    severity: SystemEventSeverity,
+    account_id: Option<Uuid>,
+    request_id: Option<&str>,
+    model: Option<&str>,
+    path: Option<&str>,
+    method: Option<&str>,
+    continuation_cursor_key: &str,
+    response_id: Option<&str>,
+    owner_key: Option<&str>,
+    message: Option<&str>,
+) -> SystemEventWrite {
+    SystemEventWrite {
+        event_id: None,
+        ts: None,
+        category: SystemEventCategory::Infra,
+        event_type: event_type.to_string(),
+        severity,
+        source: "data-plane".to_string(),
+        tenant_id: None,
+        account_id,
+        request_id: request_id.map(ToString::to_string),
+        trace_request_id: None,
+        job_id: None,
+        account_label: None,
+        auth_provider: None,
+        operator_state_from: None,
+        operator_state_to: None,
+        reason_class: Some("transient".to_string()),
+        reason_code: Some(event_type.to_string()),
+        next_action_at: None,
+        path: path.map(ToString::to_string),
+        method: method.map(ToString::to_string),
+        model: model.map(ToString::to_string),
+        selected_account_id: account_id,
+        selected_proxy_id: None,
+        routing_decision: None,
+        failover_scope: None,
+        status_code: None,
+        upstream_status_code: None,
+        latency_ms: None,
+        message: message.map(ToString::to_string),
+        preview_text: None,
+        payload_json: Some(serde_json::json!({
+            "continuation_cursor_key": continuation_cursor_key,
+            "response_id": response_id,
+        })),
+        secret_preview: compact_secret_preview(owner_key),
+    }
+}
+
+async fn emit_same_account_retry_system_event(
+    state: &AppState,
+    principal: Option<&ApiPrincipal>,
+    account_id: Uuid,
+    path: &str,
+    method: &str,
+    request_id: Option<&str>,
+    model: Option<&str>,
+    attempt: u32,
+    reason_code: &str,
+) {
+    emit_system_event_best_effort(
+        state,
+        build_same_account_retry_system_event(
+            principal.and_then(|item| item.tenant_id),
+            account_id,
+            path,
+            method,
+            request_id,
+            model,
+            attempt,
+            reason_code,
+        ),
+    )
+    .await;
+}
+
+async fn emit_request_received_system_event(
+    state: &AppState,
+    principal: Option<&ApiPrincipal>,
+    path: &str,
+    method: &str,
+    request_id: Option<&str>,
+    model: Option<&str>,
+    payload_json: Option<serde_json::Value>,
+) {
+    emit_system_event_best_effort(
+        state,
+        build_request_received_system_event(
+            principal.and_then(|item| item.tenant_id),
+            path,
+            method,
+            request_id,
+            model,
+            payload_json,
+        ),
+    )
+    .await;
+}
+
+async fn emit_routing_candidate_selected_system_event(
+    state: &AppState,
+    principal: Option<&ApiPrincipal>,
+    account: &UpstreamAccount,
+    path: &str,
+    method: &str,
+    request_id: Option<&str>,
+    model: Option<&str>,
+    routing_decision: &str,
+    payload_json: Option<serde_json::Value>,
+) {
+    emit_system_event_best_effort(
+        state,
+        build_routing_candidate_selected_system_event(
+            principal.and_then(|item| item.tenant_id),
+            account,
+            path,
+            method,
+            request_id,
+            model,
+            routing_decision,
+            payload_json,
+        ),
+    )
+    .await;
+}
+
+async fn emit_cross_account_failover_system_event(
+    state: &AppState,
+    principal: Option<&ApiPrincipal>,
+    account_id: Uuid,
+    path: &str,
+    method: &str,
+    request_id: Option<&str>,
+    model: Option<&str>,
+    tried_accounts: usize,
+    reason_code: &str,
+) {
+    emit_system_event_best_effort(
+        state,
+        build_cross_account_failover_system_event(
+            principal.and_then(|item| item.tenant_id),
+            account_id,
+            path,
+            method,
+            request_id,
+            model,
+            tried_accounts,
+            reason_code,
+        ),
+    )
+    .await;
+}
+
+async fn emit_continuation_cursor_system_event(
+    state: &AppState,
+    event_type: &str,
+    severity: SystemEventSeverity,
+    account_id: Option<Uuid>,
+    request_id: Option<&str>,
+    model: Option<&str>,
+    path: Option<&str>,
+    method: Option<&str>,
+    continuation_cursor_key: &str,
+    response_id: Option<&str>,
+    owner_key: Option<&str>,
+    message: Option<&str>,
+) {
+    emit_system_event_best_effort(
+        state,
+        build_continuation_cursor_system_event(
+            event_type,
+            severity,
+            account_id,
+            request_id,
+            model,
+            path,
+            method,
+            continuation_cursor_key,
+            response_id,
+            owner_key,
+            message,
+        ),
+    )
+    .await;
+}
+
+async fn emit_infra_system_event(
+    state: &AppState,
+    principal: Option<&ApiPrincipal>,
+    account_id: Option<Uuid>,
+    path: Option<&str>,
+    method: Option<&str>,
+    request_id: Option<&str>,
+    model: Option<&str>,
+    event_type: &str,
+    severity: SystemEventSeverity,
+    reason_code: &str,
+    selected_proxy_id: Option<Uuid>,
+    message: Option<&str>,
+    payload_json: Option<serde_json::Value>,
+) {
+    emit_system_event_best_effort(
+        state,
+        build_infra_system_event(
+            principal.and_then(|item| item.tenant_id),
+            account_id,
+            path,
+            method,
+            request_id,
+            model,
+            event_type,
+            severity,
+            reason_code,
+            selected_proxy_id,
+            message,
+            payload_json,
+        ),
+    )
+    .await;
+}
+
+fn websocket_tls_reason_code(error: &tokio_tungstenite::tungstenite::Error) -> Option<&'static str> {
+    let raw = error.to_string().to_ascii_lowercase();
+    if raw.contains("unknownissuer") || raw.contains("certificate") {
+        return Some("tls_certificate_validation_failed");
+    }
+    if raw.contains("native root ca") || raw.contains("native cert") || raw.contains("webpki") {
+        return Some("tls_root_store_fallback");
+    }
+    None
 }
 
 fn invalid_request_guard_key(principal: Option<&ApiPrincipal>) -> Option<String> {
@@ -2471,18 +3014,24 @@ struct UsageTokens {
 #[cfg(test)]
 mod request_utils_tests {
     use super::{
-        build_upstream_error_context, classify_upstream_error, decide_upstream_error,
-        ejection_ttl_for_response, maybe_adapt_openai_responses_request_for_codex_profile,
-        oauth_refresh_recovery_succeeded, parse_request_policy_context,
-        sanitize_upstream_error_log_value,
-        InternalOAuthRefreshPayload, LearnedTemplateResolution, ProxyRecoveryOutcome,
-        RetryScope, UpstreamErrorClass, UpstreamErrorContext, UpstreamErrorSource,
+        build_request_received_system_event,
+        build_continuation_cursor_system_event, build_cross_account_failover_system_event,
+        build_infra_system_event, build_same_account_retry_system_event,
+        build_upstream_error_context,
+        classify_upstream_error, decide_upstream_error, ejection_ttl_for_response,
+        maybe_adapt_openai_responses_request_for_codex_profile, oauth_refresh_recovery_succeeded,
+        parse_request_policy_context, sanitize_upstream_error_log_value,
+        websocket_tls_reason_code, InternalOAuthRefreshPayload, LearnedTemplateResolution,
+        ProxyRecoveryOutcome, RetryScope, UpstreamErrorClass, UpstreamErrorContext,
+        UpstreamErrorSource,
     };
+    use codex_pool_core::events::{SystemEventCategory, SystemEventSeverity};
     use codex_pool_core::model::{UpstreamErrorAction, UpstreamErrorRetryScope, UpstreamMode};
     use http::{HeaderMap, HeaderValue, StatusCode};
-    use serde_json::json;
+    use serde_json::{Value, json};
     use std::io::Cursor;
     use std::time::Duration;
+    use uuid::Uuid;
 
     #[test]
     fn classifies_unknown_403_as_non_retryable_client() {
@@ -2860,5 +3409,149 @@ mod request_utils_tests {
         assert!(!sanitized.contains("sensitive prompt"));
         assert!(!sanitized.contains("\"messages\":["));
         assert!(!sanitized.contains("\"response\":{\"id\""));
+    }
+
+    #[test]
+    fn builds_same_account_retry_system_event_with_request_context() {
+        let account_id = Uuid::new_v4();
+        let tenant_id = Uuid::new_v4();
+        let event = build_same_account_retry_system_event(
+            Some(tenant_id),
+            account_id,
+            "/v1/responses",
+            "POST",
+            Some("req-retry-1"),
+            Some("gpt-5.4"),
+            2,
+            "previous_response_not_found",
+        );
+
+        assert_eq!(event.category, SystemEventCategory::Request);
+        assert_eq!(event.event_type, "same_account_retry");
+        assert_eq!(event.severity, SystemEventSeverity::Warn);
+        assert_eq!(event.account_id, Some(account_id));
+        assert_eq!(event.tenant_id, Some(tenant_id));
+        assert_eq!(event.request_id.as_deref(), Some("req-retry-1"));
+        assert_eq!(event.path.as_deref(), Some("/v1/responses"));
+        assert_eq!(event.method.as_deref(), Some("POST"));
+        assert_eq!(event.model.as_deref(), Some("gpt-5.4"));
+        assert_eq!(event.reason_code.as_deref(), Some("previous_response_not_found"));
+        assert_eq!(event.routing_decision.as_deref(), Some("same_account_retry"));
+        assert_eq!(event.payload_json.as_ref().and_then(|item| item.get("attempt")).and_then(Value::as_u64), Some(2));
+    }
+
+    #[test]
+    fn builds_cross_account_failover_system_event_with_request_context() {
+        let account_id = Uuid::new_v4();
+        let tenant_id = Uuid::new_v4();
+        let event = build_cross_account_failover_system_event(
+            Some(tenant_id),
+            account_id,
+            "/v1/responses",
+            "POST",
+            Some("req-failover-1"),
+            Some("gpt-5.4"),
+            3,
+            "rate_limited",
+        );
+
+        assert_eq!(event.category, SystemEventCategory::Request);
+        assert_eq!(event.event_type, "cross_account_failover");
+        assert_eq!(event.severity, SystemEventSeverity::Warn);
+        assert_eq!(event.account_id, Some(account_id));
+        assert_eq!(event.request_id.as_deref(), Some("req-failover-1"));
+        assert_eq!(event.failover_scope.as_deref(), Some("cross_account"));
+        assert_eq!(event.routing_decision.as_deref(), Some("cross_account_failover"));
+        assert_eq!(event.reason_code.as_deref(), Some("rate_limited"));
+        assert_eq!(event.payload_json.as_ref().and_then(|item| item.get("tried_accounts")).and_then(Value::as_u64), Some(3));
+    }
+
+    #[test]
+    fn builds_continuation_cursor_system_event_with_redacted_owner_preview() {
+        let account_id = Uuid::new_v4();
+        let event = build_continuation_cursor_system_event(
+            "continuation_cursor_saved",
+            SystemEventSeverity::Info,
+            Some(account_id),
+            Some("req-cursor-1"),
+            Some("gpt-5.4"),
+            Some("/v1/responses"),
+            Some("POST"),
+            "conv-demo-001",
+            Some("resp_123"),
+            Some("owner-secret-token"),
+            Some("saved continuation cursor for response replay"),
+        );
+
+        assert_eq!(event.category, SystemEventCategory::Infra);
+        assert_eq!(event.event_type, "continuation_cursor_saved");
+        assert_eq!(event.account_id, Some(account_id));
+        assert_eq!(event.request_id.as_deref(), Some("req-cursor-1"));
+        assert_eq!(event.secret_preview.as_deref(), Some("owner-s...oken"));
+        assert_eq!(event.payload_json.as_ref().and_then(|item| item.get("continuation_cursor_key")).and_then(Value::as_str), Some("conv-demo-001"));
+        assert_eq!(event.payload_json.as_ref().and_then(|item| item.get("response_id")).and_then(Value::as_str), Some("resp_123"));
+    }
+
+    #[test]
+    fn builds_infra_system_event_with_proxy_context() {
+        let account_id = Uuid::new_v4();
+        let tenant_id = Uuid::new_v4();
+        let proxy_id = Uuid::new_v4();
+        let event = build_infra_system_event(
+            Some(tenant_id),
+            Some(account_id),
+            Some("/v1/responses"),
+            Some("POST"),
+            Some("req-infra-1"),
+            Some("gpt-5.4"),
+            "proxy_selection_failed",
+            SystemEventSeverity::Warn,
+            "proxy_unavailable",
+            Some(proxy_id),
+            Some("failed to select outbound proxy route for upstream request"),
+            Some(serde_json::json!({
+                "transport": "http",
+            })),
+        );
+
+        assert_eq!(event.category, SystemEventCategory::Infra);
+        assert_eq!(event.event_type, "proxy_selection_failed");
+        assert_eq!(event.severity, SystemEventSeverity::Warn);
+        assert_eq!(event.tenant_id, Some(tenant_id));
+        assert_eq!(event.account_id, Some(account_id));
+        assert_eq!(event.selected_proxy_id, Some(proxy_id));
+        assert_eq!(event.reason_code.as_deref(), Some("proxy_unavailable"));
+        assert_eq!(event.payload_json.as_ref().and_then(|item| item.get("transport")).and_then(Value::as_str), Some("http"));
+    }
+
+    #[test]
+    fn builds_request_received_system_event_with_request_context() {
+        let tenant_id = Uuid::new_v4();
+        let event = build_request_received_system_event(
+            Some(tenant_id),
+            "/v1/responses",
+            "POST",
+            Some("req-event-1"),
+            Some("gpt-5.4"),
+            Some(serde_json::json!({ "stream": true })),
+        );
+
+        assert_eq!(event.category, SystemEventCategory::Request);
+        assert_eq!(event.event_type, "request_received");
+        assert_eq!(event.tenant_id, Some(tenant_id));
+        assert_eq!(event.request_id.as_deref(), Some("req-event-1"));
+        assert_eq!(event.path.as_deref(), Some("/v1/responses"));
+    }
+
+    #[test]
+    fn websocket_tls_reason_code_detects_unknown_issuer() {
+        let error = tokio_tungstenite::tungstenite::Error::Io(std::io::Error::other(
+            "invalid peer certificate: UnknownIssuer",
+        ));
+
+        assert_eq!(
+            websocket_tls_reason_code(&error),
+            Some("tls_certificate_validation_failed")
+        );
     }
 }

@@ -30,7 +30,7 @@ use crate::config::DataPlaneConfig;
 use crate::event::http_sink::ControlPlaneHttpEventSink;
 #[cfg(feature = "redis-backend")]
 use crate::event::redis_sink::RedisStreamEventSink;
-use crate::event::{EventSink, NoopEventSink};
+use crate::event::{EventSink, NoopEventSink, SplitEventSink};
 use crate::outbound_proxy_runtime::OutboundProxyRuntime;
 use crate::proxy::{
     proxy_handler, proxy_websocket_handler, responses_cancel_handler,
@@ -281,7 +281,7 @@ fn build_default_event_sink(config: &DataPlaneConfig) -> anyhow::Result<Arc<dyn 
         config.shared_routing_cache_enabled,
         config.redis_url.as_deref(),
     );
-    let event_sink: Arc<dyn EventSink> = match runtime_profile.event_sink_kind {
+    let request_log_sink: Arc<dyn EventSink> = match runtime_profile.event_sink_kind {
         #[cfg(feature = "redis-backend")]
         EventSinkKind::Redis => {
             let Some(redis_url) = config.redis_url.as_deref() else {
@@ -306,7 +306,18 @@ fn build_default_event_sink(config: &DataPlaneConfig) -> anyhow::Result<Arc<dyn 
         EventSinkKind::Noop => Arc::new(NoopEventSink),
     };
 
-    Ok(event_sink)
+    let system_event_sink: Arc<dyn EventSink> = match control_plane_base_url.as_deref() {
+        Some(base_url) if !base_url.trim().is_empty() => Arc::new(ControlPlaneHttpEventSink::new(
+            base_url,
+            resolve_internal_auth_token()?,
+        )),
+        _ => Arc::new(NoopEventSink),
+    };
+
+    Ok(Arc::new(SplitEventSink::new(
+        request_log_sink,
+        system_event_sink,
+    )))
 }
 
 pub async fn build_app(config: DataPlaneConfig) -> anyhow::Result<Router> {
