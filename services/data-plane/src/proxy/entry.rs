@@ -430,6 +430,19 @@ pub async fn proxy_handler(
                             Some("restored continuation cursor for follow-up responses request"),
                         )
                         .await;
+                        emit_ws_http_fallback_system_event(
+                            &state,
+                            None,
+                            parsed_policy_context.request_id.as_deref(),
+                            parsed_policy_context.model.as_deref(),
+                            Some(path.as_str()),
+                            Some(method.as_str()),
+                            continuation_key.as_str(),
+                            Some(response_id),
+                            Some(owner_key.as_str()),
+                            true,
+                        )
+                        .await;
                     } else {
                         emit_continuation_cursor_system_event(
                             &state,
@@ -444,6 +457,19 @@ pub async fn proxy_handler(
                             None,
                             Some(owner_key.as_str()),
                             Some("continuation cursor was not found for follow-up responses request"),
+                        )
+                        .await;
+                        emit_ws_http_fallback_system_event(
+                            &state,
+                            None,
+                            parsed_policy_context.request_id.as_deref(),
+                            parsed_policy_context.model.as_deref(),
+                            Some(path.as_str()),
+                            Some(method.as_str()),
+                            continuation_key.as_str(),
+                            None,
+                            Some(owner_key.as_str()),
+                            false,
                         )
                         .await;
                     }
@@ -3299,19 +3325,40 @@ mod entry_route_selection_tests {
 
     #[derive(Default)]
     struct RecordingSink {
-        events: Mutex<Vec<RequestLogEvent>>,
+        request_events: Mutex<Vec<RequestLogEvent>>,
+        system_events: Mutex<Vec<SystemEventWrite>>,
     }
 
     impl RecordingSink {
         fn events(&self) -> Vec<RequestLogEvent> {
-            self.events.lock().expect("recording sink lock").clone()
+            self.request_events
+                .lock()
+                .expect("recording sink lock")
+                .clone()
+        }
+
+        fn system_events(&self) -> Vec<SystemEventWrite> {
+            self.system_events
+                .lock()
+                .expect("recording sink lock")
+                .clone()
         }
     }
 
     #[async_trait]
     impl EventSink for RecordingSink {
         async fn emit_request_log(&self, event: RequestLogEvent) {
-            self.events.lock().expect("recording sink lock").push(event);
+            self.request_events
+                .lock()
+                .expect("recording sink lock")
+                .push(event);
+        }
+
+        async fn emit_system_event(&self, event: SystemEventWrite) {
+            self.system_events
+                .lock()
+                .expect("recording sink lock")
+                .push(event);
         }
     }
 
@@ -3543,6 +3590,103 @@ mod entry_route_selection_tests {
             Some("req-ws-proxy-unavailable")
         );
         assert_eq!(events[0].error_code.as_deref(), Some("proxy_unavailable"));
+    }
+
+    #[tokio::test]
+    async fn http_continuation_restore_emits_ws_http_fallback_event() {
+        let upstream = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/v1/responses"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "id": "resp_new",
+                "status": "completed",
+                "output": [{
+                    "type": "message",
+                    "content": [{
+                        "type": "output_text",
+                        "text": "ok"
+                    }]
+                }]
+            })))
+            .mount(&upstream)
+            .await;
+
+        let sink = Arc::new(RecordingSink::default());
+        let state = test_state_with_sink_and_reporter(
+            vec![UpstreamAccount {
+                id: Uuid::new_v4(),
+                label: "continuation".to_string(),
+                mode: UpstreamMode::CodexOauth,
+                base_url: upstream.uri(),
+                bearer_token: "continuation-token".to_string(),
+                chatgpt_account_id: Some("acct-continuation".to_string()),
+                enabled: true,
+                priority: 100,
+                created_at: chrono::Utc::now(),
+            }],
+            sink.clone(),
+            None,
+        );
+        state
+            .background_responses
+            .store_continuation_cursor(
+                "anonymous".to_string(),
+                "conv-http-fallback".to_string(),
+                "resp_prev".to_string(),
+            )
+            .await;
+
+        let response = proxy_handler(
+            State(state),
+            Request::builder()
+                .method("POST")
+                .uri("/v1/responses")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    json!({
+                        "model": "gpt-5.4",
+                        "input": "hello",
+                        "prompt_cache_key": "conv-http-fallback"
+                    })
+                    .to_string(),
+                ))
+                .expect("request"),
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let system_events = sink.system_events();
+        assert!(
+            system_events.iter().any(|event| {
+                event.event_type == "continuation_cursor_restored"
+                    && event
+                        .payload_json
+                        .as_ref()
+                        .and_then(|value| value.get("response_id"))
+                        .and_then(Value::as_str)
+                        == Some("resp_prev")
+            }),
+            "continuation_cursor_restored event should be present"
+        );
+        assert!(
+            system_events.iter().any(|event| {
+                event.event_type == "ws_http_fallback"
+                    && event.reason_code.as_deref() == Some("continuation_cursor_restored")
+                    && event
+                        .payload_json
+                        .as_ref()
+                        .and_then(|value| value.get("continuation_cursor_key"))
+                        .and_then(Value::as_str)
+                        == Some("conv-http-fallback")
+                    && event
+                        .payload_json
+                        .as_ref()
+                        .and_then(|value| value.get("response_id"))
+                        .and_then(Value::as_str)
+                        == Some("resp_prev")
+            }),
+            "ws_http_fallback event should be present after HTTP continuation restoration"
+        );
     }
 
     #[cfg(feature = "redis-backend")]

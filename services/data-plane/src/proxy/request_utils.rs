@@ -1270,6 +1270,71 @@ fn build_continuation_cursor_system_event(
     }
 }
 
+fn build_ws_http_fallback_system_event(
+    account_id: Option<Uuid>,
+    request_id: Option<&str>,
+    model: Option<&str>,
+    path: Option<&str>,
+    method: Option<&str>,
+    continuation_cursor_key: &str,
+    response_id: Option<&str>,
+    owner_key: Option<&str>,
+    restored: bool,
+) -> SystemEventWrite {
+    let reason_code = if restored {
+        "continuation_cursor_restored"
+    } else {
+        "continuation_cursor_missed"
+    };
+    let severity = if restored {
+        SystemEventSeverity::Info
+    } else {
+        SystemEventSeverity::Warn
+    };
+    let message = if restored {
+        "restored continuation cursor for HTTP fallback after websocket session"
+    } else {
+        "continuation cursor missing during HTTP fallback after websocket session"
+    };
+    SystemEventWrite {
+        event_id: None,
+        ts: None,
+        category: SystemEventCategory::Infra,
+        event_type: "ws_http_fallback".to_string(),
+        severity,
+        source: "data-plane".to_string(),
+        tenant_id: None,
+        account_id,
+        request_id: request_id.map(ToString::to_string),
+        trace_request_id: None,
+        job_id: None,
+        account_label: None,
+        auth_provider: None,
+        operator_state_from: None,
+        operator_state_to: None,
+        reason_class: Some("transient".to_string()),
+        reason_code: Some(reason_code.to_string()),
+        next_action_at: None,
+        path: path.map(ToString::to_string),
+        method: method.map(ToString::to_string),
+        model: model.map(ToString::to_string),
+        selected_account_id: account_id,
+        selected_proxy_id: None,
+        routing_decision: None,
+        failover_scope: Some("websocket_http".to_string()),
+        status_code: None,
+        upstream_status_code: None,
+        latency_ms: None,
+        message: Some(message.to_string()),
+        preview_text: None,
+        payload_json: Some(serde_json::json!({
+            "continuation_cursor_key": continuation_cursor_key,
+            "response_id": response_id,
+        })),
+        secret_preview: compact_secret_preview(owner_key),
+    }
+}
+
 async fn emit_same_account_retry_system_event(
     state: &AppState,
     principal: Option<&ApiPrincipal>,
@@ -1402,6 +1467,35 @@ async fn emit_continuation_cursor_system_event(
             response_id,
             owner_key,
             message,
+        ),
+    )
+    .await;
+}
+
+async fn emit_ws_http_fallback_system_event(
+    state: &AppState,
+    account_id: Option<Uuid>,
+    request_id: Option<&str>,
+    model: Option<&str>,
+    path: Option<&str>,
+    method: Option<&str>,
+    continuation_cursor_key: &str,
+    response_id: Option<&str>,
+    owner_key: Option<&str>,
+    restored: bool,
+) {
+    emit_system_event_best_effort(
+        state,
+        build_ws_http_fallback_system_event(
+            account_id,
+            request_id,
+            model,
+            path,
+            method,
+            continuation_cursor_key,
+            response_id,
+            owner_key,
+            restored,
         ),
     )
     .await;
