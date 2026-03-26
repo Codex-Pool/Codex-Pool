@@ -15,7 +15,7 @@ enum InMemoryRateLimitRefreshTokenSource {
 }
 
 #[derive(Debug, Default)]
-struct InMemoryRateLimitRefreshBatchStats {
+pub(crate) struct InMemoryRateLimitRefreshBatchStats {
     processed: u64,
     success: u64,
     failed: u64,
@@ -235,6 +235,65 @@ impl InMemoryStore {
                 "quota": quota_count,
                 "fatal": fatal_count,
                 "transient": transient_count,
+            })),
+            secret_preview: None,
+        });
+    }
+
+    pub(crate) fn emit_rate_limit_refresh_batch_summary_inner(
+        &self,
+        started_at: DateTime<Utc>,
+        source: &str,
+        job_id: Option<Uuid>,
+        fetched: usize,
+        stats: &InMemoryRateLimitRefreshBatchStats,
+        due_only: bool,
+    ) {
+        self.emit_system_event_inner(codex_pool_core::events::SystemEventWrite {
+            event_id: None,
+            ts: Some(started_at),
+            category: codex_pool_core::events::SystemEventCategory::Patrol,
+            event_type: "rate_limit_refresh_batch_completed".to_string(),
+            severity: if stats.failed > 0 {
+                codex_pool_core::events::SystemEventSeverity::Warn
+            } else {
+                codex_pool_core::events::SystemEventSeverity::Info
+            },
+            source: source.to_string(),
+            tenant_id: None,
+            account_id: None,
+            request_id: None,
+            trace_request_id: None,
+            job_id,
+            account_label: None,
+            auth_provider: None,
+            operator_state_from: None,
+            operator_state_to: None,
+            reason_class: None,
+            reason_code: Some("rate_limit_refresh_batch_completed".to_string()),
+            next_action_at: None,
+            path: None,
+            method: None,
+            model: None,
+            selected_account_id: None,
+            selected_proxy_id: None,
+            routing_decision: None,
+            failover_scope: None,
+            status_code: None,
+            upstream_status_code: None,
+            latency_ms: None,
+            message: Some(format!(
+                "rate-limit refresh scanned {fetched} targets ({} ok / {} failed)",
+                stats.success, stats.failed
+            )),
+            preview_text: None,
+            payload_json: Some(serde_json::json!({
+                "fetched": fetched,
+                "processed": stats.processed,
+                "success": stats.success,
+                "failed": stats.failed,
+                "error_counts": stats.error_counts,
+                "due_only": due_only,
             })),
             secret_preview: None,
         });

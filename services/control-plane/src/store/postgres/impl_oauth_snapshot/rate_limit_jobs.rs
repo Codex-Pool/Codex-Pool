@@ -1368,6 +1368,7 @@ impl PostgresStore {
         let mut refreshed_total = 0_u64;
 
         loop {
+            let started_at = Utc::now();
             let targets = self.load_due_rate_limit_refresh_targets(batch_size).await?;
             if targets.is_empty() {
                 break;
@@ -1376,6 +1377,14 @@ impl PostgresStore {
             let stats = self
                 .refresh_rate_limit_targets_batch(targets, concurrency)
                 .await;
+            self.emit_rate_limit_refresh_batch_summary_event(
+                started_at,
+                "control_plane.rate_limit_refresh",
+                None,
+                fetched,
+                &stats,
+                true,
+            );
             refreshed_total = refreshed_total.saturating_add(stats.processed);
             if stats.failed > 0 {
                 tracing::warn!(

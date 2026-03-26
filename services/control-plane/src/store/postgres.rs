@@ -20,6 +20,7 @@ use sha2::{Digest, Sha256};
 use sqlx::{Row, Transaction};
 use sqlx_postgres::{PgPool, PgPoolOptions, Postgres};
 use std::collections::HashMap;
+use std::sync::{Arc, RwLock};
 use uuid::Uuid;
 
 use crate::contracts::{
@@ -254,6 +255,7 @@ pub struct PostgresStore {
     pool: PgPool,
     oauth_client: std::sync::Arc<dyn OAuthTokenClient>,
     credential_cipher: Option<CredentialCipher>,
+    system_event_runtime: Arc<RwLock<Option<Arc<crate::system_events::SystemEventLogRuntime>>>>,
 }
 
 pub fn build_postgres_store_ports(store: std::sync::Arc<PostgresStore>) -> RuntimeStorePorts {

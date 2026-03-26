@@ -336,6 +336,7 @@ impl PostgresStore {
 
             let mut cursor: Option<Uuid> = None;
             loop {
+                let started_at = Utc::now();
                 let targets = self
                     .load_all_rate_limit_refresh_targets_after(cursor, batch_size)
                     .await?;
@@ -350,6 +351,14 @@ impl PostgresStore {
                     let stats = self
                         .refresh_rate_limit_targets_batch(chunk.to_vec(), concurrency)
                         .await;
+                    self.emit_rate_limit_refresh_batch_summary_event(
+                        started_at,
+                        "control_plane.rate_limit_refresh_job",
+                        Some(job_id),
+                        chunk.len(),
+                        &stats,
+                        false,
+                    );
                     self.append_rate_limit_refresh_job_progress_inner(job_id, &stats)
                         .await?;
                 }

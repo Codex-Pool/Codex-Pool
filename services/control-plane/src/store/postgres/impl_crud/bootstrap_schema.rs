@@ -10,6 +10,7 @@ impl PostgresStore {
             pool,
             oauth_client: std::sync::Arc::new(OpenAiOAuthClient::from_env()),
             credential_cipher: CredentialCipher::from_env().unwrap_or(None),
+            system_event_runtime: std::sync::Arc::new(std::sync::RwLock::new(None)),
         };
         let removed = store
             .dedupe_oauth_accounts_by_identity_inner(None, None, None)
@@ -38,6 +39,7 @@ impl PostgresStore {
             pool,
             oauth_client,
             credential_cipher,
+            system_event_runtime: std::sync::Arc::new(std::sync::RwLock::new(None)),
         };
         let removed = store
             .dedupe_oauth_accounts_by_identity_inner(None, None, None)

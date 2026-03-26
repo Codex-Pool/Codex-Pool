@@ -588,6 +588,14 @@ fn refresh_token_sha256(token: &str) -> String {
 
 #[async_trait]
 impl ControlPlaneStore for PostgresStore {
+    async fn configure_system_event_runtime(
+        &self,
+        runtime: Option<Arc<crate::system_events::SystemEventLogRuntime>>,
+    ) -> Result<()> {
+        *self.system_event_runtime.write().unwrap() = runtime;
+        Ok(())
+    }
+
     async fn create_tenant(&self, req: CreateTenantRequest) -> Result<Tenant> {
         self.insert_tenant(req).await
     }

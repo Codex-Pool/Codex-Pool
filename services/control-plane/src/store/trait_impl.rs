@@ -584,6 +584,7 @@ impl ControlPlaneStore for InMemoryStore {
         let mut refreshed_total = 0_u64;
 
         loop {
+            let started_at = Utc::now();
             let targets = self.load_rate_limit_refresh_targets(None, batch_size, true);
             if targets.is_empty() {
                 break;
@@ -591,6 +592,14 @@ impl ControlPlaneStore for InMemoryStore {
 
             let fetched = targets.len();
             let stats = self.refresh_rate_limit_targets_batch(targets, concurrency).await;
+            self.emit_rate_limit_refresh_batch_summary_inner(
+                started_at,
+                "control_plane.rate_limit_refresh",
+                None,
+                fetched,
+                &stats,
+                true,
+            );
             refreshed_total = refreshed_total.saturating_add(stats.processed);
             if fetched < batch_size {
                 break;
@@ -709,6 +718,7 @@ impl ControlPlaneStore for InMemoryStore {
             let mut cursor = None;
 
             loop {
+                let started_at = Utc::now();
                 let targets = self.load_rate_limit_refresh_targets(cursor, batch_size, false);
                 if targets.is_empty() {
                     break;
@@ -717,6 +727,14 @@ impl ControlPlaneStore for InMemoryStore {
                 let fetched = targets.len();
                 cursor = targets.last().map(|target| target.account_id);
                 let stats = self.refresh_rate_limit_targets_batch(targets, concurrency).await;
+                self.emit_rate_limit_refresh_batch_summary_inner(
+                    started_at,
+                    "control_plane.rate_limit_refresh_job",
+                    Some(job_id),
+                    fetched,
+                    &stats,
+                    false,
+                );
                 self.append_rate_limit_refresh_job_progress(job_id, &stats)?;
 
                 if fetched < batch_size {
@@ -2060,6 +2078,137 @@ mod tests {
         assert!(status.rate_limits_fetched_at.is_some());
         assert!(status.rate_limits_expires_at.is_some());
         assert!(status.rate_limits_last_error_code.is_none());
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn in_memory_due_rate_limit_refresh_emits_batch_event() {
+        let store = InMemoryStore::new_with_oauth(Arc::new(RateLimitAwareOAuthTokenClient), None);
+        let event_repo = Arc::new(
+            SqliteSystemEventRepo::new(SqlitePool::connect("sqlite::memory:").await.unwrap())
+                .await
+                .unwrap(),
+        );
+        store
+            .configure_system_event_runtime(Some(Arc::new(SystemEventLogRuntime::new(
+                event_repo.clone(),
+            ))))
+            .await
+            .unwrap();
+
+        store
+            .upsert_one_time_session_account(UpsertOneTimeSessionAccountRequest {
+                label: "legacy-codex-rate-limit-event".to_string(),
+                mode: UpstreamMode::CodexOauth,
+                base_url: "https://chatgpt.com/backend-api/codex".to_string(),
+                access_token: "legacy-rate-limit-event-token".to_string(),
+                chatgpt_account_id: Some("acct_legacy_rate_limit_event".to_string()),
+                enabled: Some(true),
+                priority: Some(100),
+                token_expires_at: Some(Utc::now() + Duration::hours(2)),
+                chatgpt_plan_type: Some("free".to_string()),
+                source_type: Some("codex".to_string()),
+            })
+            .await
+            .expect("upsert one-time codex account");
+
+        let refreshed = store
+            .refresh_due_oauth_rate_limit_caches()
+            .await
+            .expect("refresh due rate-limit caches");
+        assert_eq!(refreshed, 1);
+
+        let items = wait_for_system_events(&event_repo, 1).await;
+        assert!(
+            items.iter().any(|item| {
+                item.category == codex_pool_core::events::SystemEventCategory::Patrol
+                    && item.event_type == "rate_limit_refresh_batch_completed"
+                    && item.source == "control_plane.rate_limit_refresh"
+                    && item.job_id.is_none()
+                    && item.payload_json
+                        .as_ref()
+                        .and_then(|value| value.get("processed"))
+                        .and_then(|value| value.as_u64())
+                        == Some(1)
+                    && item.payload_json
+                        .as_ref()
+                        .and_then(|value| value.get("success"))
+                        .and_then(|value| value.as_u64())
+                        == Some(1)
+                    && item.payload_json
+                        .as_ref()
+                        .and_then(|value| value.get("failed"))
+                        .and_then(|value| value.as_u64())
+                        == Some(0)
+            }),
+            "due rate-limit refresh batch event should be present"
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn in_memory_rate_limit_refresh_job_emits_batch_event() {
+        let store = InMemoryStore::new_with_oauth(Arc::new(RateLimitAwareOAuthTokenClient), None);
+        let event_repo = Arc::new(
+            SqliteSystemEventRepo::new(SqlitePool::connect("sqlite::memory:").await.unwrap())
+                .await
+                .unwrap(),
+        );
+        store
+            .configure_system_event_runtime(Some(Arc::new(SystemEventLogRuntime::new(
+                event_repo.clone(),
+            ))))
+            .await
+            .unwrap();
+
+        store
+            .upsert_one_time_session_account(UpsertOneTimeSessionAccountRequest {
+                label: "legacy-codex-rate-limit-job-event".to_string(),
+                mode: UpstreamMode::CodexOauth,
+                base_url: "https://chatgpt.com/backend-api/codex".to_string(),
+                access_token: "legacy-rate-limit-job-event-token".to_string(),
+                chatgpt_account_id: Some("acct_legacy_rate_limit_job_event".to_string()),
+                enabled: Some(true),
+                priority: Some(100),
+                token_expires_at: Some(Utc::now() + Duration::hours(2)),
+                chatgpt_plan_type: Some("free".to_string()),
+                source_type: Some("codex".to_string()),
+            })
+            .await
+            .expect("upsert one-time codex account");
+
+        let created = store
+            .create_oauth_rate_limit_refresh_job()
+            .await
+            .expect("create rate-limit refresh job");
+        store
+            .run_oauth_rate_limit_refresh_job(created.job_id)
+            .await
+            .expect("run rate-limit refresh job");
+
+        let items = wait_for_system_events(&event_repo, 1).await;
+        assert!(
+            items.iter().any(|item| {
+                item.category == codex_pool_core::events::SystemEventCategory::Patrol
+                    && item.event_type == "rate_limit_refresh_batch_completed"
+                    && item.source == "control_plane.rate_limit_refresh_job"
+                    && item.job_id == Some(created.job_id)
+                    && item.payload_json
+                        .as_ref()
+                        .and_then(|value| value.get("processed"))
+                        .and_then(|value| value.as_u64())
+                        == Some(1)
+                    && item.payload_json
+                        .as_ref()
+                        .and_then(|value| value.get("success"))
+                        .and_then(|value| value.as_u64())
+                        == Some(1)
+                    && item.payload_json
+                        .as_ref()
+                        .and_then(|value| value.get("failed"))
+                        .and_then(|value| value.as_u64())
+                        == Some(0)
+            }),
+            "rate-limit refresh job batch event should be present"
+        );
     }
 
     #[tokio::test]
