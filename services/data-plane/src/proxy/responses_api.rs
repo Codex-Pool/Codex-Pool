@@ -617,23 +617,6 @@ impl BackgroundResponsesRuntime {
         }
     }
 
-    pub(crate) async fn store_continuation_cursor(
-        &self,
-        owner_key: String,
-        continuation_cursor_key: String,
-        response_id: String,
-    ) {
-        self.conversations.write().await.insert(
-            continuation_cursor_key,
-            ConversationCursor {
-                owner_key,
-                response_id,
-                expires_at: Instant::now() + self.retention,
-            },
-        );
-        self.persist_conversations_if_configured().await;
-    }
-
     async fn persist_conversations_if_configured(&self) {
         let Some(path) = self.continuation_cursor_store_path.as_deref() else {
             return;
@@ -1044,7 +1027,7 @@ async fn maybe_handle_background_response_request(
     Some(with_status(response, StatusCode::ACCEPTED))
 }
 
-pub(crate) fn response_owner_key(principal: Option<&ApiPrincipal>) -> String {
+fn response_owner_key(principal: Option<&ApiPrincipal>) -> String {
     if let Some(api_key_id) = principal.and_then(|item| item.api_key_id) {
         return format!("api_key:{api_key_id}");
     }
