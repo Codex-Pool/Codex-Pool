@@ -13,8 +13,8 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const localesDir = path.resolve(__dirname, "../../src/locales");
 
-const baselineLocale = "en";
-const targetLocales = ["zh-CN", "zh-TW", "ja", "ru"];
+const baselineLocale = "zh-CN";
+const targetLocales = ["en"];
 
 function getPropertyName(node) {
   if (ts.isIdentifier(node) || ts.isPrivateIdentifier(node)) {

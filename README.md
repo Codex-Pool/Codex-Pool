@@ -361,62 +361,6 @@ npm ci --legacy-peer-deps
 npm run dev
 ```
 
-### 开发后端一键重启
-
-默认约定：
-
-- tmux 会话优先使用 `codex-pool:dev`
-- 若不存在，则回退到 `codex-pool:0`
-- 默认自动识别 `control-plane` 与 `data-plane` 所在 pane；必要时可用环境变量覆盖
-
-```bash
-./scripts/restart_backend_dev.sh
-```
-
-可选覆盖：
-
-- `BACKEND_TMUX_TARGET`：显式指定 `session[:window]`
-- `CONTROL_PLANE_PANE`：显式指定 control-plane pane index
-- `DATA_PLANE_PANE`：显式指定 data-plane pane index
-- `CODEX_POOL_EDITION`：按 `personal / team / business` 选择 control-plane 产品名二进制
-- `CONTROL_PLANE_BIN`：显式指定 control-plane bin，优先级高于 `CODEX_POOL_EDITION`
-
-### Gated 真实账号 AI Error Learning E2E
-
-默认 gate 关闭，因此以下测试在未设置环境变量时会 `PASS-SKIP`：
-
-```bash
-cargo test -p data-plane ai_error_learning_real_e2e -- --nocapture
-```
-
-启用真实账号 e2e：
-
-```bash
-RUN_REAL_AI_ERROR_E2E=1 cargo test -p data-plane ai_error_learning_real_e2e -- --nocapture
-```
-
-该 e2e 会：
-
-- 可选调用 `./scripts/restart_backend_dev.sh`
-- 使用本地 `codex` CLI，并显式指定 `cp` provider
-- 登录本地 control-plane admin，打开 upstream error learning 设置
-- 发起一次真实请求，然后检查 `GET /api/v1/admin/model-routing/upstream-errors` 是否出现近期模板
-
-启用前提：
-
-- 本机 `~/.codex/config.toml` 已配置 `cp` provider，且可连到本地 data-plane
-- 本地 `control-plane` / `data-plane` 已可用，默认地址分别为 `127.0.0.1:8090` / `127.0.0.1:8091`
-- 本地管理员账号可用，默认开发凭据为 `admin / admin123456`
-- 号池中存在可被本地 codex 请求实际命中的真实账号
-
-常用环境变量：
-
-- `AI_ERROR_E2E_SKIP_RESTART=1`：跳过自动重启
-- `AI_ERROR_E2E_CODEX_BIN=/path/to/codex`：指定本地 codex CLI
-- `AI_ERROR_E2E_CODEX_PROVIDER=cp`：覆盖 provider 名称
-- `AI_ERROR_E2E_CODEX_MODEL=...`：覆盖触发错误学习的模型名
-- `AI_ERROR_E2E_KEEP_TEMP=1`：保留临时目录和 codex 日志
-- `AI_ERROR_E2E_RESTORE_SETTINGS=0`：不要在脚本退出时恢复原始 error learning 设置
 
 ### 常用质量命令
 
