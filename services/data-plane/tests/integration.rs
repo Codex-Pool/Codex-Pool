@@ -1,8 +1,6 @@
 #[path = "support/mod.rs"]
 mod support;
 
-#[path = "ai_error_learning_real_e2e.rs"]
-mod ai_error_learning_real_e2e;
 #[path = "auth_middleware.rs"]
 mod auth_middleware;
 #[path = "auth_validator.rs"]
