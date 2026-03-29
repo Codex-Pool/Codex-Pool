@@ -894,13 +894,14 @@ async fn sync_openai_admin_models_catalog(
             .admin_sync_openai_models_catalog_with_client(Some(selection.client.clone()))
             .await
             .map_err(|err| {
-                tracing::warn!(error = %err, "openai catalog sync failed");
+                let error_chain = format_anyhow_error_chain(&err);
+                tracing::warn!(error = %err, error_chain = %error_chain, "openai catalog sync failed");
                 {
                     let mut last_error = state
                         .model_catalog_last_error
                         .write()
                         .expect("model_catalog_last_error lock poisoned");
-                    *last_error = Some(err.to_string());
+                    *last_error = Some(error_chain);
                 }
                 (
                     StatusCode::BAD_GATEWAY,
@@ -915,13 +916,18 @@ async fn sync_openai_admin_models_catalog(
             .sync_openai_model_catalog_with_client(Some(selection.client.clone()))
             .await
             .map_err(|err| {
-                tracing::warn!(error = %err, "sqlite openai catalog sync failed");
+                let error_chain = format_anyhow_error_chain(&err);
+                tracing::warn!(
+                    error = %err,
+                    error_chain = %error_chain,
+                    "sqlite openai catalog sync failed"
+                );
                 {
                     let mut last_error = state
                         .model_catalog_last_error
                         .write()
                         .expect("model_catalog_last_error lock poisoned");
-                    *last_error = Some(err.to_string());
+                    *last_error = Some(error_chain);
                 }
                 (
                     StatusCode::BAD_GATEWAY,
