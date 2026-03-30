@@ -1,0 +1,11 @@
+title = "gitleaks config"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Allow fake access_token values used in test fixtures."
+paths = [
+  '''^services/control-plane/src/import_jobs/manager_impl/execution_and_tests\.rs$''',
+]
+
