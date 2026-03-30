@@ -111,14 +111,13 @@ export function TenantApp({ capabilities }: TenantAppProps) {
     })
   }, [])
 
-  const notifyError = useCallback((fallback: string, error?: unknown) => {
-    const description = error ? localizeApiErrorDisplay(t, error, fallback).label : undefined
+  const notifyError = useCallback((title: string, description?: string) => {
     notify({
       variant: 'error',
-      title: fallback,
-      description: description && description !== fallback ? description : undefined,
+      title,
+      description,
     })
-  }, [t])
+  }, [])
 
   const openAuthScreen = (mode: AuthMode = 'login') => {
     setAuthScreen('auth')
@@ -187,7 +186,9 @@ export function TenantApp({ capabilities }: TenantAppProps) {
       if (isAxiosError(err) && err.response?.status === 401) {
         return
       }
-      notifyError(t('tenantApp.auth.error.loginFailed'), err)
+      const fallback = t('tenantApp.auth.error.loginFailed')
+      const description = localizeApiErrorDisplay(t, err, t('tenantApp.auth.error.loginFailed')).label
+      notifyError(fallback, description !== fallback ? description : undefined)
     },
   })
 
@@ -201,7 +202,9 @@ export function TenantApp({ capabilities }: TenantAppProps) {
       notifySuccess(t('tenantApp.auth.notice.registerSuccess'))
     },
     onError: (err) => {
-      notifyError(t('tenantApp.auth.error.registerFailed'), err)
+      const fallback = t('tenantApp.auth.error.registerFailed')
+      const description = localizeApiErrorDisplay(t, err, t('tenantApp.auth.error.registerFailed')).label
+      notifyError(fallback, description !== fallback ? description : undefined)
     },
   })
 
@@ -213,7 +216,9 @@ export function TenantApp({ capabilities }: TenantAppProps) {
       notifySuccess(t('tenantApp.auth.notice.emailVerified'))
     },
     onError: (err) => {
-      notifyError(t('tenantApp.auth.error.verificationFailed'), err)
+      const fallback = t('tenantApp.auth.error.verificationFailed')
+      const description = localizeApiErrorDisplay(t, err, t('tenantApp.auth.error.verificationFailed')).label
+      notifyError(fallback, description !== fallback ? description : undefined)
     },
   })
 
@@ -225,7 +230,9 @@ export function TenantApp({ capabilities }: TenantAppProps) {
       notifySuccess(t('tenantApp.auth.notice.resetCodeSentIfExists'))
     },
     onError: (err) => {
-      notifyError(t('tenantApp.auth.error.sendResetCodeFailed'), err)
+      const fallback = t('tenantApp.auth.error.sendResetCodeFailed')
+      const description = localizeApiErrorDisplay(t, err, t('tenantApp.auth.error.sendResetCodeFailed')).label
+      notifyError(fallback, description !== fallback ? description : undefined)
     },
   })
 
@@ -239,7 +246,9 @@ export function TenantApp({ capabilities }: TenantAppProps) {
       notifySuccess(t('tenantApp.auth.notice.passwordResetSuccess'))
     },
     onError: (err) => {
-      notifyError(t('tenantApp.auth.error.passwordResetFailed'), err)
+      const fallback = t('tenantApp.auth.error.passwordResetFailed')
+      const description = localizeApiErrorDisplay(t, err, t('tenantApp.auth.error.passwordResetFailed')).label
+      notifyError(fallback, description !== fallback ? description : undefined)
     },
   })
 

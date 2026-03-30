@@ -45,7 +45,7 @@ jobs:
         run: cargo check --workspace --all-targets --locked
 
       - name: Business feature compile check
-        run: cargo check -p control-plane --features clickhouse-backend --bin codex-pool-business --bin usage-worker --locked
+        run: cargo check -p control-plane --features postgres-backend,redis-backend,clickhouse-backend,smtp-backend --bin codex-pool-business --bin usage-worker --locked
 
   rust-fmt:
     runs-on: ubuntu-latest

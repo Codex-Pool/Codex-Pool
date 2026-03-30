@@ -2,13 +2,14 @@
 
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
+import path from "node:path";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 
-const ROOT =
-  "/Users/wangnov/Codex-Pool/.worktrees/frontend-antigravity/frontend/src";
+const ROOT = fileURLToPath(new URL("..", import.meta.url));
 
 test("Accounts wires backend-backed recent signal heatmaps into the list and detail views", async () => {
-  const source = await readFile(`${ROOT}/pages/Accounts.tsx`, "utf8");
+  const source = await readFile(path.join(ROOT, "pages/Accounts.tsx"), "utf8");
 
   assert.match(
     source,
@@ -38,7 +39,7 @@ test("Accounts wires backend-backed recent signal heatmaps into the list and det
 });
 
 test("accounts API exposes recent signal heatmap types and endpoint", async () => {
-  const source = await readFile(`${ROOT}/api/accounts.ts`, "utf8");
+  const source = await readFile(path.join(ROOT, "api/accounts.ts"), "utf8");
 
   assert.match(
     source,

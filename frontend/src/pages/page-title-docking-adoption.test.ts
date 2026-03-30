@@ -3,9 +3,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { readFile } from "node:fs/promises";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 
-const ROOT =
-  "/Users/wangnov/Codex-Pool/.worktrees/frontend-antigravity/frontend/src";
+const ROOT = fileURLToPath(new URL("..", import.meta.url));
 
 const DOCKED_PAGE_FILES = [
   "pages/Dashboard.tsx",
@@ -52,7 +53,7 @@ const WORKBENCH_ARCHETYPE_EXPECTATIONS = [
 
 test("all routed surfaces use the shared docked page intro primitive", async () => {
   for (const relativePath of DOCKED_PAGE_FILES) {
-    const source = await readFile(`${ROOT}/${relativePath}`, "utf8");
+    const source = await readFile(path.join(ROOT, relativePath), "utf8");
 
     assert.match(
       source,
@@ -64,7 +65,7 @@ test("all routed surfaces use the shared docked page intro primitive", async () 
 
 test("DataTable-driven pages should no longer keep top-level titles inside the table toolbar", async () => {
   for (const relativePath of ["pages/Models.tsx", "pages/Logs.tsx"] as const) {
-    const source = await readFile(`${ROOT}/${relativePath}`, "utf8");
+    const source = await readFile(path.join(ROOT, relativePath), "utf8");
 
     assert.doesNotMatch(
       source,
@@ -81,7 +82,7 @@ test("DataTable-driven pages should no longer keep top-level titles inside the t
 
 test("main workbench pages keep their docked title intro on the correct archetype", async () => {
   for (const [relativePath, archetype] of WORKBENCH_ARCHETYPE_EXPECTATIONS) {
-    const source = await readFile(`${ROOT}/${relativePath}`, "utf8");
+    const source = await readFile(path.join(ROOT, relativePath), "utf8");
 
     assert.match(
       source,
@@ -92,7 +93,7 @@ test("main workbench pages keep their docked title intro on the correct archetyp
 });
 
 test("AdminApiKeys stays on HeroUI-native workbench primitives", async () => {
-  const source = await readFile(`${ROOT}/pages/AdminApiKeys.tsx`, "utf8");
+  const source = await readFile(path.join(ROOT, "pages/AdminApiKeys.tsx"), "utf8");
 
   assert.match(
     source,
@@ -112,7 +113,7 @@ test("AdminApiKeys stays on HeroUI-native workbench primitives", async () => {
 });
 
 test("Groups stays on HeroUI-native workbench primitives", async () => {
-  const source = await readFile(`${ROOT}/pages/Groups.tsx`, "utf8");
+  const source = await readFile(path.join(ROOT, "pages/Groups.tsx"), "utf8");
 
   assert.match(
     source,
@@ -132,7 +133,7 @@ test("Groups stays on HeroUI-native workbench primitives", async () => {
 });
 
 test("Models avoids rendering raw technical error fields directly into operator surfaces", async () => {
-  const source = await readFile(`${ROOT}/pages/Models.tsx`, "utf8");
+  const source = await readFile(path.join(ROOT, "pages/Models.tsx"), "utf8");
 
   assert.doesNotMatch(
     source,
@@ -157,7 +158,7 @@ test("workbench list and ledger card headers pin their title blocks to the left 
   ] as const;
 
   for (const [relativePath, pattern] of expectations) {
-    const source = await readFile(`${ROOT}/${relativePath}`, "utf8");
+    const source = await readFile(path.join(ROOT, relativePath), "utf8");
 
     assert.match(
       source,

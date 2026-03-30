@@ -2,27 +2,28 @@
 
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
+import path from "node:path";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 
-const ROOT =
-  "/Users/wangnov/Codex-Pool/.worktrees/frontend-antigravity/frontend/src";
+const ROOT = fileURLToPath(new URL("..", import.meta.url));
 
 test("Accounts consolidates operator-facing table columns and actions", async () => {
-  const source = await readFile(`${ROOT}/pages/Accounts.tsx`, "utf8");
+  const source = await readFile(path.join(ROOT, "pages/Accounts.tsx"), "utf8");
 
   assert.match(
     source,
-    /<TableColumn>\{t\('accountPool\.columns\.operationalStatus'\)\}<\/TableColumn>/,
+    /<TableColumn[^>]*>\s*\{t\('accountPool\.columns\.operationalStatus'\)\}\s*<\/TableColumn>/,
     "Accounts should expose the consolidated operational status column",
   );
   assert.match(
     source,
-    /<TableColumn>\{t\('accountPool\.columns\.recentSignal'\)\}<\/TableColumn>/,
+    /<TableColumn[^>]*>\s*\{t\('accountPool\.columns\.recentSignal'\)\}\s*<\/TableColumn>/,
     "Accounts should expose the recent signal column",
   );
   assert.doesNotMatch(
     source,
-    /<TableColumn>\{t\('accountPool\.columns\.reason'\)\}<\/TableColumn>|<TableColumn>\{t\('accountPool\.columns\.credentials'\)\}<\/TableColumn>/,
+    /<TableColumn[^>]*>\s*\{t\('accountPool\.columns\.reason'\)\}\s*<\/TableColumn>|<TableColumn[^>]*>\s*\{t\('accountPool\.columns\.credentials'\)\}\s*<\/TableColumn>/,
     "Accounts should no longer keep reason and credentials as standalone list columns",
   );
   assert.match(
@@ -48,7 +49,7 @@ test("Accounts consolidates operator-facing table columns and actions", async ()
 });
 
 test("Accounts summary cards can drive state and reason filters", async () => {
-  const source = await readFile(`${ROOT}/pages/Accounts.tsx`, "utf8");
+  const source = await readFile(path.join(ROOT, "pages/Accounts.tsx"), "utf8");
 
   assert.match(
     source,
@@ -68,7 +69,7 @@ test("Accounts summary cards can drive state and reason filters", async () => {
 });
 
 test("Accounts list avoids showing raw account ids in the secondary identity line", async () => {
-  const source = await readFile(`${ROOT}/pages/Accounts.tsx`, "utf8");
+  const source = await readFile(path.join(ROOT, "pages/Accounts.tsx"), "utf8");
 
   assert.doesNotMatch(
     source,

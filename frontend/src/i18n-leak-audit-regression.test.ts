@@ -2,17 +2,18 @@
 
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
+import path from "node:path";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 
-const ROOT =
-  "/Users/wangnov/Codex-Pool/.worktrees/frontend-antigravity/frontend/src";
+const ROOT = fileURLToPath(new URL(".", import.meta.url));
 
 test("high-priority admin and tenant surfaces avoid direct raw error leaks", async () => {
-  const accounts = await readFile(`${ROOT}/pages/Accounts.tsx`, "utf8");
-  const models = await readFile(`${ROOT}/pages/Models.tsx`, "utf8");
-  const tenantApp = await readFile(`${ROOT}/tenant/TenantApp.tsx`, "utf8");
-  const oauthImport = await readFile(`${ROOT}/pages/OAuthImport.tsx`, "utf8");
-  const dashboard = await readFile(`${ROOT}/pages/Dashboard.tsx`, "utf8");
+  const accounts = await readFile(path.join(ROOT, "pages/Accounts.tsx"), "utf8");
+  const models = await readFile(path.join(ROOT, "pages/Models.tsx"), "utf8");
+  const tenantApp = await readFile(path.join(ROOT, "tenant/TenantApp.tsx"), "utf8");
+  const oauthImport = await readFile(path.join(ROOT, "pages/OAuthImport.tsx"), "utf8");
+  const dashboard = await readFile(path.join(ROOT, "pages/Dashboard.tsx"), "utf8");
 
   assert.doesNotMatch(
     accounts,
@@ -66,14 +67,20 @@ test("high-priority admin and tenant surfaces avoid direct raw error leaks", asy
 });
 
 test("logs range label and import item fallbacks stay localized", async () => {
-  const logs = await readFile(`${ROOT}/pages/Logs.tsx`, "utf8");
-  const importJobs = await readFile(`${ROOT}/pages/ImportJobs.tsx`, "utf8");
-  const groups = await readFile(`${ROOT}/pages/Groups.tsx`, "utf8");
-  const config = await readFile(`${ROOT}/pages/Config.tsx`, "utf8");
-  const tenantApiKeys = await readFile(`${ROOT}/tenant/pages/ApiKeysPage.tsx`, "utf8");
-  const tenantBilling = await readFile(`${ROOT}/tenant/pages/BillingPage.tsx`, "utf8");
-  const zh = await readFile(`${ROOT}/locales/zh-CN.ts`, "utf8");
-  const en = await readFile(`${ROOT}/locales/en.ts`, "utf8");
+  const logs = await readFile(path.join(ROOT, "pages/Logs.tsx"), "utf8");
+  const importJobs = await readFile(path.join(ROOT, "pages/ImportJobs.tsx"), "utf8");
+  const groups = await readFile(path.join(ROOT, "pages/Groups.tsx"), "utf8");
+  const config = await readFile(path.join(ROOT, "pages/Config.tsx"), "utf8");
+  const tenantApiKeys = await readFile(
+    path.join(ROOT, "tenant/pages/ApiKeysPage.tsx"),
+    "utf8",
+  );
+  const tenantBilling = await readFile(
+    path.join(ROOT, "tenant/pages/BillingPage.tsx"),
+    "utf8",
+  );
+  const zh = await readFile(path.join(ROOT, "locales/zh-CN.ts"), "utf8");
+  const en = await readFile(path.join(ROOT, "locales/en.ts"), "utf8");
 
   assert.match(
     logs,
@@ -134,15 +141,21 @@ test("logs range label and import item fallbacks stay localized", async () => {
 });
 
 test("remaining operator-facing diagnostics stay localized", async () => {
-  const errorI18n = await readFile(`${ROOT}/api/errorI18n.ts`, "utf8");
-  const logs = await readFile(`${ROOT}/pages/Logs.tsx`, "utf8");
-  const tenantLogs = await readFile(`${ROOT}/tenant/pages/LogsPage.tsx`, "utf8");
-  const accountsColumns = await readFile(`${ROOT}/features/accounts/use-accounts-columns.tsx`, "utf8");
-  const accountDetail = await readFile(`${ROOT}/features/accounts/account-detail-dialog.tsx`, "utf8");
-  const importPanels = await readFile(`${ROOT}/features/import-jobs/panels.tsx`, "utf8");
-  const proxies = await readFile(`${ROOT}/pages/Proxies.tsx`, "utf8");
-  const zh = await readFile(`${ROOT}/locales/zh-CN.ts`, "utf8");
-  const en = await readFile(`${ROOT}/locales/en.ts`, "utf8");
+  const errorI18n = await readFile(path.join(ROOT, "api/errorI18n.ts"), "utf8");
+  const logs = await readFile(path.join(ROOT, "pages/Logs.tsx"), "utf8");
+  const tenantLogs = await readFile(path.join(ROOT, "tenant/pages/LogsPage.tsx"), "utf8");
+  const accountsColumns = await readFile(
+    path.join(ROOT, "features/accounts/use-accounts-columns.tsx"),
+    "utf8",
+  );
+  const accountDetail = await readFile(
+    path.join(ROOT, "features/accounts/account-detail-dialog.tsx"),
+    "utf8",
+  );
+  const importPanels = await readFile(path.join(ROOT, "features/import-jobs/panels.tsx"), "utf8");
+  const proxies = await readFile(path.join(ROOT, "pages/Proxies.tsx"), "utf8");
+  const zh = await readFile(path.join(ROOT, "locales/zh-CN.ts"), "utf8");
+  const en = await readFile(path.join(ROOT, "locales/en.ts"), "utf8");
 
   assert.match(
     errorI18n,

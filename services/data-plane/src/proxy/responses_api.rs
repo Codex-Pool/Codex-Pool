@@ -34,6 +34,7 @@ const MAX_BACKGROUND_RESPONSES_MAX_RPS: u32 = 100;
 pub struct BackgroundResponsesRuntime {
     entries: Arc<RwLock<HashMap<String, StoredResponseRecord>>>,
     conversations: Arc<RwLock<HashMap<String, ConversationCursor>>>,
+    continuation_cursors: Arc<RwLock<HashMap<String, ConversationCursor>>>,
     permits: Arc<Semaphore>,
     next_dispatch_at: Arc<Mutex<Instant>>,
     self_base_url: Arc<str>,
@@ -205,6 +206,7 @@ impl BackgroundResponsesRuntime {
         Self {
             entries: Arc::new(RwLock::new(HashMap::new())),
             conversations: Arc::new(RwLock::new(HashMap::new())),
+            continuation_cursors: Arc::new(RwLock::new(HashMap::new())),
             permits: Arc::new(Semaphore::new(max_concurrency)),
             next_dispatch_at: Arc::new(Mutex::new(Instant::now())),
             self_base_url: Arc::from(self_base_url),
@@ -227,6 +229,9 @@ impl BackgroundResponsesRuntime {
 
         let mut conversations = self.conversations.write().await;
         conversations.retain(|_, cursor| cursor.expires_at > now);
+
+        let mut continuation_cursors = self.continuation_cursors.write().await;
+        continuation_cursors.retain(|_, cursor| cursor.expires_at > now);
     }
 
     async fn lookup_response(&self, owner_key: &str, response_id: &str) -> Option<Value> {
@@ -331,6 +336,35 @@ impl BackgroundResponsesRuntime {
             return None;
         }
         Some(cursor.response_id.clone())
+    }
+
+    async fn current_continuation_cursor_response_id(
+        &self,
+        owner_key: &str,
+        continuation_cursor_key: &str,
+    ) -> Option<String> {
+        let continuation_cursors = self.continuation_cursors.read().await;
+        let cursor = continuation_cursors.get(continuation_cursor_key)?;
+        if cursor.owner_key != owner_key || cursor.expires_at <= Instant::now() {
+            return None;
+        }
+        Some(cursor.response_id.clone())
+    }
+
+    async fn store_continuation_cursor(
+        &self,
+        owner_key: String,
+        continuation_cursor_key: String,
+        response_id: String,
+    ) {
+        self.continuation_cursors.write().await.insert(
+            continuation_cursor_key,
+            ConversationCursor {
+                owner_key,
+                response_id,
+                expires_at: Instant::now() + self.retention,
+            },
+        );
     }
 
     async fn queue_background_response(
@@ -1082,6 +1116,18 @@ async fn store_completed_response_from_proxy(
     let Some(request_value) = serde_json::from_slice::<Value>(request_body).ok() else {
         return;
     };
+    let continuation_cursor_key = request_value
+        .get("prompt_cache_key")
+        .and_then(Value::as_str)
+        .or_else(|| {
+            request_value
+                .get("metadata")
+                .and_then(|meta| meta.get("session_id"))
+                .and_then(Value::as_str)
+        })
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToString::to_string);
     let response_id = serde_json::from_slice::<Value>(response_body)
         .ok()
         .and_then(|value| value.get("id").and_then(Value::as_str).map(ToString::to_string));
@@ -1096,9 +1142,17 @@ async fn store_completed_response_from_proxy(
             force_store,
         )
         .await;
-    if let Some(continuation_cursor_key) =
-        parsed_policy_context.continuation_key_hint.as_deref()
+    if let (Some(continuation_cursor_key), Some(response_id)) =
+        (continuation_cursor_key.as_deref(), response_id.as_deref())
     {
+        state
+            .background_responses
+            .store_continuation_cursor(
+                owner_key.clone(),
+                continuation_cursor_key.to_string(),
+                response_id.to_string(),
+            )
+            .await;
         emit_continuation_cursor_system_event(
             state,
             "continuation_cursor_saved",
@@ -1109,7 +1163,7 @@ async fn store_completed_response_from_proxy(
             Some("/v1/responses"),
             Some("POST"),
             continuation_cursor_key,
-            response_id.as_deref(),
+            Some(response_id),
             Some(owner_key.as_str()),
             Some("saved continuation cursor for HTTP responses replay"),
         )

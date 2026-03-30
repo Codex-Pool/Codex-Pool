@@ -2,13 +2,14 @@
 
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
+import path from "node:path";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 
-const ROOT =
-  "/Users/wangnov/Codex-Pool/.worktrees/frontend-antigravity/frontend/src";
+const ROOT = fileURLToPath(new URL("..", import.meta.url));
 
 test("extractRateLimitDisplaysFromSnapshots keeps used_percent to remainingPercent conversion in shared utils", async () => {
-  const source = await readFile(`${ROOT}/features/accounts/utils.ts`, "utf8");
+  const source = await readFile(path.join(ROOT, "features/accounts/utils.ts"), "utf8");
 
   assert.match(
     source,
@@ -28,7 +29,7 @@ test("extractRateLimitDisplaysFromSnapshots keeps used_percent to remainingPerce
 });
 
 test("Accounts uses the shared usage helper and HeroUI progress bars for account pool usage", async () => {
-  const source = await readFile(`${ROOT}/pages/Accounts.tsx`, "utf8");
+  const source = await readFile(path.join(ROOT, "pages/Accounts.tsx"), "utf8");
 
   assert.match(
     source,
@@ -58,7 +59,7 @@ test("Accounts uses the shared usage helper and HeroUI progress bars for account
 });
 
 test("Accounts localizes reason codes instead of falling back to raw backend values", async () => {
-  const source = await readFile(`${ROOT}/pages/Accounts.tsx`, "utf8");
+  const source = await readFile(path.join(ROOT, "pages/Accounts.tsx"), "utf8");
 
   assert.match(
     source,
@@ -78,7 +79,7 @@ test("Accounts localizes reason codes instead of falling back to raw backend val
 });
 
 test("accounts plan labels flow through i18n-backed plan value keys", async () => {
-  const source = await readFile(`${ROOT}/features/accounts/utils.ts`, "utf8");
+  const source = await readFile(path.join(ROOT, "features/accounts/utils.ts"), "utf8");
 
   assert.match(
     source,
@@ -88,8 +89,8 @@ test("accounts plan labels flow through i18n-backed plan value keys", async () =
 });
 
 test("locale files expose account-pool usage wording and reason-code mappings", async () => {
-  const zh = await readFile(`${ROOT}/locales/zh-CN.ts`, "utf8");
-  const en = await readFile(`${ROOT}/locales/en.ts`, "utf8");
+  const zh = await readFile(path.join(ROOT, "locales/zh-CN.ts"), "utf8");
+  const en = await readFile(path.join(ROOT, "locales/en.ts"), "utf8");
 
   assert.match(zh, /quota:\s*"用量"/, "zh-CN should label the account-pool usage column as 用量");
   assert.match(en, /quota:\s*"Usage"/, "en should label the account-pool usage column as Usage");

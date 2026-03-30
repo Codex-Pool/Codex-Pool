@@ -21,7 +21,7 @@ async fn build_app_with_event_sink_and_allowed_keys(
     event_sink: Arc<NoopEventSink>,
     allowed_keys: Vec<String>,
 ) -> anyhow::Result<Router> {
-    support::ensure_test_security_env().await;
+    let _env_guard = support::lock_env().await;
     dp_build_app_with_event_sink_and_allowed_keys(config, event_sink, allowed_keys).await
 }
 

@@ -400,6 +400,24 @@ pub async fn proxy_handler(
     if path == "/v1/responses" {
         if let Some(mut request_value) = parse_request_json_body(&parts.headers, &body_bytes) {
             let owner_key = response_owner_key(principal.as_ref());
+            let has_previous_response_id = request_value
+                .get("previous_response_id")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .is_some();
+            let continuation_cursor_key = request_value
+                .get("prompt_cache_key")
+                .and_then(Value::as_str)
+                .or_else(|| {
+                    request_value
+                        .get("metadata")
+                        .and_then(|meta| meta.get("session_id"))
+                        .and_then(Value::as_str)
+                })
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(ToString::to_string);
             let prior_conversation_response_id = parsed_policy_context
                 .conversation_id
                 .as_deref()
@@ -476,6 +494,82 @@ pub async fn proxy_handler(
                 }
                 None => None,
             };
+            if prior_conversation_response_id.is_none() && !has_previous_response_id {
+                if let Some(continuation_cursor_key) = continuation_cursor_key.as_deref() {
+                    let restored = state
+                        .background_responses
+                        .current_continuation_cursor_response_id(
+                            owner_key.as_str(),
+                            continuation_cursor_key,
+                        )
+                        .await;
+                    if let Some(response_id) = restored.as_deref() {
+                        if let Some(object) = request_value.as_object_mut() {
+                            object.insert(
+                                "previous_response_id".to_string(),
+                                Value::String(response_id.to_string()),
+                            );
+                        }
+                        emit_continuation_cursor_system_event(
+                            &state,
+                            "continuation_cursor_restored",
+                            SystemEventSeverity::Info,
+                            None,
+                            parsed_policy_context.request_id.as_deref(),
+                            parsed_policy_context.model.as_deref(),
+                            Some(path.as_str()),
+                            Some(method.as_str()),
+                            continuation_cursor_key,
+                            Some(response_id),
+                            Some(owner_key.as_str()),
+                            Some("restored continuation cursor for HTTP fallback after websocket session"),
+                        )
+                        .await;
+                        emit_ws_http_fallback_system_event(
+                            &state,
+                            None,
+                            parsed_policy_context.request_id.as_deref(),
+                            parsed_policy_context.model.as_deref(),
+                            Some(path.as_str()),
+                            Some(method.as_str()),
+                            continuation_cursor_key,
+                            Some(response_id),
+                            Some(owner_key.as_str()),
+                            true,
+                        )
+                        .await;
+                    } else {
+                        emit_continuation_cursor_system_event(
+                            &state,
+                            "continuation_cursor_missed",
+                            SystemEventSeverity::Warn,
+                            None,
+                            parsed_policy_context.request_id.as_deref(),
+                            parsed_policy_context.model.as_deref(),
+                            Some(path.as_str()),
+                            Some(method.as_str()),
+                            continuation_cursor_key,
+                            None,
+                            Some(owner_key.as_str()),
+                            Some("continuation cursor was not found for HTTP fallback after websocket session"),
+                        )
+                        .await;
+                        emit_ws_http_fallback_system_event(
+                            &state,
+                            None,
+                            parsed_policy_context.request_id.as_deref(),
+                            parsed_policy_context.model.as_deref(),
+                            Some(path.as_str()),
+                            Some(method.as_str()),
+                            continuation_cursor_key,
+                            None,
+                            Some(owner_key.as_str()),
+                            false,
+                        )
+                        .await;
+                    }
+                }
+            }
             if let Err(err) = apply_conversation_semantics_to_request(
                 &mut request_value,
                 &mut parsed_policy_context,

@@ -1,5 +1,4 @@
 use std::env;
-use std::sync::LazyLock;
 use std::time::Duration;
 
 use chrono::Utc;
@@ -9,7 +8,7 @@ use uuid::Uuid;
 use wiremock::matchers::any;
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
-static ENV_LOCK: LazyLock<tokio::sync::Mutex<()>> = LazyLock::new(|| tokio::sync::Mutex::new(()));
+use crate::support;
 
 fn proxy_node(label: &str, proxy_url: &str) -> OutboundProxyNode {
     OutboundProxyNode {
@@ -66,7 +65,7 @@ async fn runtime_blocks_or_falls_back_based_on_fail_mode() {
 
 #[tokio::test]
 async fn direct_client_bypasses_ambient_http_proxy() {
-    let _env_guard = ENV_LOCK.lock().await;
+    let _env_guard = support::lock_env().await;
     let target = MockServer::start().await;
     Mock::given(any())
         .respond_with(ResponseTemplate::new(200).set_body_string("target"))
@@ -132,7 +131,7 @@ async fn direct_client_bypasses_ambient_http_proxy() {
 
 #[tokio::test]
 async fn direct_client_can_use_ambient_http_proxy_when_enabled() {
-    let _env_guard = ENV_LOCK.lock().await;
+    let _env_guard = support::lock_env().await;
     let target = MockServer::start().await;
     Mock::given(any())
         .respond_with(ResponseTemplate::new(200).set_body_string("target"))

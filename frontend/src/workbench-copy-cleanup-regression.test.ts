@@ -2,14 +2,15 @@
 
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
+import path from "node:path";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 
-const ROOT =
-  "/Users/wangnov/Codex-Pool/.worktrees/frontend-antigravity/frontend/src";
+const ROOT = fileURLToPath(new URL(".", import.meta.url));
 
 test("models and tenants trim repeated workbench copy from primary surfaces", async () => {
-  const models = await readFile(`${ROOT}/pages/Models.tsx`, "utf8");
-  const tenants = await readFile(`${ROOT}/pages/Tenants.tsx`, "utf8");
+  const models = await readFile(path.join(ROOT, "pages/Models.tsx"), "utf8");
+  const tenants = await readFile(path.join(ROOT, "pages/Tenants.tsx"), "utf8");
 
   assert.doesNotMatch(
     models,
@@ -45,8 +46,11 @@ test("models and tenants trim repeated workbench copy from primary surfaces", as
 });
 
 test("tenant dashboard and billing keep section headers concise", async () => {
-  const dashboard = await readFile(`${ROOT}/tenant/pages/DashboardPage.tsx`, "utf8");
-  const billing = await readFile(`${ROOT}/tenant/pages/BillingPage.tsx`, "utf8");
+  const dashboard = await readFile(
+    path.join(ROOT, "tenant/pages/DashboardPage.tsx"),
+    "utf8",
+  );
+  const billing = await readFile(path.join(ROOT, "tenant/pages/BillingPage.tsx"), "utf8");
 
   assert.doesNotMatch(
     dashboard,

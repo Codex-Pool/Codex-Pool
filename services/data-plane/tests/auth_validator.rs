@@ -23,7 +23,7 @@ async fn build_app_with_event_sink_and_allowed_keys(
     event_sink: Arc<NoopEventSink>,
     allowed_keys: Vec<String>,
 ) -> anyhow::Result<Router> {
-    support::ensure_test_security_env().await;
+    let _env_guard = support::lock_env().await;
     dp_build_app_with_event_sink_and_allowed_keys(config, event_sink, allowed_keys).await
 }
 
@@ -684,9 +684,10 @@ async fn auth_validator_rejects_disabled_api_key() {
 
 #[tokio::test]
 async fn auth_validator_sends_internal_service_token_header() {
-    support::ensure_test_security_env().await;
+    let _env_guard = support::lock_env().await;
     let internal_token =
         std::env::var("CONTROL_PLANE_INTERNAL_AUTH_TOKEN").expect("internal auth token env");
+    drop(_env_guard);
     let expected_auth_header = format!("Bearer {internal_token}");
 
     let upstream = MockServer::start().await;

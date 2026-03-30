@@ -292,13 +292,8 @@ impl SqliteUsageRepo {
             "TEXT NULL",
         )
         .await?;
-        Self::ensure_column_exists(
-            pool,
-            "openai_models_catalog",
-            "snapshots_json",
-            "TEXT NULL",
-        )
-        .await?;
+        Self::ensure_column_exists(pool, "openai_models_catalog", "snapshots_json", "TEXT NULL")
+            .await?;
         Self::ensure_column_exists(
             pool,
             "openai_models_catalog",
@@ -1099,7 +1094,7 @@ impl SqliteUsageRepo {
                     raw_text,
                     synced_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(model_id) DO UPDATE SET
                     owned_by = excluded.owned_by,
                     title = excluded.title,
@@ -2132,8 +2127,7 @@ mod tests {
                 family_label: Some("Frontier models".to_string()),
                 description: Some("Latest reasoning model".to_string()),
                 avatar_remote_url: Some(
-                    "https://developers.openai.com/images/api/models/icons/gpt-5.4.png"
-                        .to_string(),
+                    "https://developers.openai.com/images/api/models/icons/gpt-5.4.png".to_string(),
                 ),
                 avatar_local_path: Some("gpt-5.4.png".to_string()),
                 avatar_synced_at: Some(synced_at),
@@ -2204,12 +2198,18 @@ mod tests {
         assert_eq!(catalog[0].model_id, "gpt-5.4");
         assert_eq!(catalog[0].title, "GPT-5.4");
         assert_eq!(catalog[0].display_name.as_deref(), Some("GPT-5.4"));
-        assert_eq!(catalog[0].tagline.as_deref(), Some("Latest reasoning flagship"));
+        assert_eq!(
+            catalog[0].tagline.as_deref(),
+            Some("Latest reasoning flagship")
+        );
         assert_eq!(catalog[0].family.as_deref(), Some("frontier"));
         assert_eq!(catalog[0].family_label.as_deref(), Some("Frontier models"));
         assert_eq!(catalog[0].avatar_local_path.as_deref(), Some("gpt-5.4.png"));
         assert_eq!(catalog[0].max_input_tokens, Some(272_000));
-        assert_eq!(catalog[0].pricing_note_items, vec!["Pricing note".to_string()]);
+        assert_eq!(
+            catalog[0].pricing_note_items,
+            vec!["Pricing note".to_string()]
+        );
         assert_eq!(catalog[0].endpoints, vec!["v1/responses".to_string()]);
         assert_eq!(catalog[0].supported_features, vec!["streaming".to_string()]);
         assert_eq!(catalog[0].supported_tools, vec!["web_search".to_string()]);
@@ -2218,10 +2218,7 @@ mod tests {
         assert_eq!(catalog[0].feature_items.len(), 1);
         assert_eq!(catalog[0].tool_items.len(), 1);
         assert_eq!(catalog[0].snapshot_items.len(), 1);
-        assert_eq!(
-            catalog[0].snapshots,
-            vec!["gpt-5.4-2026-03-05".to_string()]
-        );
+        assert_eq!(catalog[0].snapshots, vec!["gpt-5.4-2026-03-05".to_string()]);
 
         let pricing = repo
             .upsert_model_pricing(crate::tenant::ModelPricingUpsertRequest {

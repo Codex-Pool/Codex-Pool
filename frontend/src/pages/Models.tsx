@@ -1156,7 +1156,6 @@ export default function Models() {
               <Chip size="sm" variant="flat">
                 {filteredModels.length}
               </Chip>
-              <span>{t("models.antigravity.directoryDescription")}</span>
             </div>
           </div>
         </CardHeader>
@@ -1326,11 +1325,6 @@ export default function Models() {
                   <div className="text-sm leading-6 text-default-500">
                     {describeAvailabilityOutcome(selectedModel, t)}
                   </div>
-                  {selectedModel.availability_error ? (
-                    <div className="rounded-2xl border border-danger-200 bg-danger-50/70 px-3 py-3 text-sm leading-6 text-danger-700 dark:bg-danger/10 dark:text-danger-300">
-                      {selectedModel.availability_error}
-                    </div>
-                  ) : null}
                 </AntigravityDialogPanel>
 
                 <AntigravityDialogPanel tone="secondary">

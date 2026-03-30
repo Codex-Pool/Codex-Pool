@@ -904,7 +904,7 @@ async fn oauth_import_job_does_not_fail_reused_refresh_tokens_during_queue_only_
         sleep(Duration::from_millis(30)).await;
     }
 
-    assert_eq!(latest_job["status"], "failed");
+    assert_eq!(latest_job["status"], "completed");
     assert_eq!(latest_job["created_count"], 1);
     assert_eq!(latest_job["updated_count"], 0);
     assert_eq!(latest_job["failed_count"], 0);

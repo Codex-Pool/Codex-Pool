@@ -174,7 +174,8 @@ fn maybe_adapt_openai_responses_request_for_codex_profile(
         }
     }
 
-    if object.remove("max_output_tokens").is_some() {
+    let removed_max_output_tokens = object.remove("max_output_tokens").is_some();
+    if removed_max_output_tokens {
         changed = true;
     }
 
@@ -190,7 +191,15 @@ fn maybe_adapt_openai_responses_request_for_codex_profile(
             changed = true;
         }
     } else {
-        if object.get("store").and_then(Value::as_bool) != Some(false) {
+        let has_previous_response_id = object
+            .get("previous_response_id")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .is_some();
+        let should_force_store_false =
+            removed_max_output_tokens && !has_previous_response_id && !object.contains_key("store");
+        if should_force_store_false {
             object.insert("store".to_string(), Value::Bool(false));
             changed = true;
         }

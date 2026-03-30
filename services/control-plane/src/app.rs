@@ -900,7 +900,7 @@ mod capabilities_tests {
                     output_price_microcredits: Some(10_000_000),
                     pricing_notes: None,
                     pricing_note_items: vec![
-                        "Pricing is based on the number of tokens used.".to_string(),
+                        "Pricing is based on the number of tokens used.".to_string()
                     ],
                     input_modalities: vec!["text".to_string()],
                     output_modalities: vec!["text".to_string()],

@@ -3,8 +3,10 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { readFile } from 'node:fs/promises'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 
-const ROOT = '/Users/wangnov/Codex-Pool/.worktrees/frontend-antigravity/frontend/src'
+const ROOT = fileURLToPath(new URL('..', import.meta.url))
 
 const PAGE_CONTENT_FILES = [
   'pages/Dashboard.tsx',
@@ -33,7 +35,7 @@ const PAGE_CONTENT_FILES = [
 
 test('all routed surfaces should use the shared PageContent gutter primitive', async () => {
   for (const relativePath of PAGE_CONTENT_FILES) {
-    const source = await readFile(`${ROOT}/${relativePath}`, 'utf8')
+    const source = await readFile(path.join(ROOT, relativePath), 'utf8')
 
     assert.match(
       source,
@@ -45,7 +47,7 @@ test('all routed surfaces should use the shared PageContent gutter primitive', a
 
 test('routed surfaces should no longer hardcode 32px desktop gutters or missing page padding', async () => {
   for (const relativePath of PAGE_CONTENT_FILES) {
-    const source = await readFile(`${ROOT}/${relativePath}`, 'utf8')
+    const source = await readFile(path.join(ROOT, relativePath), 'utf8')
 
     assert.doesNotMatch(
       source,

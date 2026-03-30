@@ -20,6 +20,7 @@ fn ensure_test_security_env_locked() {
     });
 }
 
+#[allow(dead_code)]
 pub async fn ensure_test_security_env() {
     let _guard = ENV_LOCK.lock().await;
     ensure_test_security_env_locked();

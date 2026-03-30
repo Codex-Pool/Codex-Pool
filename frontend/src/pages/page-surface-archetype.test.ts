@@ -3,8 +3,10 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { readFile } from 'node:fs/promises'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 
-const ROOT = '/Users/wangnov/Codex-Pool/.worktrees/frontend-antigravity/frontend/src/pages'
+const ROOT = fileURLToPath(new URL('.', import.meta.url))
 
 const DASHBOARD_FAMILY_PAGES = [
   'Dashboard.tsx',
@@ -18,7 +20,7 @@ const DASHBOARD_FAMILY_PAGES = [
 
 test('dashboard-family pages should use shared antigravity surface primitives instead of legacy card skins', async () => {
   for (const relativePath of DASHBOARD_FAMILY_PAGES) {
-    const source = await readFile(`${ROOT}/${relativePath}`, 'utf8')
+    const source = await readFile(path.join(ROOT, relativePath), 'utf8')
 
     assert.doesNotMatch(
       source,
@@ -27,4 +29,3 @@ test('dashboard-family pages should use shared antigravity surface primitives in
     )
   }
 })
-
