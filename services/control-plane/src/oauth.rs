@@ -1,6 +1,7 @@
 use async_trait::async_trait;
 use base64::Engine;
 use chrono::{DateTime, Duration, Utc};
+use codex_pool_core::api::ProductEdition;
 use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -13,6 +14,8 @@ const DEFAULT_OPENAI_OAUTH_TOKEN_URL: &str = "https://auth.openai.com/oauth/toke
 const DEFAULT_OPENAI_OAUTH_AUTHORIZE_URL: &str = "https://auth.openai.com/oauth/authorize";
 const DEFAULT_OPENAI_CHATGPT_BASE_URL: &str = "https://chatgpt.com/backend-api/codex";
 const DEFAULT_OPENAI_OAUTH_TIMEOUT_SEC: u64 = 15;
+const DEFAULT_PERSONAL_OPENAI_OAUTH_CLIENT_ID: &str = "app_EMoamEEZ73f0CkXaXp7hrann";
+const CODEX_POOL_EDITION_ENV: &str = "CODEX_POOL_EDITION";
 const DEFAULT_OAUTH_EXPIRES_IN_SEC: i64 = 3600;
 const CODEX_DEFAULT_USER_AGENT: &str = "codex-cli";
 const CHATGPT_ACCOUNT_ID_HEADER: &str = "ChatGPT-Account-Id";
@@ -20,6 +23,34 @@ const CHATGPT_ACCOUNTS_CHECK_PATH: &str =
     "/backend-api/accounts/check/v4-2023-04-27?timezone_offset_min=0";
 const OPENAI_AUTH_NESTED_CLAIM_KEY: &str = "https://api.openai.com/auth";
 const OPENAI_PROFILE_NESTED_CLAIM_KEY: &str = "https://api.openai.com/profile";
+
+fn normalize_optional_string(value: Option<String>) -> Option<String> {
+    value
+        .map(|raw| raw.trim().to_string())
+        .filter(|raw| !raw.is_empty())
+}
+
+fn runtime_product_edition() -> ProductEdition {
+    let env_value = std::env::var(CODEX_POOL_EDITION_ENV).ok();
+    let executable_name = std::env::args_os()
+        .next()
+        .and_then(|value| value.into_string().ok());
+    ProductEdition::resolve_runtime_edition(env_value.as_deref(), executable_name.as_deref())
+}
+
+pub fn resolve_openai_oauth_client_id(
+    configured: Option<String>,
+    edition: ProductEdition,
+) -> Option<String> {
+    normalize_optional_string(configured).or_else(|| match edition {
+        ProductEdition::Personal => Some(DEFAULT_PERSONAL_OPENAI_OAUTH_CLIENT_ID.to_string()),
+        ProductEdition::Team | ProductEdition::Business => None,
+    })
+}
+
+pub fn resolve_runtime_openai_oauth_client_id(configured: Option<String>) -> Option<String> {
+    resolve_openai_oauth_client_id(configured, runtime_product_edition())
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OAuthRefreshErrorCode {
@@ -173,7 +204,9 @@ impl OpenAiOAuthClient {
             outbound_proxy_runtime: Some(outbound_proxy_runtime),
             token_url,
             authorize_url,
-            client_id: std::env::var("OPENAI_OAUTH_CLIENT_ID").ok(),
+            client_id: resolve_runtime_openai_oauth_client_id(
+                std::env::var("OPENAI_OAUTH_CLIENT_ID").ok(),
+            ),
         }
     }
 
@@ -212,7 +245,7 @@ impl OpenAiOAuthClient {
             outbound_proxy_runtime,
             token_url: token_url.into(),
             authorize_url: authorize_url.into(),
-            client_id,
+            client_id: normalize_optional_string(client_id),
         }
     }
 
@@ -1339,11 +1372,13 @@ fn classify_oauth_error_code(
 mod tests {
     use super::{
         classify_oauth_error_code, parse_access_token_claims, parse_id_token_claims,
-        parse_workspace_name_from_accounts_check, resolve_usage_endpoint,
-        resolve_workspace_check_endpoint, OAuthRefreshErrorCode, OAuthTokenEndpointError,
+        parse_workspace_name_from_accounts_check, resolve_openai_oauth_client_id,
+        resolve_usage_endpoint, resolve_workspace_check_endpoint, OAuthRefreshErrorCode,
+        OAuthTokenEndpointError,
     };
     use base64::Engine;
     use chrono::{DateTime, Utc};
+    use codex_pool_core::api::ProductEdition;
     use reqwest::StatusCode;
     use serde_json::json;
 
@@ -1378,6 +1413,27 @@ mod tests {
         };
         let code = classify_oauth_error_code(StatusCode::TOO_MANY_REQUESTS, Some(&parsed), "");
         assert_eq!(code, OAuthRefreshErrorCode::RateLimited);
+    }
+
+    #[test]
+    fn resolve_openai_oauth_client_id_uses_personal_default() {
+        let client_id = resolve_openai_oauth_client_id(None, ProductEdition::Personal);
+        assert_eq!(client_id.as_deref(), Some("app_EMoamEEZ73f0CkXaXp7hrann"));
+    }
+
+    #[test]
+    fn resolve_openai_oauth_client_id_preserves_explicit_value() {
+        let client_id = resolve_openai_oauth_client_id(
+            Some("client-test".to_string()),
+            ProductEdition::Personal,
+        );
+        assert_eq!(client_id.as_deref(), Some("client-test"));
+    }
+
+    #[test]
+    fn resolve_openai_oauth_client_id_does_not_default_for_business() {
+        let client_id = resolve_openai_oauth_client_id(None, ProductEdition::Business);
+        assert_eq!(client_id, None);
     }
 
     #[test]

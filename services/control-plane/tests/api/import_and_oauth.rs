@@ -379,6 +379,77 @@ async fn codex_oauth_login_session_callback_imports_account() {
 }
 
 #[tokio::test]
+async fn codex_oauth_login_session_personal_defaults_client_id_and_derives_callback_url() {
+    let _guard = OAUTH_LOGIN_ENV_LOCK.lock().await;
+    let old_client_id = set_env("OPENAI_OAUTH_CLIENT_ID", None);
+    let old_authorize_url = set_env(
+        "OPENAI_OAUTH_AUTHORIZE_URL",
+        Some("https://auth.example.com/oauth/authorize"),
+    );
+    let old_redirect_url = set_env("CODEX_OAUTH_REDIRECT_URL", None);
+    let old_public_base_url = set_env("CONTROL_PLANE_PUBLIC_BASE_URL", None);
+    let old_control_plane_base_url = set_env("CONTROL_PLANE_BASE_URL", None);
+    let old_edition = set_env("CODEX_POOL_EDITION", Some("personal"));
+
+    let cipher_key = base64::engine::general_purpose::STANDARD.encode([14_u8; 32]);
+    let cipher = CredentialCipher::from_base64_key(&cipher_key).unwrap();
+    let store = InMemoryStore::new_with_oauth(Arc::new(StaticOAuthTokenClient), Some(cipher));
+    let app = build_app_with_store(Arc::new(store));
+    let admin_token = login_admin_token(&app).await;
+
+    let create_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/upstream-accounts/oauth/codex/login-sessions")
+                .header("authorization", format!("Bearer {admin_token}"))
+                .header("content-type", "application/json")
+                .header("origin", "http://192.168.31.5:8090")
+                .header("host", "192.168.31.5:8090")
+                .body(Body::from(r#"{"label":"personal-defaults"}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(create_response.status(), StatusCode::OK);
+    let create_body = to_bytes(create_response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let create_json: Value = serde_json::from_slice(&create_body).unwrap();
+    assert_eq!(
+        create_json["callback_url"],
+        "http://192.168.31.5:8090/auth/callback"
+    );
+    let authorize_url = reqwest::Url::parse(create_json["authorize_url"].as_str().unwrap()).unwrap();
+    let client_id = authorize_url
+        .query_pairs()
+        .find(|(key, _)| key == "client_id")
+        .map(|(_, value)| value.to_string())
+        .unwrap();
+    let redirect_uri = authorize_url
+        .query_pairs()
+        .find(|(key, _)| key == "redirect_uri")
+        .map(|(_, value)| value.to_string())
+        .unwrap();
+    assert_eq!(client_id, "app_EMoamEEZ73f0CkXaXp7hrann");
+    assert_eq!(redirect_uri, "http://192.168.31.5:8090/auth/callback");
+
+    set_env("OPENAI_OAUTH_CLIENT_ID", old_client_id.as_deref());
+    set_env("OPENAI_OAUTH_AUTHORIZE_URL", old_authorize_url.as_deref());
+    set_env("CODEX_OAUTH_REDIRECT_URL", old_redirect_url.as_deref());
+    set_env(
+        "CONTROL_PLANE_PUBLIC_BASE_URL",
+        old_public_base_url.as_deref(),
+    );
+    set_env(
+        "CONTROL_PLANE_BASE_URL",
+        old_control_plane_base_url.as_deref(),
+    );
+    set_env("CODEX_POOL_EDITION", old_edition.as_deref());
+}
+
+#[tokio::test]
 async fn codex_oauth_login_session_updates_existing_chatgpt_account_user_id() {
     let _guard = OAUTH_LOGIN_ENV_LOCK.lock().await;
     let (token_url, mock_handle) = spawn_codex_oauth_token_server(false).await;

@@ -117,26 +117,113 @@ fn normalize_codex_import_base_url(base_url: Option<String>) -> String {
     normalized
 }
 
-fn resolve_codex_oauth_redirect_url_with_default(
-    env_key: &str,
-    default_url: &str,
-) -> Option<String> {
-    let configured = std::env::var(env_key)
-        .ok()
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())
-        .unwrap_or_else(|| default_url.to_string());
-    let mut parsed = reqwest::Url::parse(&configured).ok()?;
+fn normalize_url_value(value: Option<String>) -> Option<String> {
+    value
+        .map(|raw| raw.trim().to_string())
+        .filter(|raw| !raw.is_empty())
+}
+
+fn normalize_absolute_url(raw: &str) -> Option<String> {
+    let mut parsed = reqwest::Url::parse(raw.trim()).ok()?;
     parsed.set_query(None);
     parsed.set_fragment(None);
     Some(parsed.to_string())
 }
 
-fn resolve_codex_oauth_redirect_url() -> Option<String> {
-    resolve_codex_oauth_redirect_url_with_default(
-        "CODEX_OAUTH_REDIRECT_URL",
-        DEFAULT_CODEX_OAUTH_REDIRECT_URL,
-    )
+fn callback_url_from_base_url(raw: &str) -> Option<String> {
+    let mut parsed = reqwest::Url::parse(raw.trim()).ok()?;
+    parsed.host_str()?;
+    parsed.set_path("/auth/callback");
+    parsed.set_query(None);
+    parsed.set_fragment(None);
+    Some(parsed.to_string())
+}
+
+fn header_value(headers: &HeaderMap, name: impl axum::http::header::AsHeaderName) -> Option<String> {
+    headers
+        .get(name)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.split(',').next())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToString::to_string)
+}
+
+fn forwarded_param(headers: &HeaderMap, key: &str) -> Option<String> {
+    let forwarded = header_value(headers, "forwarded")?;
+    let first_entry = forwarded.split(',').next()?.trim();
+    for pair in first_entry.split(';') {
+        let (name, value) = pair.split_once('=')?;
+        if name.trim().eq_ignore_ascii_case(key) {
+            let normalized = value.trim().trim_matches('"').trim();
+            if !normalized.is_empty() {
+                return Some(normalized.to_string());
+            }
+        }
+    }
+    None
+}
+
+fn compose_origin(proto: &str, host: &str, port: Option<&str>) -> Option<String> {
+    let base = if host.contains(':') || port.is_none() {
+        format!("{proto}://{host}")
+    } else {
+        format!("{proto}://{host}:{}", port?)
+    };
+    callback_url_from_base_url(&base)
+}
+
+fn derive_request_callback_url(headers: &HeaderMap) -> Option<String> {
+    let forwarded_proto = header_value(headers, "x-forwarded-proto")
+        .or_else(|| forwarded_param(headers, "proto"));
+    let forwarded_host =
+        header_value(headers, "x-forwarded-host").or_else(|| forwarded_param(headers, "host"));
+    let forwarded_port = header_value(headers, "x-forwarded-port");
+
+    if let Some(host) = forwarded_host {
+        let proto = forwarded_proto.as_deref().unwrap_or("http");
+        if let Some(url) = compose_origin(proto, &host, forwarded_port.as_deref()) {
+            return Some(url);
+        }
+    }
+
+    if let Some(origin) = header_value(headers, axum::http::header::ORIGIN)
+        .and_then(|value| callback_url_from_base_url(&value))
+    {
+        return Some(origin);
+    }
+
+    if let Some(host) = header_value(headers, axum::http::header::HOST) {
+        let proto = forwarded_proto.as_deref().unwrap_or("http");
+        if let Some(url) = compose_origin(proto, &host, forwarded_port.as_deref()) {
+            return Some(url);
+        }
+    }
+
+    None
+}
+
+fn resolve_codex_oauth_redirect_url(headers: &HeaderMap) -> Option<String> {
+    if let Some(configured) = normalize_url_value(std::env::var("CODEX_OAUTH_REDIRECT_URL").ok())
+        .and_then(|value| normalize_absolute_url(&value))
+    {
+        return Some(configured);
+    }
+    if let Some(configured) =
+        normalize_url_value(std::env::var("CONTROL_PLANE_PUBLIC_BASE_URL").ok())
+            .and_then(|value| callback_url_from_base_url(&value))
+    {
+        return Some(configured);
+    }
+    if let Some(derived) = derive_request_callback_url(headers) {
+        return Some(derived);
+    }
+    if let Some(configured) = normalize_url_value(std::env::var("CONTROL_PLANE_BASE_URL").ok())
+        .and_then(|value| callback_url_from_base_url(&value))
+    {
+        return Some(configured);
+    }
+    normalize_absolute_url(DEFAULT_CODEX_OAUTH_REDIRECT_URL)
 }
 
 fn random_urlsafe_token() -> String {
@@ -442,16 +529,8 @@ async fn process_codex_oauth_callback_flow(
     let (session_id, code, callback_url, code_verifier, base_url, label, enabled, priority) =
         prepared_session.ok_or_else(codex_oauth_not_found_error)?;
 
-    let oauth_client = crate::oauth::OpenAiOAuthClient::from_parts_with_outbound_proxy_runtime(
-        std::env::var("OPENAI_OAUTH_TOKEN_URL")
-            .unwrap_or_else(|_| "https://auth.openai.com/oauth/token".to_string()),
-        std::env::var("OPENAI_OAUTH_AUTHORIZE_URL")
-            .unwrap_or_else(|_| "https://auth.openai.com/oauth/authorize".to_string()),
-        std::env::var("OPENAI_OAUTH_CLIENT_ID").ok(),
-        std::env::var("OPENAI_OAUTH_TIMEOUT_SEC")
-            .ok()
-            .and_then(|value| value.parse::<u64>().ok()),
-        Some(state.outbound_proxy_runtime.clone()),
+    let oauth_client = crate::oauth::OpenAiOAuthClient::from_env_with_outbound_proxy_runtime(
+        state.outbound_proxy_runtime.clone(),
     );
     let exchange = match oauth_client
         .exchange_authorization_code(&code, &callback_url, &code_verifier)
@@ -861,8 +940,8 @@ async fn create_codex_oauth_login_session(
 ) -> Result<Json<CodexOAuthLoginSessionResponse>, (StatusCode, Json<ErrorEnvelope>)> {
     let _principal = require_admin_principal(&state, &headers)?;
 
-    let callback_url =
-        resolve_codex_oauth_redirect_url().ok_or_else(codex_oauth_provider_not_configured_error)?;
+    let callback_url = resolve_codex_oauth_redirect_url(&headers)
+        .ok_or_else(codex_oauth_provider_not_configured_error)?;
     let code_verifier = random_urlsafe_token();
     let code_challenge = pkce_code_challenge(&code_verifier);
     let session_id = Uuid::new_v4().to_string();
@@ -877,16 +956,8 @@ async fn create_codex_oauth_login_session(
     let enabled = req.enabled.unwrap_or(DEFAULT_CODEX_IMPORT_ENABLED);
     let priority = req.priority.unwrap_or(DEFAULT_CODEX_IMPORT_PRIORITY);
 
-    let oauth_client = crate::oauth::OpenAiOAuthClient::from_parts_with_outbound_proxy_runtime(
-        std::env::var("OPENAI_OAUTH_TOKEN_URL")
-            .unwrap_or_else(|_| "https://auth.openai.com/oauth/token".to_string()),
-        std::env::var("OPENAI_OAUTH_AUTHORIZE_URL")
-            .unwrap_or_else(|_| "https://auth.openai.com/oauth/authorize".to_string()),
-        std::env::var("OPENAI_OAUTH_CLIENT_ID").ok(),
-        std::env::var("OPENAI_OAUTH_TIMEOUT_SEC")
-            .ok()
-            .and_then(|value| value.parse::<u64>().ok()),
-        Some(state.outbound_proxy_runtime.clone()),
+    let oauth_client = crate::oauth::OpenAiOAuthClient::from_env_with_outbound_proxy_runtime(
+        state.outbound_proxy_runtime.clone(),
     );
     let authorize_url = oauth_client
         .build_authorize_url(
@@ -1877,4 +1948,60 @@ async fn list_tenant_credit_ledger(
     )
     .await;
     Ok(Json(response))
+}
+
+#[cfg(test)]
+mod account_access_tests {
+    use super::{derive_request_callback_url, resolve_codex_oauth_redirect_url};
+
+    #[tokio::test]
+    async fn resolve_codex_oauth_redirect_url_prefers_public_base_url() {
+        let _guard = crate::test_support::ENV_LOCK.lock().await;
+        let old_redirect_url = crate::test_support::set_env("CODEX_OAUTH_REDIRECT_URL", None);
+        let old_public_base_url = crate::test_support::set_env(
+            "CONTROL_PLANE_PUBLIC_BASE_URL",
+            Some("https://pool.example.com/admin"),
+        );
+        let old_control_plane_base_url =
+            crate::test_support::set_env("CONTROL_PLANE_BASE_URL", Some("http://127.0.0.1:8090"));
+
+        let mut headers = axum::http::HeaderMap::new();
+        headers.insert(
+            axum::http::header::ORIGIN,
+            axum::http::HeaderValue::from_static("http://192.168.31.5:8090"),
+        );
+        headers.insert(
+            axum::http::header::HOST,
+            axum::http::HeaderValue::from_static("192.168.31.5:8090"),
+        );
+
+        let callback_url = resolve_codex_oauth_redirect_url(&headers).unwrap();
+        assert_eq!(callback_url, "https://pool.example.com/auth/callback");
+
+        crate::test_support::set_env("CODEX_OAUTH_REDIRECT_URL", old_redirect_url.as_deref());
+        crate::test_support::set_env(
+            "CONTROL_PLANE_PUBLIC_BASE_URL",
+            old_public_base_url.as_deref(),
+        );
+        crate::test_support::set_env(
+            "CONTROL_PLANE_BASE_URL",
+            old_control_plane_base_url.as_deref(),
+        );
+    }
+
+    #[test]
+    fn derive_request_callback_url_uses_request_origin_when_not_configured() {
+        let mut headers = axum::http::HeaderMap::new();
+        headers.insert(
+            axum::http::header::ORIGIN,
+            axum::http::HeaderValue::from_static("http://192.168.31.5:8090"),
+        );
+        headers.insert(
+            axum::http::header::HOST,
+            axum::http::HeaderValue::from_static("192.168.31.5:8090"),
+        );
+
+        let callback_url = derive_request_callback_url(&headers).unwrap();
+        assert_eq!(callback_url, "http://192.168.31.5:8090/auth/callback");
+    }
 }
