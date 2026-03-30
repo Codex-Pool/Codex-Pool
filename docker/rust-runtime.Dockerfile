@@ -18,7 +18,7 @@ COPY services ./services
 COPY vendor ./vendor
 COPY --from=frontend-builder /app/frontend/dist ./frontend/dist
 
-RUN cargo build --release -p control-plane --features clickhouse-backend --bin codex-pool-business --bin usage-worker \
+RUN cargo build --release -p control-plane --features postgres-backend,redis-backend,clickhouse-backend,smtp-backend --bin codex-pool-business --bin usage-worker \
     && cargo build --release -p data-plane --bin data-plane
 
 FROM debian:12.13-slim AS runtime
