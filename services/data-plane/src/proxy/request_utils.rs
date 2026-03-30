@@ -2751,16 +2751,16 @@ fn parse_request_policy_context(
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(ToString::to_string);
-    let sticky_key_hint = value
+    let prompt_cache_key = value
         .get("prompt_cache_key")
         .and_then(Value::as_str)
-        .or_else(|| {
-            value
-                .get("metadata")
-                .and_then(|meta| meta.get("session_id"))
-                .and_then(Value::as_str)
-        })
-        .or_else(|| value.get("previous_response_id").and_then(Value::as_str))
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToString::to_string);
+    let metadata_session_id = value
+        .get("metadata")
+        .and_then(|meta| meta.get("session_id"))
+        .and_then(Value::as_str)
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(ToString::to_string);
@@ -2770,6 +2770,10 @@ fn parse_request_policy_context(
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(ToString::to_string);
+    let sticky_key_hint = prompt_cache_key
+        .clone()
+        .or_else(|| metadata_session_id.clone())
+        .or_else(|| previous_response_id.clone());
     ParsedRequestPolicyContext {
         model,
         requested_service_tier,
@@ -2780,15 +2784,8 @@ fn parse_request_policy_context(
         continuation_key_hint: previous_response_id.clone(),
         sticky_key_hint: sticky_key_hint.or_else(|| conversation_id.clone()),
         session_key_hint: sticky_session_key_from_headers(headers)
-            .or_else(|| {
-                value
-                    .get("metadata")
-                    .and_then(|meta| meta.get("session_id"))
-                    .and_then(Value::as_str)
-                    .map(str::trim)
-                    .filter(|value| !value.is_empty())
-                    .map(ToString::to_string)
-            })
+            .or_else(|| metadata_session_id.clone())
+            .or_else(|| prompt_cache_key.clone())
             .or_else(|| conversation_id.clone())
             .or(previous_response_id),
         conversation_id,
@@ -3392,6 +3389,33 @@ mod request_utils_tests {
 
         assert_eq!(context.model.as_deref(), Some("gpt-5.4"));
         assert_eq!(context.detected_locale, "zh-CN");
+    }
+
+    #[test]
+    fn parse_request_policy_context_prefers_session_headers_for_continuation_cursor_restore() {
+        let mut headers = HeaderMap::new();
+        headers.insert("session_id", HeaderValue::from_static("session-from-header"));
+        let body = bytes::Bytes::from(
+            json!({
+                "model": "gpt-5.4",
+                "prompt_cache_key": "session-from-body",
+                "input": "remember this"
+            })
+            .to_string(),
+        );
+
+        let context = parse_request_policy_context(&headers, &body);
+
+        assert_eq!(
+            context.session_key_hint.as_deref(),
+            Some("session-from-header")
+        );
+        assert_eq!(
+            context.sticky_key_hint.as_deref(),
+            Some("session-from-body")
+        );
+        assert!(context.continuation_key_hint.is_none());
+        assert!(context.conversation_id.is_none());
     }
 
     #[test]

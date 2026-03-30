@@ -1116,22 +1116,11 @@ async fn store_completed_response_from_proxy(
     let Some(request_value) = serde_json::from_slice::<Value>(request_body).ok() else {
         return;
     };
-    let continuation_cursor_key = request_value
-        .get("prompt_cache_key")
-        .and_then(Value::as_str)
-        .or_else(|| {
-            request_value
-                .get("metadata")
-                .and_then(|meta| meta.get("session_id"))
-                .and_then(Value::as_str)
-        })
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(ToString::to_string);
     let response_id = serde_json::from_slice::<Value>(response_body)
         .ok()
         .and_then(|value| value.get("id").and_then(Value::as_str).map(ToString::to_string));
     let owner_key = response_owner_key(principal);
+    let continuation_cursor_key = stable_continuation_cursor_key(parsed_policy_context);
     state
         .background_responses
         .store_completed_response(
@@ -1198,14 +1187,15 @@ fn apply_conversation_semantics_to_request(
         parsed_policy_context.conversation_id = Some(conversation_id.clone());
         parsed_policy_context.sticky_key_hint = Some(conversation_id.clone());
         parsed_policy_context.session_key_hint = Some(conversation_id.clone());
-        if !has_previous_response_id {
-            if let Some(previous_response_id) = previous_response_id {
-                object.insert(
-                    "previous_response_id".to_string(),
-                    Value::String(previous_response_id.clone()),
-                );
-                parsed_policy_context.continuation_key_hint = Some(previous_response_id);
-            }
+    }
+
+    if !has_previous_response_id {
+        if let Some(previous_response_id) = previous_response_id {
+            object.insert(
+                "previous_response_id".to_string(),
+                Value::String(previous_response_id.clone()),
+            );
+            parsed_policy_context.continuation_key_hint = Some(previous_response_id);
         }
     }
 

@@ -120,6 +120,24 @@ struct ParsedRequestPolicyContext {
     conversation_id: Option<String>,
 }
 
+fn stable_continuation_cursor_key(context: &ParsedRequestPolicyContext) -> Option<String> {
+    context
+        .session_key_hint
+        .clone()
+        .and_then(|key| {
+            (context.conversation_id.as_deref() != Some(key.as_str())
+                && context.continuation_key_hint.as_deref() != Some(key.as_str()))
+            .then_some(key)
+        })
+        .or_else(|| {
+            context.sticky_key_hint.clone().and_then(|key| {
+                (context.conversation_id.as_deref() != Some(key.as_str())
+                    && context.continuation_key_hint.as_deref() != Some(key.as_str()))
+                .then_some(key)
+            })
+        })
+}
+
 #[derive(Debug)]
 enum StreamPreludeError {
     EndOfStreamBeforeCommit,
@@ -406,18 +424,7 @@ pub async fn proxy_handler(
                 .map(str::trim)
                 .filter(|value| !value.is_empty())
                 .is_some();
-            let continuation_cursor_key = request_value
-                .get("prompt_cache_key")
-                .and_then(Value::as_str)
-                .or_else(|| {
-                    request_value
-                        .get("metadata")
-                        .and_then(|meta| meta.get("session_id"))
-                        .and_then(Value::as_str)
-                })
-                .map(str::trim)
-                .filter(|value| !value.is_empty())
-                .map(ToString::to_string);
+            let continuation_cursor_key = stable_continuation_cursor_key(&parsed_policy_context);
             let prior_conversation_response_id = parsed_policy_context
                 .conversation_id
                 .as_deref()

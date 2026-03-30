@@ -262,7 +262,7 @@ async fn spawn_storage_sensitive_continuation_upstream(
             .map(str::to_string);
 
         match previous_response_id.as_deref() {
-            Some("resp_stored") => (
+            Some("resp_unstored" | "resp_stored") => (
                 StatusCode::OK,
                 [(CONTENT_TYPE, "application/json")],
                 Body::from(
@@ -1426,9 +1426,94 @@ async fn conversation_reuses_last_response_id_without_explicit_previous_response
             .to_bytes(),
     )
     .unwrap();
-    assert_eq!(second_payload["id"], "resp_followup_ok");
-
     let seen = seen_bodies.lock().unwrap().clone();
+    assert_eq!(
+        second_payload["id"],
+        "resp_followup_ok",
+        "unexpected second payload: {second_payload:?}, seen upstream bodies: {seen:?}"
+    );
+    assert_eq!(seen.len(), 2);
+    assert!(seen[0].get("conversation").is_none());
+    assert!(seen[1].get("conversation").is_none());
+    assert_eq!(seen[1]["previous_response_id"], "resp_stored");
+}
+
+#[tokio::test]
+async fn session_id_reuses_last_response_id_without_body_conversation() {
+    let (upstream_base, seen_bodies) =
+        spawn_storage_sensitive_continuation_upstream("/backend-api/codex/responses").await;
+    let codex_base = format!("{upstream_base}/backend-api/codex");
+    let app = test_app(vec![test_account(codex_base, "upstream-token")]).await;
+
+    let first_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/responses")
+                .header("content-type", "application/json")
+                .header("session_id", "session_bluebird")
+                .body(Body::from(
+                    json!({
+                        "model": "gpt-5.4",
+                        "prompt_cache_key": "session_bluebird",
+                        "input": "Remember BLUEBIRD."
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(first_response.status(), StatusCode::OK);
+    let first_payload: Value = serde_json::from_slice(
+        &first_response
+            .into_body()
+            .collect()
+            .await
+            .unwrap()
+            .to_bytes(),
+    )
+    .unwrap();
+    assert_eq!(first_payload["id"], "resp_stored");
+
+    let second_response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/responses")
+                .header("content-type", "application/json")
+                .header("session_id", "session_bluebird")
+                .body(Body::from(
+                    json!({
+                        "model": "gpt-5.4",
+                        "prompt_cache_key": "session_bluebird",
+                        "input": "What did I ask you to remember?"
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(second_response.status(), StatusCode::OK);
+    let second_payload: Value = serde_json::from_slice(
+        &second_response
+            .into_body()
+            .collect()
+            .await
+            .unwrap()
+            .to_bytes(),
+    )
+    .unwrap();
+    let seen = seen_bodies.lock().unwrap().clone();
+    assert_eq!(
+        second_payload["id"],
+        "resp_followup_ok",
+        "unexpected second payload: {second_payload:?}, seen upstream bodies: {seen:?}"
+    );
     assert_eq!(seen.len(), 2);
     assert!(seen[0].get("conversation").is_none());
     assert!(seen[1].get("conversation").is_none());
