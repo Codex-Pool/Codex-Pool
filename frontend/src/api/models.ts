@@ -20,10 +20,32 @@ export interface AdminModelPricingView {
   source: string
 }
 
+export interface AdminModelSectionItem {
+  key: string
+  label: string
+  detail?: string | null
+  status?: string | null
+  icon_svg?: string | null
+}
+
+export interface AdminModelSnapshotItem {
+  alias: string
+  label: string
+  latest_snapshot?: string | null
+  versions: string[]
+}
+
 export interface AdminModelOfficialInfo {
   title: string
+  display_name?: string | null
+  tagline?: string | null
+  family?: string | null
+  family_label?: string | null
   description?: string | null
+  avatar_url?: string | null
+  deprecated?: boolean | null
   context_window_tokens?: number | null
+  max_input_tokens?: number | null
   max_output_tokens?: number | null
   knowledge_cutoff?: string | null
   reasoning_token_support?: boolean | null
@@ -31,9 +53,18 @@ export interface AdminModelOfficialInfo {
   cached_input_price_microcredits?: number | null
   output_price_microcredits?: number | null
   pricing_notes?: string | null
+  pricing_note_items: string[]
   input_modalities: string[]
   output_modalities: string[]
   endpoints: string[]
+  supported_features: string[]
+  supported_tools: string[]
+  snapshots: string[]
+  modality_items: AdminModelSectionItem[]
+  endpoint_items: AdminModelSectionItem[]
+  feature_items: AdminModelSectionItem[]
+  tool_items: AdminModelSectionItem[]
+  snapshot_items: AdminModelSnapshotItem[]
   source_url: string
   synced_at: string
   raw_text?: string | null

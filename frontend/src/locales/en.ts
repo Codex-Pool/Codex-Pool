@@ -1481,7 +1481,7 @@ export default {
     },
     models: {
         actions: {
-            copyModelId: "Copy model name",
+            copyModelId: "Copy model ID",
             createModel: "Create model",
             syncOpenAiCatalog: "Sync OpenAI catalog",
             probeAvailability: "Probe availability",
@@ -1589,12 +1589,17 @@ export default {
             directoryTitle: "Model Directory",
             directoryDescription: "Filter models by provider and availability, then inspect pricing and official metadata.",
             noDescription: "No official description is available.",
+            ungroupedFamily: "Ungrouped models",
+            deprecated: "Deprecated",
             copyModelIdSuccess: "Copied model ID: {{modelId}}",
             copyModelIdFailed: "Failed to copy model ID.",
             effectivePricingSource: "Effective pricing source",
             officialPageStatus: "Official catalog page",
             officialPageReady: "Available",
             officialPageMissing: "Unavailable",
+            emptyFilteredTitle: "No models match the current filters",
+            emptyFilteredDescription: "Adjust the provider, availability, or search keyword to continue exploring the catalog.",
+            noSectionItems: "No structured official metadata is available here yet.",
             availabilityOutcomeLabel: "Latest probe outcome",
             availabilityOutcome: {
                 available: "The latest probe marked this model as available.",
@@ -1614,7 +1619,15 @@ export default {
             },
             sections: {
                 operational: "Operational state",
-                pricing: "Pricing snapshot"
+                pricing: "Pricing snapshot",
+                identity: "Identity",
+                limits: "Limits",
+                modalities: "Modalities",
+                endpoints: "Endpoints",
+                features: "Features",
+                tools: "Tools",
+                snapshots: "Snapshots",
+                pricingNotes: "Pricing notes"
             }
         },
         form: {
@@ -1665,6 +1678,7 @@ export default {
             sourceLabels: {
                 officialSync: "OpenAI official",
                 manualOverride: "Manual override",
+                probeOnly: "Probe only",
                 unknown: "Unknown"
             },
         },
@@ -1729,6 +1743,14 @@ export default {
             inputModalities: "Input modalities",
             outputModalities: "Output modalities",
             endpoints: "Endpoints",
+            maxInputTokens: "Max input tokens",
+            capabilityDetails: {
+                supported: "Supported",
+                notSupported: "Not supported",
+                inputAndOutput: "Input and output",
+                inputOnly: "Input only",
+                outputOnly: "Output only"
+            },
             rawText: "Official text snapshot",
         }
     },
@@ -1859,7 +1881,7 @@ export default {
         },
         signalSource: {
             active: "Active patrol",
-            passive: "Passive signal",
+            passive: "Request traffic",
             unknown: "Unknown"
         },
         reasonCode: {
@@ -1934,7 +1956,9 @@ export default {
             legend: {
                 success: "Success",
                 mixed: "Partially failed",
-                error: "All failed"
+                error: "All failed",
+                request: "Request traffic",
+                patrol: "Active patrol"
             }
         },
         cooling: {

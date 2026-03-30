@@ -39,7 +39,10 @@ const DIALOG_SIZE_CLASS_NAMES: Record<DrawerPlacement, Record<AntigravityDialogS
   },
 }
 
-type AntigravityDialogShellProps = Omit<ComponentProps<typeof DialogContent>, 'children'> & {
+type AntigravityDialogShellProps = Omit<
+  ComponentProps<typeof DialogContent>,
+  'children' | 'title'
+> & {
   title: ReactNode
   description?: ReactNode
   meta?: ReactNode

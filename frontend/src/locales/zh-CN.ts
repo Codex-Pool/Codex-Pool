@@ -1481,7 +1481,7 @@ export default {
     },
     models: {
         actions: {
-            copyModelId: "复制模型名",
+            copyModelId: "复制模型 ID",
             createModel: "创建模型",
             syncOpenAiCatalog: "同步 OpenAI 目录",
             probeAvailability: "探测可用性",
@@ -1589,12 +1589,17 @@ export default {
             directoryTitle: "模型目录",
             directoryDescription: "按提供商和可用性筛选模型，再查看定价与官方元数据。",
             noDescription: "暂无官方描述。",
+            ungroupedFamily: "未分组模型",
+            deprecated: "已弃用",
             copyModelIdSuccess: "已复制模型 ID：{{modelId}}",
             copyModelIdFailed: "复制模型 ID 失败。",
             effectivePricingSource: "实际定价来源",
             officialPageStatus: "官方目录页",
             officialPageReady: "可打开",
             officialPageMissing: "未提供",
+            emptyFilteredTitle: "当前筛选下没有匹配模型",
+            emptyFilteredDescription: "调整提供商、可用性或搜索关键词后，再继续查看模型目录。",
+            noSectionItems: "当前没有可展示的官方结构化信息。",
             availabilityOutcomeLabel: "最近探测结果",
             availabilityOutcome: {
                 available: "最近一次探测显示可用。",
@@ -1614,7 +1619,15 @@ export default {
             },
             sections: {
                 operational: "运行状态",
-                pricing: "价格快照"
+                pricing: "价格快照",
+                identity: "模型身份",
+                limits: "上下文与限制",
+                modalities: "模态",
+                endpoints: "端点",
+                features: "能力特性",
+                tools: "工具",
+                snapshots: "快照",
+                pricingNotes: "价格说明"
             }
         },
         form: {
@@ -1665,6 +1678,7 @@ export default {
             sourceLabels: {
                 officialSync: "OpenAI 官方",
                 manualOverride: "手工覆盖",
+                probeOnly: "仅探测结果",
                 unknown: "未知"
             },
         },
@@ -1729,6 +1743,14 @@ export default {
             inputModalities: "输入模态",
             outputModalities: "输出模态",
             endpoints: "支持端点",
+            maxInputTokens: "最大输入 Token",
+            capabilityDetails: {
+                supported: "支持",
+                notSupported: "不支持",
+                inputAndOutput: "输入与输出",
+                inputOnly: "仅输入",
+                outputOnly: "仅输出"
+            },
             rawText: "官方文本快照",
         }
     },
@@ -1859,7 +1881,7 @@ export default {
         },
         signalSource: {
             active: "主动巡检",
-            passive: "被动信号",
+            passive: "用户请求",
             unknown: "未知"
         },
         reasonCode: {
@@ -1934,7 +1956,9 @@ export default {
             legend: {
                 success: "成功",
                 mixed: "部分失败",
-                error: "全部失败"
+                error: "全部失败",
+                request: "用户请求",
+                patrol: "主动巡检"
             }
         },
         cooling: {
