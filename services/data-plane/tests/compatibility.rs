@@ -1428,8 +1428,7 @@ async fn conversation_reuses_last_response_id_without_explicit_previous_response
     .unwrap();
     let seen = seen_bodies.lock().unwrap().clone();
     assert_eq!(
-        second_payload["id"],
-        "resp_followup_ok",
+        second_payload["id"], "resp_followup_ok",
         "unexpected second payload: {second_payload:?}, seen upstream bodies: {seen:?}"
     );
     assert_eq!(seen.len(), 2);
@@ -1510,8 +1509,7 @@ async fn session_id_reuses_last_response_id_without_body_conversation() {
     .unwrap();
     let seen = seen_bodies.lock().unwrap().clone();
     assert_eq!(
-        second_payload["id"],
-        "resp_followup_ok",
+        second_payload["id"], "resp_followup_ok",
         "unexpected second payload: {second_payload:?}, seen upstream bodies: {seen:?}"
     );
     assert_eq!(seen.len(), 2);
