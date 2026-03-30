@@ -867,35 +867,97 @@ async fn probe_admin_models(
     ))
 }
 
+fn is_openai_catalog_sync_transport_error(err: &anyhow::Error) -> bool {
+    err.chain()
+        .filter_map(|source| source.downcast_ref::<reqwest::Error>())
+        .any(|source| {
+            source.is_connect()
+                || source.is_timeout()
+                || (source.status().is_none()
+                    && !source.is_body()
+                    && !source.is_decode()
+                    && !source.is_builder())
+        })
+}
+
+fn should_retry_openai_catalog_sync_direct(
+    fail_mode: codex_pool_core::model::ProxyFailMode,
+    selection: &crate::outbound_proxy_runtime::SelectedHttpClient,
+    err: &anyhow::Error,
+) -> bool {
+    fail_mode == codex_pool_core::model::ProxyFailMode::AllowDirectFallback
+        && selection.proxy_id.is_some()
+        && is_openai_catalog_sync_transport_error(err)
+}
+
+async fn run_openai_catalog_sync_with_outbound_fallback<T, Op, Fut>(
+    store: &dyn ControlPlaneStore,
+    outbound_proxy_runtime: &crate::outbound_proxy_runtime::OutboundProxyRuntime,
+    timeout: Duration,
+    op: Op,
+) -> anyhow::Result<T>
+where
+    Op: Fn(reqwest::Client) -> Fut,
+    Fut: std::future::Future<Output = anyhow::Result<T>>,
+{
+    let selection = outbound_proxy_runtime.select_http_client(timeout).await?;
+    match op(selection.client.clone()).await {
+        Ok(response) => Ok(response),
+        Err(err) => {
+            let fail_mode = store.outbound_proxy_pool_settings().await?.fail_mode;
+            if should_retry_openai_catalog_sync_direct(fail_mode, &selection, &err) {
+                let proxy_error_chain = format_anyhow_error_chain(&err);
+                tracing::warn!(
+                    error = %err,
+                    error_chain = %proxy_error_chain,
+                    proxy_id = ?selection.proxy_id,
+                    proxy_label = selection.proxy_label.as_deref(),
+                    "openai catalog sync proxy transport failed; retrying direct"
+                );
+                outbound_proxy_runtime
+                    .mark_proxy_transport_failure(&selection)
+                    .await;
+                let direct_selection = outbound_proxy_runtime
+                    .select_direct_http_client(timeout)
+                    .await?;
+                return op(direct_selection.client).await.with_context(|| {
+                    format!("proxy transport failed before direct fallback: {proxy_error_chain}")
+                });
+            }
+            Err(err)
+        }
+    }
+}
+
 async fn sync_openai_admin_models_catalog(
     State(state): State<AppState>,
     headers: HeaderMap,
 ) -> Result<Json<crate::tenant::OpenAiModelsSyncResponse>, (StatusCode, Json<ErrorEnvelope>)> {
     let principal = require_admin_principal(&state, &headers)?;
-    let selection = state
-        .outbound_proxy_runtime
-        .select_http_client(Duration::from_secs(20))
-        .await
-        .map_err(|err| {
-            tracing::warn!(
-                error = %err,
-                "failed to select outbound proxy client for openai catalog sync"
-            );
-            (
-                StatusCode::BAD_GATEWAY,
-                Json(ErrorEnvelope::new(
-                    "openai_catalog_sync_failed",
-                    "openai catalog sync failed",
-                )),
-            )
-        })?;
+    let timeout = Duration::from_secs(20);
     let response = if let Some(tenant_auth) = state.tenant_auth_service.as_ref() {
-        tenant_auth
-            .admin_sync_openai_models_catalog_with_client(Some(selection.client.clone()))
+        let tenant_auth = tenant_auth.clone();
+        run_openai_catalog_sync_with_outbound_fallback(
+            state.store.as_ref(),
+            state.outbound_proxy_runtime.as_ref(),
+            timeout,
+            move |client| {
+                let tenant_auth = tenant_auth.clone();
+                async move {
+                    tenant_auth
+                        .admin_sync_openai_models_catalog_with_client(Some(client))
+                        .await
+                }
+            },
+        )
             .await
             .map_err(|err| {
                 let error_chain = format_anyhow_error_chain(&err);
-                tracing::warn!(error = %err, error_chain = %error_chain, "openai catalog sync failed");
+                tracing::warn!(
+                    error = %err,
+                    error_chain = %error_chain,
+                    "openai catalog sync failed"
+                );
                 {
                     let mut last_error = state
                         .model_catalog_last_error
@@ -912,8 +974,20 @@ async fn sync_openai_admin_models_catalog(
                 )
             })?
     } else if let Some(sqlite_repo) = state.sqlite_usage_repo.as_ref() {
-        sqlite_repo
-            .sync_openai_model_catalog_with_client(Some(selection.client.clone()))
+        let sqlite_repo = sqlite_repo.clone();
+        run_openai_catalog_sync_with_outbound_fallback(
+            state.store.as_ref(),
+            state.outbound_proxy_runtime.as_ref(),
+            timeout,
+            move |client| {
+                let sqlite_repo = sqlite_repo.clone();
+                async move {
+                    sqlite_repo
+                        .sync_openai_model_catalog_with_client(Some(client))
+                        .await
+                }
+            },
+        )
             .await
             .map_err(|err| {
                 let error_chain = format_anyhow_error_chain(&err);
@@ -978,6 +1052,7 @@ async fn sync_openai_admin_models_catalog(
 #[cfg(test)]
 mod billing_runtime_tests {
     use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
     #[test]
     fn format_anyhow_error_chain_preserves_nested_contexts() {
@@ -1000,6 +1075,127 @@ mod billing_runtime_tests {
         assert_eq!(status, StatusCode::BAD_REQUEST);
         assert_eq!(envelope.error.code, "billing_model_missing");
         assert_eq!(envelope.error.message, "billing model missing");
+    }
+
+    #[tokio::test]
+    async fn openai_catalog_sync_retries_direct_after_proxy_transport_failure() {
+        let store: Arc<dyn ControlPlaneStore> = Arc::new(InMemoryStore::default());
+        let runtime = Arc::new(crate::outbound_proxy_runtime::OutboundProxyRuntime::new());
+        runtime.attach_store(store.clone());
+        store
+            .create_outbound_proxy_node(CreateOutboundProxyNodeRequest {
+                label: "proxy-a".to_string(),
+                proxy_url: "http://127.0.0.1:19080".to_string(),
+                enabled: Some(true),
+                weight: Some(1),
+            })
+            .await
+            .expect("create proxy node");
+        store
+            .update_outbound_proxy_pool_settings(UpdateOutboundProxyPoolSettingsRequest {
+                enabled: true,
+                fail_mode: codex_pool_core::model::ProxyFailMode::AllowDirectFallback,
+            })
+            .await
+            .expect("enable direct fallback");
+        let failing_listener =
+            std::net::TcpListener::bind("127.0.0.1:0").expect("bind temporary port");
+        let failing_url = format!(
+            "http://{}",
+            failing_listener
+                .local_addr()
+                .expect("read temporary listener addr")
+        );
+        drop(failing_listener);
+
+        let attempts = Arc::new(AtomicUsize::new(0));
+        let result = run_openai_catalog_sync_with_outbound_fallback(
+            store.as_ref(),
+            runtime.as_ref(),
+            Duration::from_secs(1),
+            {
+                let attempts = attempts.clone();
+                let failing_url = failing_url.clone();
+                move |_client| {
+                    let attempts = attempts.clone();
+                    let failing_url = failing_url.clone();
+                    async move {
+                        let attempt = attempts.fetch_add(1, Ordering::Relaxed);
+                        if attempt == 0 {
+                            let transport_err = reqwest::Client::builder()
+                                .no_proxy()
+                                .build()
+                                .expect("build no-proxy client")
+                                .get(&failing_url)
+                                .send()
+                                .await
+                                .expect_err("connect should fail");
+                            return Err(anyhow::Error::from(transport_err).context("proxy failed"));
+                        }
+                        Ok("synced")
+                    }
+                }
+            },
+        )
+        .await
+        .expect("direct fallback should succeed");
+
+        assert_eq!(result, "synced");
+        assert_eq!(attempts.load(Ordering::Relaxed), 2);
+
+        let selected = runtime
+            .select_http_client(Duration::from_secs(1))
+            .await
+            .expect("selection after transport failure");
+        assert!(selected.proxy_id.is_none());
+        assert!(selected.used_direct_fallback);
+    }
+
+    #[tokio::test]
+    async fn openai_catalog_sync_does_not_retry_direct_for_non_transport_errors() {
+        let store: Arc<dyn ControlPlaneStore> = Arc::new(InMemoryStore::default());
+        let runtime = Arc::new(crate::outbound_proxy_runtime::OutboundProxyRuntime::new());
+        runtime.attach_store(store.clone());
+        store
+            .create_outbound_proxy_node(CreateOutboundProxyNodeRequest {
+                label: "proxy-a".to_string(),
+                proxy_url: "http://127.0.0.1:19080".to_string(),
+                enabled: Some(true),
+                weight: Some(1),
+            })
+            .await
+            .expect("create proxy node");
+        store
+            .update_outbound_proxy_pool_settings(UpdateOutboundProxyPoolSettingsRequest {
+                enabled: true,
+                fail_mode: codex_pool_core::model::ProxyFailMode::AllowDirectFallback,
+            })
+            .await
+            .expect("enable direct fallback");
+
+        let attempts = Arc::new(AtomicUsize::new(0));
+        let err = run_openai_catalog_sync_with_outbound_fallback(
+            store.as_ref(),
+            runtime.as_ref(),
+            Duration::from_secs(1),
+            {
+                let attempts = attempts.clone();
+                move |_client| {
+                    let attempts = attempts.clone();
+                    async move {
+                        attempts.fetch_add(1, Ordering::Relaxed);
+                        Err::<&'static str, anyhow::Error>(anyhow::anyhow!(
+                            "unexpected html shape"
+                        ))
+                    }
+                }
+            },
+        )
+        .await
+        .expect_err("non-transport errors should not retry direct");
+
+        assert!(err.to_string().contains("unexpected html shape"));
+        assert_eq!(attempts.load(Ordering::Relaxed), 1);
     }
 
     #[test]

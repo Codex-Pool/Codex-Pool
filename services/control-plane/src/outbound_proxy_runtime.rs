@@ -114,6 +114,10 @@ impl OutboundProxyRuntime {
             .remove(&proxy_id);
     }
 
+    pub async fn select_direct_http_client(&self, timeout: Duration) -> Result<SelectedHttpClient> {
+        self.direct_client(timeout, true).await
+    }
+
     fn available_nodes(&self, nodes: Vec<OutboundProxyNode>) -> Vec<OutboundProxyNode> {
         let now = Instant::now();
         let unavailable = self
