@@ -77,7 +77,9 @@ import {
   formatAbsoluteDateTime,
   formatRateLimitResetText,
   getPlanLabel,
+  normalizePlanValue,
 } from '@/features/accounts/utils'
+import { PLAN_UNKNOWN_VALUE } from '@/features/accounts/types'
 import { Checkbox } from '@/components/ui/checkbox'
 import { formatRelativeTime } from '@/lib/time'
 import { notify } from '@/lib/notification'
@@ -86,6 +88,7 @@ import { cn } from '@/lib/utils'
 type StateFilter = 'all' | AccountPoolOperatorState
 type ScopeFilter = 'all' | AccountPoolRecordScope
 type ReasonClassFilter = 'all' | AccountPoolReasonClass
+type PlanFilter = 'all' | string
 type ResponsesTestMessageRole = 'user' | 'assistant'
 
 interface AccountPoolResponsesTestMessage {
@@ -221,6 +224,24 @@ function getStateLabel(state: AccountPoolOperatorState, t: ReturnType<typeof use
       return t('accountPool.state.pendingDelete')
     default:
       return t('accountPool.state.unknown')
+  }
+}
+
+function getPlanChipColor(plan: string | undefined) {
+  switch (normalizePlanValue(plan)) {
+    case 'enterprise':
+    case 'business':
+      return 'success' as const
+    case 'pro':
+      return 'warning' as const
+    case 'plus':
+      return 'primary' as const
+    case 'team':
+      return 'secondary' as const
+    case 'free':
+    case PLAN_UNKNOWN_VALUE:
+    default:
+      return 'default' as const
   }
 }
 
@@ -622,6 +643,7 @@ export default function Accounts() {
   const [stateFilter, setStateFilter] = useState<StateFilter>('all')
   const [scopeFilter, setScopeFilter] = useState<ScopeFilter>('all')
   const [reasonClassFilter, setReasonClassFilter] = useState<ReasonClassFilter>('all')
+  const [planFilter, setPlanFilter] = useState<PlanFilter>('all')
   const [searchValue, setSearchValue] = useState('')
   const [rowsPerPage, setRowsPerPage] = useState(20)
   const [currentPage, setCurrentPage] = useState(1)
@@ -712,6 +734,15 @@ export default function Accounts() {
     refetchOnWindowFocus: 'always',
   })
 
+  const availablePlanFilters = useMemo(() => {
+    const values = Array.from(new Set(records.map((record) => normalizePlanValue(record.chatgpt_plan_type))))
+    const knownValues = values.filter((value) => value !== PLAN_UNKNOWN_VALUE)
+    knownValues.sort((left, right) => getPlanLabel(left, t).localeCompare(getPlanLabel(right, t), locale))
+    return values.includes(PLAN_UNKNOWN_VALUE)
+      ? [...knownValues, PLAN_UNKNOWN_VALUE]
+      : knownValues
+  }, [locale, records, t])
+
   const filteredRecords = useMemo(() => {
     const keyword = searchValue.trim().toLowerCase()
 
@@ -725,12 +756,15 @@ export default function Accounts() {
       if (reasonClassFilter !== 'all' && record.reason_class !== reasonClassFilter) {
         return false
       }
+      if (planFilter !== 'all' && normalizePlanValue(record.chatgpt_plan_type) !== planFilter) {
+        return false
+      }
       if (keyword && !matchesAccountPoolSearch(record, keyword)) {
         return false
       }
       return true
     })
-  }, [reasonClassFilter, records, scopeFilter, searchValue, stateFilter])
+  }, [planFilter, reasonClassFilter, records, scopeFilter, searchValue, stateFilter])
 
   const sortedRecords = useMemo(
     () => sortAccountPoolRecords(filteredRecords, normalizeAccountPoolSortDescriptor(sortDescriptor)),
@@ -1208,7 +1242,7 @@ export default function Accounts() {
           </div>
 
           <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
-            <div className="grid flex-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
+            <div className="grid flex-1 gap-3 md:grid-cols-2 xl:grid-cols-5">
               <Input
                 aria-label={t('accountPool.searchPlaceholder')}
                 className="xl:col-span-1"
@@ -1279,6 +1313,29 @@ export default function Accounts() {
                 <SelectItem key="fatal">{getReasonLabel('fatal', t)}</SelectItem>
                 <SelectItem key="transient">{getReasonLabel('transient', t)}</SelectItem>
                 <SelectItem key="admin">{getReasonLabel('admin', t)}</SelectItem>
+              </Select>
+
+              <Select
+                aria-label={t('accounts.filters.plan')}
+                selectedKeys={new Set([planFilter])}
+                size="sm"
+                onSelectionChange={(selection) => {
+                  const nextValue = normalizeSelection(selection)
+                  if (!nextValue) {
+                    return
+                  }
+                  setCurrentPage(1)
+                  setPlanFilter(nextValue as PlanFilter)
+                }}
+              >
+                <>
+                  <SelectItem key="all">{t('accounts.filters.planAll')}</SelectItem>
+                  {availablePlanFilters.map((planValue) => (
+                    <SelectItem key={planValue}>
+                      {getPlanLabel(planValue === PLAN_UNKNOWN_VALUE ? undefined : planValue, t)}
+                    </SelectItem>
+                  ))}
+                </>
               </Select>
             </div>
 
@@ -1450,6 +1507,9 @@ export default function Accounts() {
                           {getRecordLabel(record)}
                         </div>
                         <div className="flex flex-wrap items-center gap-2 text-xs leading-5 text-default-500">
+                          <Chip color={getPlanChipColor(record.chatgpt_plan_type)} size="sm" variant="flat">
+                            {getPlanLabel(record.chatgpt_plan_type, t)}
+                          </Chip>
                           <Chip size="sm" variant="flat">
                             {getScopeLabel(record.record_scope, t)}
                           </Chip>
