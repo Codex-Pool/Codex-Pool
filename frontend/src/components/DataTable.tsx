@@ -542,7 +542,7 @@ export function DataTable<T, TValue = unknown>({
               "w-full overflow-hidden transition-all duration-200",
               selectionCount > 0 ? "max-h-14 opacity-100" : "max-h-0 opacity-0 pointer-events-none",
             )}>
-              <div className="w-full rounded-large border border-default-200 bg-default-100/80 px-3.5 py-2">
+              <div className="w-full rounded-large bg-default-100/80 px-3.5 py-2">
                 <div className="flex w-full flex-wrap items-center gap-2.5">
                   {canSelectAcrossPages ? (
                     <>
@@ -800,7 +800,6 @@ export function DataTable<T, TValue = unknown>({
           )}
         </TableHeader>
         <TableBody
-          items={rows}
           emptyContent={
             <EmptyState
               icon={<Inbox />}
@@ -813,7 +812,7 @@ export function DataTable<T, TValue = unknown>({
             <Spinner label={t("common.loading", { defaultValue: "Loading…" })} />
           }
         >
-          {(row) => {
+          {rows.map((row) => {
             const resolvedRowClassName =
               typeof rowClassName === "function"
                 ? rowClassName(row.original)
@@ -835,7 +834,7 @@ export function DataTable<T, TValue = unknown>({
                 ))}
               </TableRow>
             )
-          }}
+          })}
         </TableBody>
       </Table>
 

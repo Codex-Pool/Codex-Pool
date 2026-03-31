@@ -1311,7 +1311,7 @@ export default function Accounts() {
             'w-full overflow-hidden transition-all duration-200',
             selectedIds.size > 0 ? 'max-h-14 opacity-100' : 'max-h-0 opacity-0 pointer-events-none',
           )}>
-            <div className="w-full rounded-large border border-default-200 bg-default-100/80 px-3.5 py-2">
+            <div className="w-full rounded-large bg-default-100/80 px-3.5 py-2">
               <div className="flex w-full flex-wrap items-center gap-2.5">
                 {canSelectAcrossPages ? (
                   <>
@@ -1416,200 +1416,203 @@ export default function Accounts() {
                 </div>
               )}
               isLoading={isRecordsLoading}
-              items={paginatedRecords}
               loadingContent={<Spinner label={t('common.loading')} />}
             >
-              {(record) => (
-                <TableRow
-                  key={record.id}
-                  className={cn(
-                    rowFeedback.get(record.id) === 'success' && 'row-action-success',
-                    rowFeedback.get(record.id) === 'error' && 'row-action-error',
-                    rowFeedback.get(record.id) === 'pending' && 'opacity-60 transition-opacity',
-                    selectedIds.has(record.id) && 'bg-primary/5',
-                  )}
-                >
-                  <TableCell>
-                    <Checkbox
-                      checked={selectedIds.has(record.id)}
-                      onCheckedChange={(value) => {
-                        setSelectedIds((prev) => {
-                          const next = new Set(prev)
-                          value ? next.add(record.id) : next.delete(record.id)
-                          return next
-                        })
-                      }}
-                      aria-label={t('common.table.selectRow', { defaultValue: 'Select row' })}
-                    />
-                  </TableCell>
-                  <TableCell>
-                    <div className="min-w-[240px] space-y-2">
-                      <div className="font-medium text-foreground">
-                        {getRecordLabel(record)}
+              {paginatedRecords.map((record) => {
+                const isRecordSelected = selectedIds.has(record.id)
+
+                return (
+                  <TableRow
+                    key={record.id}
+                    className={cn(
+                      rowFeedback.get(record.id) === 'success' && 'row-action-success',
+                      rowFeedback.get(record.id) === 'error' && 'row-action-error',
+                      rowFeedback.get(record.id) === 'pending' && 'opacity-60 transition-opacity',
+                      isRecordSelected && 'bg-primary/5',
+                    )}
+                  >
+                    <TableCell>
+                      <Checkbox
+                        checked={isRecordSelected}
+                        onCheckedChange={(value) => {
+                          setSelectedIds((prev) => {
+                            const next = new Set(prev)
+                            value ? next.add(record.id) : next.delete(record.id)
+                            return next
+                          })
+                        }}
+                        aria-label={t('common.table.selectRow', { defaultValue: 'Select row' })}
+                      />
+                    </TableCell>
+                    <TableCell>
+                      <div className="min-w-[240px] space-y-2">
+                        <div className="font-medium text-foreground">
+                          {getRecordLabel(record)}
+                        </div>
+                        <div className="flex flex-wrap items-center gap-2 text-xs leading-5 text-default-500">
+                          <Chip size="sm" variant="flat">
+                            {getScopeLabel(record.record_scope, t)}
+                          </Chip>
+                          {getRecordSecondaryLabel(record) ? (
+                            <span>{getRecordSecondaryLabel(record)}</span>
+                          ) : null}
+                        </div>
                       </div>
-                      <div className="flex flex-wrap items-center gap-2 text-xs leading-5 text-default-500">
-                        <Chip size="sm" variant="flat">
-                          {getScopeLabel(record.record_scope, t)}
-                        </Chip>
-                        {getRecordSecondaryLabel(record) ? (
-                          <span>{getRecordSecondaryLabel(record)}</span>
+                    </TableCell>
+                    <TableCell>
+                      <div className="space-y-2">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <Chip color={getStateColor(record.operator_state)} size="sm" variant="flat">
+                            {getStateLabel(record.operator_state, t)}
+                          </Chip>
+                          <Chip color={getReasonColor(record.reason_class)} size="sm" variant="flat">
+                            {getReasonLabel(record.reason_class, t)}
+                          </Chip>
+                        </div>
+                        <div className="text-xs leading-5 text-default-500">
+                          {t('accountPool.fields.reasonCode')}: {getReasonCodeLabel(record.reason_code, t)}
+                        </div>
+                        {record.operator_state === 'cooling' ? (
+                          <CoolingCountdown nextActionAt={record.next_action_at} t={t} />
                         ) : null}
                       </div>
-                    </div>
-                  </TableCell>
-                  <TableCell>
-                    <div className="space-y-2">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <Chip color={getStateColor(record.operator_state)} size="sm" variant="flat">
-                          {getStateLabel(record.operator_state, t)}
-                        </Chip>
-                        <Chip color={getReasonColor(record.reason_class)} size="sm" variant="flat">
-                          {getReasonLabel(record.reason_class, t)}
-                        </Chip>
-                      </div>
-                      <div className="text-xs leading-5 text-default-500">
-                        {t('accountPool.fields.reasonCode')}: {getReasonCodeLabel(record.reason_code, t)}
-                      </div>
-                      {record.operator_state === 'cooling' ? (
-                        <CoolingCountdown nextActionAt={record.next_action_at} t={t} />
-                      ) : null}
-                    </div>
-                  </TableCell>
-                  <TableCell>
-                    <div className="space-y-3">
-                      {(() => {
-                        const usageRows = buildUsageRows(record, t)
+                    </TableCell>
+                    <TableCell>
+                      <div className="space-y-3">
+                        {(() => {
+                          const usageRows = buildUsageRows(record, t)
 
-                        if (usageRows.length === 0) {
+                          if (usageRows.length === 0) {
+                            return (
+                              <div className="text-xs text-default-500">
+                                {t('accounts.rateLimits.unavailable')}
+                              </div>
+                            )
+                          }
+
                           return (
-                            <div className="text-xs text-default-500">
-                              {t('accounts.rateLimits.unavailable')}
+                            <div className="grid gap-2">
+                              {usageRows.map((item) => (
+                                <div key={item.key} className="rounded-large border border-default-200 bg-content1/70 px-3 py-2">
+                                  <div className="flex items-center justify-between gap-3 text-xs text-default-500">
+                                    <span>{item.compactLabel}</span>
+                                    <span className="tabular-nums">{item.remainingText}</span>
+                                  </div>
+                                  <Progress
+                                    aria-label={`${item.bucketLabel} ${item.remainingText}`}
+                                    className="mt-2"
+                                    color={getUsageProgressColor(item.remainingPercent)}
+                                    size="sm"
+                                    value={item.remainingPercent}
+                                  />
+                                </div>
+                              ))}
                             </div>
                           )
-                        }
+                        })()}
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      {(() => {
+                        const signal = getRecentSignalDisplay(record, t)
+                        const heatmap = record.recent_signal_heatmap
 
                         return (
-                          <div className="grid gap-2">
-                            {usageRows.map((item) => (
-                              <div key={item.key} className="rounded-large border border-default-200 bg-content1/70 px-3 py-2">
-                                <div className="flex items-center justify-between gap-3 text-xs text-default-500">
-                                  <span>{item.compactLabel}</span>
-                                  <span className="tabular-nums">{item.remainingText}</span>
-                                </div>
-                                <Progress
-                                  aria-label={`${item.bucketLabel} ${item.remainingText}`}
-                                  className="mt-2"
-                                  color={getUsageProgressColor(item.remainingPercent)}
-                                  size="sm"
-                                  value={item.remainingPercent}
-                                />
+                          <div className="min-w-[208px] space-y-2">
+                            <div className="flex items-center justify-between gap-2">
+                              <div className="text-xs font-semibold uppercase tracking-[0.12em] text-default-500">
+                                {heatmap ? t('accountPool.recentSignal.window12h') : signal.label}
                               </div>
-                            ))}
+                              {heatmap ? (
+                                <Chip size="sm" variant="flat">
+                                  {getHeatmapActivityLabel(heatmap, t)}
+                                </Chip>
+                              ) : null}
+                            </div>
+                            {heatmap ? (
+                              <>
+                                <SignalHeatmapMini
+                                  intensityLevels={heatmap.intensity_levels}
+                                  activeCounts={heatmap.active_counts}
+                                  passiveCounts={heatmap.passive_counts}
+                                  successCounts={heatmap.success_counts}
+                                  errorCounts={heatmap.error_counts}
+                                  bucketMinutes={heatmap.bucket_minutes}
+                                  windowStart={heatmap.window_start}
+                                  visibleCount={12}
+                                />
+                                <div className="text-xs leading-5 text-default-500">
+                                  {getRecentSignalSummaryText(record, locale, t)}
+                                </div>
+                              </>
+                            ) : (
+                              <>
+                                <div className="text-sm font-medium text-foreground">
+                                  {signal.timestamp}
+                                </div>
+                                <div className="text-xs leading-5 text-default-500">
+                                  {signal.detail}
+                                </div>
+                              </>
+                            )}
                           </div>
                         )
                       })()}
-                    </div>
-                  </TableCell>
-                  <TableCell>
-                    {(() => {
-                      const signal = getRecentSignalDisplay(record, t)
-                      const heatmap = record.recent_signal_heatmap
-
-                      return (
-                        <div className="min-w-[208px] space-y-2">
-                          <div className="flex items-center justify-between gap-2">
-                            <div className="text-xs font-semibold uppercase tracking-[0.12em] text-default-500">
-                              {heatmap ? t('accountPool.recentSignal.window12h') : signal.label}
-                            </div>
-                            {heatmap ? (
-                              <Chip size="sm" variant="flat">
-                                {getHeatmapActivityLabel(heatmap, t)}
-                              </Chip>
-                            ) : null}
-                          </div>
-                          {heatmap ? (
-                            <>
-                              <SignalHeatmapMini
-                                intensityLevels={heatmap.intensity_levels}
-                                activeCounts={heatmap.active_counts}
-                                passiveCounts={heatmap.passive_counts}
-                                successCounts={heatmap.success_counts}
-                                errorCounts={heatmap.error_counts}
-                                bucketMinutes={heatmap.bucket_minutes}
-                                windowStart={heatmap.window_start}
-                                visibleCount={12}
-                              />
-                              <div className="text-xs leading-5 text-default-500">
-                                {getRecentSignalSummaryText(record, locale, t)}
-                              </div>
-                            </>
-                          ) : (
-                            <>
-                              <div className="text-sm font-medium text-foreground">
-                                {signal.timestamp}
-                              </div>
-                              <div className="text-xs leading-5 text-default-500">
-                                {signal.detail}
-                              </div>
-                            </>
-                          )}
-                        </div>
-                      )
-                    })()}
-                  </TableCell>
-                  <TableCell className="w-[132px]">
-                    <div className="flex items-center justify-end gap-1">
-                      <Button
-                        isIconOnly
-                        aria-label={t('accountPool.actions.inspect')}
-                        size="sm"
-                        variant="light"
-                        onPress={() => openRecord(record.id)}
-                      >
-                        <Eye className="h-4 w-4" />
-                      </Button>
-                      <Dropdown>
-                        <DropdownTrigger>
-                          <Button
-                            isIconOnly
-                            aria-label={t('accountPool.actions.more')}
-                            size="sm"
-                            variant="light"
-                          >
-                            <MoreHorizontal className="h-4 w-4" />
-                          </Button>
-                        </DropdownTrigger>
-                        <DropdownMenu
-                          aria-label={t('accountPool.actions.more')}
-                          onAction={(key) => runAccountAction(record, String(key) as AccountPoolAction)}
+                    </TableCell>
+                    <TableCell className="w-[132px]">
+                      <div className="flex items-center justify-end gap-1">
+                        <Button
+                          isIconOnly
+                          aria-label={t('accountPool.actions.inspect')}
+                          size="sm"
+                          variant="light"
+                          onPress={() => openRecord(record.id)}
                         >
-                          <DropdownItem
-                            key="reprobe"
-                            startContent={<RefreshCcw className="h-4 w-4" />}
+                          <Eye className="h-4 w-4" />
+                        </Button>
+                        <Dropdown>
+                          <DropdownTrigger>
+                            <Button
+                              isIconOnly
+                              aria-label={t('accountPool.actions.more')}
+                              size="sm"
+                              variant="light"
+                            >
+                              <MoreHorizontal className="h-4 w-4" />
+                            </Button>
+                          </DropdownTrigger>
+                          <DropdownMenu
+                            aria-label={t('accountPool.actions.more')}
+                            onAction={(key) => runAccountAction(record, String(key) as AccountPoolAction)}
                           >
-                            {t('accountPool.actions.reprobe')}
-                          </DropdownItem>
-                          <DropdownItem
-                            key="restore"
-                            isDisabled={!canRunAccountPoolAction(record, 'restore')}
-                            startContent={<RotateCcw className="h-4 w-4" />}
-                          >
-                            {t('accountPool.actions.restore')}
-                          </DropdownItem>
-                          <DropdownItem
-                            key="delete"
-                            className="text-danger"
-                            color="danger"
-                            startContent={<Trash2 className="h-4 w-4" />}
-                          >
-                            {t('accountPool.actions.delete')}
-                          </DropdownItem>
-                        </DropdownMenu>
-                      </Dropdown>
-                    </div>
-                  </TableCell>
-                </TableRow>
-              )}
+                            <DropdownItem
+                              key="reprobe"
+                              startContent={<RefreshCcw className="h-4 w-4" />}
+                            >
+                              {t('accountPool.actions.reprobe')}
+                            </DropdownItem>
+                            <DropdownItem
+                              key="restore"
+                              isDisabled={!canRunAccountPoolAction(record, 'restore')}
+                              startContent={<RotateCcw className="h-4 w-4" />}
+                            >
+                              {t('accountPool.actions.restore')}
+                            </DropdownItem>
+                            <DropdownItem
+                              key="delete"
+                              className="text-danger"
+                              color="danger"
+                              startContent={<Trash2 className="h-4 w-4" />}
+                            >
+                              {t('accountPool.actions.delete')}
+                            </DropdownItem>
+                          </DropdownMenu>
+                        </Dropdown>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                )
+              })}
             </TableBody>
           </Table>
           <div className="flex flex-col gap-3 border-t border-default-200 px-0 pt-4 text-xs text-default-500 sm:flex-row sm:items-center sm:justify-between">
