@@ -3,6 +3,9 @@ import {
   type ReactNode,
   useMemo,
 } from 'react'
+import { Area, AreaChart, ResponsiveContainer } from 'recharts'
+import { Chip } from '@heroui/react'
+import { ArrowUpRight, ArrowRight, ArrowDownRight } from 'lucide-react'
 
 import {
   describeDashboardOverviewLayout,
@@ -439,11 +442,14 @@ export function DashboardShell({
   )
 }
 
-type DashboardMetricGridProps = HTMLAttributes<HTMLDivElement>
+interface DashboardMetricGridProps extends HTMLAttributes<HTMLDivElement> {
+  variant?: 'primary' | 'secondary'
+}
 
 export function DashboardMetricGrid({
   className,
   children,
+  variant = 'primary',
   ...props
 }: DashboardMetricGridProps) {
   const overview = describeDashboardOverviewLayout()
@@ -454,6 +460,7 @@ export function DashboardMetricGrid({
         overview.metricPresentation === 'strip' &&
           'grid gap-px overflow-hidden rounded-large border-small border-default-200 bg-default-100 sm:grid-cols-2 2xl:grid-cols-4',
         overview.metricPresentation !== 'strip' && 'grid gap-3 sm:grid-cols-2 2xl:grid-cols-4',
+        variant === 'secondary' && 'xl:grid-cols-4',
         className,
       )}
       {...props}
@@ -463,13 +470,106 @@ export function DashboardMetricGrid({
   )
 }
 
+/* ── Sparkline mini-chart for KPI cards ─────────────────── */
+
+function KpiSparkline({
+  data,
+  trendType = 'neutral',
+}: {
+  data: number[]
+  trendType?: 'up' | 'neutral' | 'down'
+}) {
+  const chartData = useMemo(() => data.map((v, i) => ({ i, v })), [data])
+
+  const strokeColor =
+    trendType === 'up'
+      ? 'hsl(var(--heroui-success))'
+      : trendType === 'down'
+        ? 'hsl(var(--heroui-danger))'
+        : 'hsl(var(--heroui-warning))'
+
+  const fillId = `kpi-spark-${trendType}`
+
+  if (chartData.length < 2) return null
+
+  return (
+    <div className="h-[52px] w-[140px] shrink-0">
+      <ResponsiveContainer width="100%" height="100%">
+        <AreaChart data={chartData} margin={{ top: 2, right: 2, bottom: 2, left: 2 }}>
+          <defs>
+            <linearGradient id={fillId} x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor={strokeColor} stopOpacity={0.2} />
+              <stop offset="100%" stopColor={strokeColor} stopOpacity={0} />
+            </linearGradient>
+          </defs>
+          <Area
+            type="monotone"
+            dataKey="v"
+            stroke={strokeColor}
+            strokeWidth={1.5}
+            fill={`url(#${fillId})`}
+            dot={false}
+            isAnimationActive={false}
+          />
+        </AreaChart>
+      </ResponsiveContainer>
+    </div>
+  )
+}
+
+/* ── Trend chip (HeroUI Pro KPI Stat 1 style) ──────────── */
+
+function TrendChip({
+  change,
+  trendType,
+  changeType,
+  comparisonLabel,
+}: {
+  change: string
+  trendType: 'up' | 'neutral' | 'down'
+  changeType: 'positive' | 'neutral' | 'negative'
+  comparisonLabel?: string
+}) {
+  const TrendIcon =
+    trendType === 'up' ? ArrowUpRight : trendType === 'down' ? ArrowDownRight : ArrowRight
+  const chipColor =
+    changeType === 'positive' ? 'success' : changeType === 'negative' ? 'danger' : 'warning'
+
+  return (
+    <div className="flex items-center gap-1.5">
+      <Chip
+        color={chipColor}
+        radius="sm"
+        size="sm"
+        variant="flat"
+        classNames={{ content: 'font-medium text-[0.65rem]' }}
+        startContent={<TrendIcon className="h-3 w-3" />}
+      >
+        {change}
+      </Chip>
+      {comparisonLabel ? (
+        <span className="text-[11px] text-default-400">{comparisonLabel}</span>
+      ) : null}
+    </div>
+  )
+}
+
+/* ── Dashboard Metric Card (HeroUI Pro KPI Stat 3 style) ── */
+
 interface DashboardMetricCardProps extends Omit<HTMLAttributes<HTMLDivElement>, 'title'> {
   eyebrow?: ReactNode
   title: ReactNode
   value: ReactNode
   valueTitle?: string
   description?: ReactNode
+  icon?: ReactNode
   loading?: boolean
+  variant?: 'primary' | 'secondary'
+  sparklineData?: number[]
+  trendChange?: string
+  trendType?: 'up' | 'neutral' | 'down'
+  changeType?: 'positive' | 'neutral' | 'negative'
+  comparisonLabel?: string
 }
 
 export function DashboardMetricCard({
@@ -478,43 +578,94 @@ export function DashboardMetricCard({
   value,
   valueTitle,
   description,
+  icon,
   loading = false,
+  variant = 'primary',
+  sparklineData,
+  trendChange,
+  trendType = 'neutral',
+  changeType = 'neutral',
+  comparisonLabel,
   className,
   ...props
 }: DashboardMetricCardProps) {
+  const isPrimary = variant === 'primary'
+  const hasSparkline = isPrimary && sparklineData && sparklineData.length >= 2
+  const hasTrend = !!trendChange
+
   return (
     <div
       className={cn(
-        'h-full space-y-3 bg-content1/82 px-4 py-4',
+        'h-full bg-content1/82',
+        isPrimary ? 'flex flex-col justify-between px-4 py-4' : 'flex flex-col justify-center px-4 py-3',
         className,
       )}
       {...props}
     >
-      <div className="min-w-0 space-y-1">
-        {eyebrow ? (
-          <p className="text-xs font-semibold uppercase tracking-[0.15em] text-muted-foreground">
-            {eyebrow}
+      {/* Header: title + sparkline (primary) or title + icon (secondary) */}
+      <div className={cn('flex items-start justify-between gap-3', isPrimary && 'mb-1')}>
+        <div className="min-w-0 space-y-1">
+          {eyebrow ? (
+            <p className="text-xs font-semibold uppercase tracking-[0.15em] text-muted-foreground">
+              {eyebrow}
+            </p>
+          ) : null}
+          <p className={cn(
+            'font-medium',
+            isPrimary
+              ? 'text-small text-default-500'
+              : 'text-[11px] font-semibold uppercase tracking-[0.1em] text-default-400',
+          )}>
+            {title}
           </p>
+        </div>
+        {isPrimary && hasSparkline ? (
+          <KpiSparkline data={sparklineData} trendType={trendType} />
+        ) : icon ? (
+          <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-medium border-small border-default-200 bg-default-50 text-default-400">
+            {icon}
+          </div>
         ) : null}
-        <p className="text-[12px] font-semibold uppercase tracking-[0.1em] text-foreground/76">{title}</p>
       </div>
-      <div className="space-y-1.5">
+
+      {/* Value */}
+      <div className={cn(isPrimary ? 'space-y-2' : 'space-y-0.5')}>
         {loading ? (
-          <div className="h-9 w-32 animate-pulse rounded-lg bg-default-200/75" />
+          <div className={cn(
+            'animate-pulse rounded-lg bg-default-200/75',
+            isPrimary ? 'h-9 w-32' : 'h-7 w-24',
+          )} />
         ) : (
           <p
             title={valueTitle}
-            className="text-[clamp(1.7rem,2.7vw,2.35rem)] font-semibold leading-none tracking-[-0.04em] text-foreground"
+            className={cn(
+              'font-semibold leading-none tracking-[-0.04em] text-foreground',
+              isPrimary
+                ? 'text-[clamp(1.7rem,2.7vw,2.35rem)]'
+                : 'text-[clamp(1.2rem,2vw,1.5rem)]',
+            )}
           >
             {value}
           </p>
         )}
-        {description ? (
-          loading ? (
-            <div className="h-3.5 w-40 animate-pulse rounded bg-default-200/70" />
-          ) : (
-            <p className="text-[12px] leading-6 text-muted-foreground">{description}</p>
-          )
+
+        {/* Trend chip (primary) or description (secondary) */}
+        {loading ? (
+          <div className="h-3.5 w-40 animate-pulse rounded bg-default-200/70" />
+        ) : hasTrend ? (
+          <TrendChip
+            change={trendChange}
+            trendType={trendType}
+            changeType={changeType}
+            comparisonLabel={comparisonLabel}
+          />
+        ) : description ? (
+          <p className={cn(
+            'leading-6 text-muted-foreground',
+            isPrimary ? 'text-[12px]' : 'text-[11px]',
+          )}>
+            {description}
+          </p>
         ) : null}
       </div>
     </div>

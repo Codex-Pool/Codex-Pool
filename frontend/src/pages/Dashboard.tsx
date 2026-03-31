@@ -31,6 +31,9 @@ import {
   Bar,
   BarChart,
   CartesianGrid,
+  Cell,
+  Pie,
+  PieChart,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -43,6 +46,8 @@ import { dashboardApi } from '@/api/dashboard'
 import { adminApi } from '@/api/settings'
 import { usageApi } from '@/api/usage'
 import {
+  DashboardMetricCard,
+  DashboardMetricGrid,
   DockedPageIntro,
   PageContent,
 } from '@/components/layout/page-archetypes'
@@ -76,6 +81,14 @@ const POOL_ACCENT_CLASS_NAMES = {
   success: 'bg-success',
   warning: 'bg-warning',
   danger: 'bg-danger',
+} as const
+
+/** HSL fill colors for the donut chart segments */
+const POOL_PIE_COLORS = {
+  brand: 'hsl(var(--heroui-primary))',
+  success: 'hsl(var(--heroui-success))',
+  warning: 'hsl(var(--heroui-warning))',
+  danger: 'hsl(var(--heroui-danger))',
 } as const
 
 function formatNumber(n: number): string {
@@ -188,39 +201,66 @@ export default function Dashboard() {
     model: `model-${modelDistribution.length}-${modelDistribution[0]?.requests ?? 0}`,
   }), [hourlyTrends, summaryData, modelDistribution])
 
-  const overviewMetrics = useMemo(
+  const requestSparkline = useMemo(() => trafficData.map((p) => p.accounts), [trafficData])
+  const tokenSparkline = useMemo(
+    () => tokenTrend.map((p) => p.input + p.cached + p.output + p.reasoning),
+    [tokenTrend],
+  )
+
+  const primaryMetrics = useMemo(
     () => [
       {
+        id: 'total_requests',
         title: t('dashboard.kpi.totalRequests'),
         rawValue: kpis.totalRequests,
         format: formatNumber,
         description: t('dashboard.antigravity.last24Hours', { defaultValue: 'Last 24 hours' }),
+        sparklineData: requestSparkline,
+        trendType: 'up' as const,
+        changeType: 'positive' as const,
       },
       {
+        id: 'total_tokens',
         title: t('dashboard.kpi.totalTokens'),
         rawValue: kpis.totalTokens,
         format: formatNumber,
         description: t('dashboard.kpi.totalTokensDesc'),
+        sparklineData: tokenSparkline,
+        trendType: 'up' as const,
+        changeType: 'neutral' as const,
       },
       {
+        id: 'rpm',
         title: t('dashboard.kpi.rpm'),
         rawValue: kpis.rpm,
         format: (n: number) => n.toString(),
         description: t('dashboard.kpi.rpmDesc'),
+        sparklineData: requestSparkline,
+        trendType: 'up' as const,
+        changeType: 'positive' as const,
       },
       {
+        id: 'avg_ttft',
         title: t('dashboard.kpi.avgFirstTokenSpeed'),
         rawValue: kpis.avgFirstTokenMs,
         format: formatDurationMs,
         description: t('dashboard.kpi.avgFirstTokenSpeedDesc'),
       },
+    ],
+    [kpis, t, requestSparkline, tokenSparkline],
+  )
+
+  const secondaryMetrics = useMemo(
+    () => [
       {
+        id: 'tenant_count',
         title: t('dashboard.kpi.tenants'),
         rawValue: kpis.tenantCount,
         format: (n: number) => n.toString(),
         description: t('dashboard.kpi.tenantsDesc'),
       },
       {
+        id: 'account_count',
         title: t('dashboard.kpi.accounts'),
         rawValue: kpis.accountCount,
         format: (n: number) => n.toString(),
@@ -230,12 +270,14 @@ export default function Dashboard() {
         }),
       },
       {
+        id: 'api_key_count',
         title: t('dashboard.kpi.apiKeys'),
         rawValue: kpis.apiKeyCount,
         format: (n: number) => n.toString(),
         description: t('dashboard.kpi.apiKeysDesc'),
       },
       {
+        id: 'tpm',
         title: t('dashboard.kpi.tpm'),
         rawValue: kpis.tpm,
         format: formatNumber,
@@ -371,29 +413,38 @@ export default function Dashboard() {
 
       {/* ── Pool 数据概览（紧凑分组） ── */}
       <div className="space-y-5">
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-          {overviewMetrics.map((metric) => (
-            <Card
-              key={metric.title}
-              className="border-small border-default-200 bg-content1 shadow-small"
-            >
-              <CardBody className="space-y-2 p-4">
-                <div className="text-xs font-semibold uppercase tracking-[0.14em] text-default-500">
-                  {metric.title}
-                </div>
-                <div className="text-[clamp(1.8rem,4vw,2.5rem)] font-semibold leading-none tracking-[-0.04em] text-foreground tabular-nums">
-                  <SpringKpiValue rawValue={metric.rawValue} format={metric.format} />
-                </div>
-                <p className="text-sm leading-6 text-default-600">
-                  {metric.description}
-                </p>
-              </CardBody>
-            </Card>
+        {/* Primary KPIs — with sparkline */}
+        <DashboardMetricGrid variant="primary" className="xl:grid-cols-4">
+          {primaryMetrics.map((metric) => (
+            <DashboardMetricCard
+              key={metric.id}
+              variant="primary"
+              title={metric.title}
+              value={<SpringKpiValue rawValue={metric.rawValue} format={metric.format} />}
+              description={metric.description}
+              sparklineData={'sparklineData' in metric ? metric.sparklineData : undefined}
+              trendType={'trendType' in metric ? metric.trendType : undefined}
+              changeType={'changeType' in metric ? metric.changeType : undefined}
+            />
           ))}
-        </div>
+        </DashboardMetricGrid>
 
+        {/* Secondary KPIs — compact */}
+        <DashboardMetricGrid variant="secondary" className="mt-3 xl:grid-cols-4">
+          {secondaryMetrics.map((metric) => (
+            <DashboardMetricCard
+              key={metric.id}
+              variant="secondary"
+              title={metric.title}
+              value={<SpringKpiValue rawValue={metric.rawValue} format={metric.format} />}
+              description={metric.description}
+            />
+          ))}
+        </DashboardMetricGrid>
+
+        {/* ── 账号池总览 — Donut (HeroUI Pro Circles 3 style) ── */}
         <Card className="border-small border-default-200 bg-content1 shadow-small">
-          <CardHeader className="flex flex-col gap-4 px-5 pb-0 pt-5 lg:flex-row lg:items-start lg:justify-between">
+          <CardHeader className="flex items-start justify-between gap-4 px-5 pb-0 pt-5">
             <div className="space-y-1">
               <h2 className="text-lg font-semibold tracking-[-0.02em] text-foreground">
                 {t('dashboard.poolOverview.title')}
@@ -402,106 +453,88 @@ export default function Dashboard() {
                 {t('dashboard.poolOverview.description')}
               </p>
             </div>
-
-            <div className="w-full rounded-large border border-default-200 bg-content2/55 px-4 py-4 lg:max-w-[520px]">
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                <div className="space-y-1">
-                  <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-default-500">
-                    {t('dashboard.poolOverview.totalLabel', { defaultValue: '总计' })}
-                  </div>
-                  <div className="tabular-nums text-[clamp(1.8rem,3vw,2.5rem)] font-semibold leading-none tracking-[-0.05em] text-foreground">
-                    {formatNumber(totalManagedPool)}
-                  </div>
-                </div>
-
-                <Dropdown placement="bottom-end">
-                  <DropdownTrigger>
-                    <Button
-                      aria-label={t('dashboard.actions.openMenu', { defaultValue: 'Open actions menu' })}
-                      radius="full"
-                      size="sm"
-                      variant="flat"
-                    >
-                      <Icon icon="solar:menu-dots-bold" className="text-lg text-default-500" />
-                    </Button>
-                  </DropdownTrigger>
-                  <DropdownMenu aria-label={t('dashboard.poolOverview.title')} onAction={handlePoolOverviewAction}>
-                    <DropdownItem key="accounts">
-                      {t('dashboard.actions.viewAccounts', { defaultValue: 'View accounts' })}
-                    </DropdownItem>
-                    <DropdownItem key="logs">
-                      {t('dashboard.actions.viewLogs', { defaultValue: 'View request logs' })}
-                    </DropdownItem>
-                    <DropdownItem key="imports">
-                      {t('dashboard.actions.viewImports', { defaultValue: 'View imports' })}
-                    </DropdownItem>
-                  </DropdownMenu>
-                </Dropdown>
-              </div>
-
-              <div className="mt-4 space-y-3">
-                <div className="flex h-2 overflow-hidden rounded-full bg-default-100">
-                  {poolOverviewSummaryMetrics.map((metric) => (
-                    metric.value > 0 ? (
-                      <span
-                        key={metric.title}
-                        aria-hidden="true"
-                        className={cn('h-full', POOL_ACCENT_CLASS_NAMES[metric.tone])}
-                        style={{ flexBasis: 0, flexGrow: metric.value }}
-                      />
-                    ) : null
-                  ))}
-                  {totalManagedPool === 0 ? (
-                    <span aria-hidden="true" className="h-full flex-1 bg-default-200" />
-                  ) : null}
-                </div>
-
-                <div className="flex flex-wrap gap-x-4 gap-y-2">
-                  {poolOverviewSummaryMetrics.map((metric) => (
-                    <div key={metric.title} className="flex items-center gap-2 text-xs text-default-600">
-                      <span className={cn('h-2 w-2 shrink-0 rounded-full', POOL_ACCENT_CLASS_NAMES[metric.tone])} />
-                      <span>{metric.title}</span>
-                      <span className="tabular-nums text-default-500">{metric.ratio}%</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
+            <Dropdown placement="bottom-end">
+              <DropdownTrigger>
+                <Button
+                  aria-label={t('dashboard.actions.openMenu', { defaultValue: 'Open actions menu' })}
+                  radius="full"
+                  size="sm"
+                  variant="flat"
+                >
+                  <Icon icon="solar:menu-dots-bold" className="text-lg text-default-500" />
+                </Button>
+              </DropdownTrigger>
+              <DropdownMenu aria-label={t('dashboard.poolOverview.title')} onAction={handlePoolOverviewAction}>
+                <DropdownItem key="accounts">
+                  {t('dashboard.actions.viewAccounts', { defaultValue: 'View accounts' })}
+                </DropdownItem>
+                <DropdownItem key="logs">
+                  {t('dashboard.actions.viewLogs', { defaultValue: 'View request logs' })}
+                </DropdownItem>
+                <DropdownItem key="imports">
+                  {t('dashboard.actions.viewImports', { defaultValue: 'View imports' })}
+                </DropdownItem>
+              </DropdownMenu>
+            </Dropdown>
           </CardHeader>
 
-          <CardBody className="grid gap-5 px-5 pb-5 pt-5 sm:grid-cols-2 xl:grid-cols-4">
-            {poolOverviewSummaryMetrics.map((metric) => (
-              <div
-                key={metric.title}
-                className="flex h-full flex-col gap-5 rounded-large border-small border-default-200 bg-content1 p-4"
-              >
-                <div className="flex items-start justify-between gap-3">
-                  <div
-                    className={cn(
-                      'flex h-11 w-11 shrink-0 items-center justify-center rounded-large border-small',
-                      POOL_TONE_CLASS_NAMES[metric.tone],
-                    )}
+          <CardBody className="flex flex-col items-center gap-6 px-5 pb-5 pt-3 sm:flex-row">
+            {/* Donut chart */}
+            <div className="relative h-[180px] w-[180px] shrink-0">
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <Pie
+                    data={poolOverviewSummaryMetrics.map((m) => ({ name: m.title, value: Math.max(m.value, 0) }))}
+                    cx="50%"
+                    cy="50%"
+                    innerRadius={58}
+                    outerRadius={80}
+                    paddingAngle={2}
+                    dataKey="value"
+                    stroke="none"
+                    isAnimationActive={!prefersReducedMotion}
+                    animationDuration={800}
                   >
-                    {metric.icon}
-                  </div>
-                  <Chip color={POOL_PROGRESS_COLORS[metric.tone]} size="sm" variant="flat">
-                    {metric.ratio}%
-                  </Chip>
-                </div>
-
-                <div className="space-y-2">
-                  <div className="text-xs font-semibold uppercase tracking-[0.16em] text-default-500">
-                    {metric.title}
-                  </div>
-                  <div className="text-[clamp(2rem,4vw,2.8rem)] font-semibold leading-none tracking-[-0.045em] text-foreground">
-                    {formatNumber(metric.value)}
-                  </div>
-                  <p className="text-sm leading-6 text-default-600">
-                    {metric.description}
-                  </p>
-                </div>
+                    {poolOverviewSummaryMetrics.map((metric) => (
+                      <Cell key={metric.title} fill={POOL_PIE_COLORS[metric.tone]} />
+                    ))}
+                  </Pie>
+                </PieChart>
+              </ResponsiveContainer>
+              {/* Center label */}
+              <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
+                <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-default-500">
+                  {t('dashboard.poolOverview.totalLabel', { defaultValue: '总计' })}
+                </span>
+                <span className="tabular-nums text-2xl font-semibold leading-tight tracking-[-0.04em] text-foreground">
+                  {formatNumber(totalManagedPool)}
+                </span>
               </div>
-            ))}
+            </div>
+
+            {/* Legend list */}
+            <div className="grid flex-1 gap-3 sm:grid-cols-2">
+              {poolOverviewSummaryMetrics.map((metric) => (
+                <div
+                  key={metric.title}
+                  className="flex items-start gap-3 rounded-large border-small border-default-100 px-3 py-2.5"
+                >
+                  <span className={cn('mt-1.5 h-2.5 w-2.5 shrink-0 rounded-full', POOL_ACCENT_CLASS_NAMES[metric.tone])} />
+                  <div className="min-w-0">
+                    <div className="flex items-baseline gap-2">
+                      <span className="text-xs font-medium text-default-500">{metric.title}</span>
+                      <Chip color={POOL_PROGRESS_COLORS[metric.tone]} size="sm" variant="flat" classNames={{ content: 'text-[0.6rem] font-semibold' }}>
+                        {metric.ratio}%
+                      </Chip>
+                    </div>
+                    <div className="tabular-nums text-lg font-semibold leading-tight tracking-[-0.03em] text-foreground">
+                      {formatNumber(metric.value)}
+                    </div>
+                    <p className="text-[11px] leading-5 text-default-400">{metric.description}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
           </CardBody>
         </Card>
       </div>
@@ -616,27 +649,42 @@ export default function Dashboard() {
 
       <div className="space-y-6">
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1.25fr)_minmax(0,0.75fr)]">
+        {/* ── 全天流量趋势 — Graph 1 style ── */}
         <Card className="border-small border-default-200 bg-content1 shadow-small">
-          <CardHeader className="px-5 pb-3 pt-5">
-            <div className="space-y-1">
+          <CardHeader className="flex flex-col gap-4 px-5 pb-2 pt-5">
+            <div className="flex items-start justify-between gap-3">
               <h2 className="text-lg font-semibold tracking-[-0.02em] text-foreground">
                 {t('dashboard.trafficChart.title')}
               </h2>
-              <p className="text-sm leading-6 text-default-600">
-                {t('dashboard.trafficChart.subtitle')}
-              </p>
+              <Chip size="sm" variant="flat" color="default">24h</Chip>
+            </div>
+            {/* Inline KPI summary row */}
+            <div className="flex flex-wrap gap-3">
+              {[
+                { label: t('dashboard.kpi.totalRequests'), value: formatNumber(kpis.totalRequests), color: 'success' as const, active: true },
+                { label: t('dashboard.antigravity.accountTraffic', { defaultValue: 'Account traffic' }), value: formatNumber(trafficData.reduce((s, p) => s + p.accounts, 0)), color: 'success' as const, active: false },
+                { label: t('dashboard.antigravity.apiKeyTraffic', { defaultValue: 'API key traffic' }), value: formatNumber(trafficData.reduce((s, p) => s + p.apiKeys, 0)), color: 'danger' as const, active: false },
+              ].map((item) => (
+                <div key={item.label} className={cn(
+                  'rounded-large border-small px-3 py-2',
+                  item.active ? 'border-success/40 bg-success/5' : 'border-default-200 bg-transparent',
+                )}>
+                  <div className="text-[11px] font-medium text-default-500">{item.label}</div>
+                  <div className="text-lg font-semibold tabular-nums leading-tight text-foreground">{item.value}</div>
+                </div>
+              ))}
             </div>
           </CardHeader>
           <CardBody className="px-5 pb-5 pt-1">
-            <ResponsiveContainer width="100%" height={280}>
+            <ResponsiveContainer width="100%" height={240}>
               <AreaChart key={chartAnimKey.traffic} data={trafficData}>
                 <defs>
                   <linearGradient id="successGradient" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="hsl(var(--heroui-success))" stopOpacity={0.3} />
+                    <stop offset="0%" stopColor="hsl(var(--heroui-success))" stopOpacity={0.25} />
                     <stop offset="100%" stopColor="hsl(var(--heroui-success))" stopOpacity={0} />
                   </linearGradient>
                   <linearGradient id="dangerGradient" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="hsl(var(--heroui-danger))" stopOpacity={0.3} />
+                    <stop offset="0%" stopColor="hsl(var(--heroui-danger))" stopOpacity={0.15} />
                     <stop offset="100%" stopColor="hsl(var(--heroui-danger))" stopOpacity={0} />
                   </linearGradient>
                 </defs>
@@ -645,33 +693,46 @@ export default function Dashboard() {
                 <YAxis tick={{ fill: chartTextColor, fontSize: 11 }} axisLine={false} tickLine={false} />
                 <Tooltip contentStyle={chartTooltipStyle} />
                 <Area type="monotone" dataKey="accounts" stroke="hsl(var(--heroui-success))" fill="url(#successGradient)" strokeWidth={2} isAnimationActive={!prefersReducedMotion} animationDuration={1000} animationEasing="ease-out" animationBegin={0} />
-                <Area type="monotone" dataKey="apiKeys" stroke="hsl(var(--heroui-danger))" fill="url(#dangerGradient)" strokeWidth={2} isAnimationActive={!prefersReducedMotion} animationDuration={1000} animationEasing="ease-out" animationBegin={120} />
+                <Area type="monotone" dataKey="apiKeys" stroke="hsl(var(--heroui-danger))" fill="url(#dangerGradient)" strokeWidth={1.5} isAnimationActive={!prefersReducedMotion} animationDuration={1000} animationEasing="ease-out" animationBegin={120} />
               </AreaChart>
             </ResponsiveContainer>
           </CardBody>
         </Card>
 
+        {/* ── Token 使用趋势 — Graph 2 style with inline KPI legend ── */}
         <Card className="border-small border-default-200 bg-content1 shadow-small">
-          <CardHeader className="px-5 pb-3 pt-5">
-            <div className="space-y-1">
-              <h2 className="text-lg font-semibold tracking-[-0.02em] text-foreground">
-                {t('dashboard.tokenTrend.title')}
-              </h2>
-              <p className="text-sm leading-6 text-default-600">
-                {t('dashboard.tokenTrend.description')}
-              </p>
+          <CardHeader className="flex flex-col gap-4 px-5 pb-2 pt-5">
+            <h2 className="text-lg font-semibold tracking-[-0.02em] text-foreground">
+              {t('dashboard.tokenTrend.title')}
+            </h2>
+            {/* Token component KPI legend row */}
+            <div className="flex flex-wrap gap-3">
+              {([
+                { key: 'input', label: t('dashboard.tokenComponent.input', { defaultValue: 'Input' }), value: tokenTrend.reduce((s, p) => s + p.input, 0), color: CHART_SERIES_COLORS.input },
+                { key: 'cached', label: t('dashboard.tokenComponent.cached', { defaultValue: 'Cached' }), value: tokenTrend.reduce((s, p) => s + p.cached, 0), color: CHART_SERIES_COLORS.cached },
+                { key: 'output', label: t('dashboard.tokenComponent.output', { defaultValue: 'Output' }), value: tokenTrend.reduce((s, p) => s + p.output, 0), color: CHART_SERIES_COLORS.output },
+                { key: 'reasoning', label: t('dashboard.tokenComponent.reasoning', { defaultValue: 'Reasoning' }), value: tokenTrend.reduce((s, p) => s + p.reasoning, 0), color: CHART_SERIES_COLORS.reasoning },
+              ] as const).map((item) => (
+                <div key={item.key} className="rounded-large border-small border-default-200 px-3 py-2">
+                  <div className="flex items-center gap-1.5">
+                    <span className="h-2 w-2 rounded-full" style={{ backgroundColor: item.color }} />
+                    <span className="text-[11px] font-medium text-default-500">{item.label}</span>
+                  </div>
+                  <div className="text-base font-semibold tabular-nums leading-tight text-foreground">{formatNumber(item.value)}</div>
+                </div>
+              ))}
             </div>
           </CardHeader>
           <CardBody className="px-5 pb-5 pt-1">
-            <ResponsiveContainer width="100%" height={280}>
+            <ResponsiveContainer width="100%" height={240}>
               <AreaChart key={chartAnimKey.token} data={tokenTrend}>
                 <defs>
                   <linearGradient id="inputGradient" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor={CHART_SERIES_COLORS.input} stopOpacity={0.3} />
+                    <stop offset="0%" stopColor={CHART_SERIES_COLORS.input} stopOpacity={0.25} />
                     <stop offset="100%" stopColor={CHART_SERIES_COLORS.input} stopOpacity={0} />
                   </linearGradient>
                   <linearGradient id="outputGradient" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor={CHART_SERIES_COLORS.output} stopOpacity={0.3} />
+                    <stop offset="0%" stopColor={CHART_SERIES_COLORS.output} stopOpacity={0.25} />
                     <stop offset="100%" stopColor={CHART_SERIES_COLORS.output} stopOpacity={0} />
                   </linearGradient>
                 </defs>
@@ -721,7 +782,11 @@ export default function Dashboard() {
                     formatter={(value: number | string | readonly (number | string)[] | undefined) =>
                       formatNumber(Number(Array.isArray(value) ? value[0] ?? 0 : value ?? 0))}
                   />
-                  <Bar dataKey="requests" fill="hsl(var(--heroui-primary))" radius={[0, 6, 6, 0]} barSize={20} isAnimationActive={!prefersReducedMotion} animationDuration={900} animationEasing="ease-out" animationBegin={0} />
+                  <Bar dataKey="requests" radius={[0, 6, 6, 0]} barSize={20} isAnimationActive={!prefersReducedMotion} animationDuration={900} animationEasing="ease-out" animationBegin={0}>
+                    {modelDistribution.map((_, idx) => (
+                      <Cell key={idx} fill={CHART_SERIES_COLORS[['input', 'cached', 'output', 'reasoning', 'input'][idx % 5] as keyof typeof CHART_SERIES_COLORS] ?? 'hsl(var(--heroui-primary))'} />
+                    ))}
+                  </Bar>
                 </BarChart>
               </ResponsiveContainer>
             )}

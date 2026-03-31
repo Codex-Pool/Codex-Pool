@@ -131,6 +131,15 @@ export function buildModelDistributionPoints(
   ]
 }
 
+export function extractSparklineData(
+  metrics: UsageDashboardMetrics | undefined,
+  field: 'requestCount' | 'totalTokens' | 'inputTokens' | 'outputTokens',
+): number[] {
+  const points = buildTokenTrendChartPoints(metrics)
+  if (points.length === 0) return []
+  return points.map((p) => p[field])
+}
+
 function normalizeTokenComponentSelection(
   value: Partial<TokenComponentSelection> | undefined,
 ): TokenComponentSelection {

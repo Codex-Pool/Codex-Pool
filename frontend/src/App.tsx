@@ -70,14 +70,16 @@ function AdminApp({ capabilities }: AdminAppProps) {
   const queryClient = useQueryClient()
   const [authChecked, setAuthChecked] = useState(false)
   const [authenticated, setAuthenticated] = useState(false)
+  const [adminUsername, setAdminUsername] = useState<string | undefined>()
 
   useEffect(() => {
     let cancelled = false
     adminAuthApi
       .me()
-      .then(() => {
+      .then((me) => {
         if (!cancelled) {
           setAuthenticated(true)
+          setAdminUsername(me.username)
         }
       })
       .catch(() => {
@@ -192,7 +194,7 @@ function AdminApp({ capabilities }: AdminAppProps) {
     <BrowserRouter>
       <Suspense fallback={<LoadingFallback />}>
         <Routes>
-          <Route element={<AppLayout onLogout={handleLogout} capabilities={capabilities} />}>
+          <Route element={<AppLayout onLogout={handleLogout} capabilities={capabilities} username={adminUsername} />}>
             <Route path="/" element={<Navigate to="/dashboard" replace />} />
             <Route path="/dashboard" element={<Dashboard />} />
             <Route path="/accounts" element={<Accounts />} />

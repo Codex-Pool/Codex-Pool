@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import type { FormEvent } from 'react'
 import { Icon } from '@iconify/react'
-import { Button, Form, Input } from '@heroui/react'
+import { Button, Card, CardBody, Form, Input } from '@heroui/react'
 import { isAxiosError } from 'axios'
 import { useTranslation } from 'react-i18next'
 import { motion } from 'framer-motion'
@@ -40,23 +40,23 @@ export default function Login({ onLogin }: LoginProps) {
 
   return (
     <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-background px-4 py-10">
-      {/* React Bits SoftAurora 背景 — OGL WebGL，兼容 React 19 */}
+      {/* SoftAurora 背景 — 保持品牌感但比原版更克制 */}
       <div
-        className="pointer-events-none absolute inset-0 opacity-40 dark:opacity-30"
+        className="pointer-events-none absolute inset-0 opacity-35 dark:opacity-25"
         aria-hidden="true"
       >
         <SoftAurora
           color1="#0d9488"
           color2="#2dd4bf"
-          speed={0.4}
-          scale={1.2}
-          brightness={0.9}
+          speed={0.35}
+          scale={1.1}
+          brightness={0.75}
           bandHeight={0.5}
-          bandSpread={1.2}
-          noiseFrequency={2.0}
-          noiseAmplitude={0.8}
-          layerOffset={0.4}
-          colorSpeed={0.6}
+          bandSpread={1.0}
+          noiseFrequency={1.8}
+          noiseAmplitude={0.6}
+          layerOffset={0.35}
+          colorSpeed={0.5}
           enableMouseInteraction={false}
         />
       </div>
@@ -72,89 +72,90 @@ export default function Login({ onLogin }: LoginProps) {
         transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
         className="relative z-10 w-full max-w-sm"
       >
-        {/* 品牌标识 */}
-        <div className="mb-8 flex items-center gap-3">
-          <img src="/favicon.svg" alt="Codex-Pool" className="h-9 w-9 rounded-xl" />
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-widest text-default-400">
-              Codex
-            </p>
-            <p className="text-sm font-semibold leading-none text-foreground">Pool</p>
-          </div>
-        </div>
+        <Card className="border-small border-default-200 bg-content1/80 shadow-medium backdrop-blur-lg">
+          <CardBody className="px-6 py-8">
+            {/* 品牌标识 */}
+            <div className="mb-8 flex items-center gap-3">
+              <img src="/favicon.svg" alt="Codex-Pool" className="h-9 w-9 rounded-xl" />
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-widest text-default-400">
+                  Codex
+                </p>
+                <p className="text-sm font-semibold leading-none text-foreground">Pool</p>
+              </div>
+            </div>
 
-        {/* 标题区 */}
-        <div className="mb-6 space-y-1.5">
-          <h1 className="text-2xl font-semibold tracking-[-0.02em] text-foreground">
-            {t('login.title')}
-          </h1>
-          <p className="text-sm text-default-600">
-            {t('login.subtitle')}
-          </p>
-        </div>
+            {/* 标题区 */}
+            <div className="mb-6 space-y-1.5">
+              <h1 className="text-2xl font-semibold tracking-[-0.02em] text-foreground">
+                {t('login.title')}
+              </h1>
+              <p className="text-sm text-default-500">
+                {t('login.subtitle')}
+              </p>
+            </div>
 
-        <Form
-          className="flex flex-col gap-3"
-          validationBehavior="native"
-          onSubmit={submit}
-        >
-          <Input
-            isRequired
-            autoFocus
-            autoComplete="username"
-            label={t('login.username')}
-            labelPlacement="outside"
-            name="username"
-            placeholder={t('login.usernamePlaceholder')}
-            size="md"
-            value={username}
-            onValueChange={setUsername}
-            classNames={{ inputWrapper: 'bg-content2/60' }}
-          />
+            <Form
+              className="flex flex-col gap-3"
+              validationBehavior="native"
+              onSubmit={submit}
+            >
+              <Input
+                isRequired
+                autoFocus
+                autoComplete="username"
+                label={t('login.username')}
+                labelPlacement="outside"
+                name="username"
+                placeholder={t('login.usernamePlaceholder')}
+                size="md"
+                value={username}
+                onValueChange={setUsername}
+              />
 
-          <Input
-            isRequired
-            autoComplete="current-password"
-            label={t('login.password')}
-            labelPlacement="outside"
-            name="password"
-            placeholder={t('login.passwordPlaceholder')}
-            size="md"
-            type={showPassword ? 'text' : 'password'}
-            value={password}
-            onValueChange={setPassword}
-            endContent={(
-              <button
-                type="button"
-                className="text-default-400 transition-colors hover:text-foreground focus:outline-none"
-                aria-label={
-                  showPassword
-                    ? t('login.hidePassword')
-                    : t('login.showPassword')
-                }
-                onClick={() => setShowPassword((c) => !c)}
+              <Input
+                isRequired
+                autoComplete="current-password"
+                label={t('login.password')}
+                labelPlacement="outside"
+                name="password"
+                placeholder={t('login.passwordPlaceholder')}
+                size="md"
+                type={showPassword ? 'text' : 'password'}
+                value={password}
+                onValueChange={setPassword}
+                endContent={(
+                  <button
+                    type="button"
+                    className="text-default-400 transition-colors hover:text-foreground focus:outline-none"
+                    aria-label={
+                      showPassword
+                        ? t('login.hidePassword')
+                        : t('login.showPassword')
+                    }
+                    onClick={() => setShowPassword((c) => !c)}
+                  >
+                    <Icon
+                      icon={showPassword ? 'solar:eye-bold' : 'solar:eye-closed-linear'}
+                      className="text-lg"
+                    />
+                  </button>
+                )}
+              />
+
+              <Button
+                className="mt-2 w-full font-medium"
+                color="primary"
+                isDisabled={!username.trim() || !password}
+                isLoading={loading}
+                size="md"
+                type="submit"
               >
-                <Icon
-                  icon={showPassword ? 'solar:eye-bold' : 'solar:eye-closed-linear'}
-                  className="text-lg"
-                />
-              </button>
-            )}
-            classNames={{ inputWrapper: 'bg-content2/60' }}
-          />
-
-          <Button
-            className="mt-1 w-full font-medium"
-            color="primary"
-            isDisabled={!username.trim() || !password}
-            isLoading={loading}
-            size="md"
-            type="submit"
-          >
-            {t('login.submit')}
-          </Button>
-        </Form>
-
+                {t('login.submit')}
+              </Button>
+            </Form>
+          </CardBody>
+        </Card>
       </motion.div>
     </div>
   )

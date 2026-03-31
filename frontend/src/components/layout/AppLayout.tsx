@@ -44,6 +44,7 @@ interface AppLayoutProps {
   onLogout: () => void;
   capabilities?: SystemCapabilitiesResponse;
   menuGroups?: AppLayoutMenuGroup[];
+  username?: string;
 }
 
 export interface AppLayoutMenuItem {
@@ -68,6 +69,7 @@ export default function AppLayout({
   onLogout,
   capabilities,
   menuGroups,
+  username,
 }: AppLayoutProps) {
   const { t } = useTranslation();
   const location = useLocation();
@@ -387,43 +389,56 @@ export default function AppLayout({
           ))}
         </nav>
 
-        {/* Sidebar footer */}
+        {/* Sidebar footer — user info + collapse toggle */}
         <div
           className={cn(
-            "flex shrink-0 items-center border-t border-default-100 p-3",
-            collapsed ? "flex-col gap-2" : "justify-between",
+            "flex shrink-0 flex-col gap-2 border-t border-default-100 p-3",
           )}
         >
-          <AnimatePresence initial={false}>
-            {!collapsed && (
-              <motion.div
-                key="footer-status"
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1, transition: { duration: 0.1, delay: 0.08 } }}
-                exit={{ opacity: 0, transition: { duration: 0.05 } }}
-                className="flex items-center gap-2"
-              >
-                <span className="h-2 w-2 animate-pulse rounded-full bg-success shadow-small" />
-                <span className="text-xs text-default-400">
-                  {t("nav.online", { defaultValue: "Online" })}
-                </span>
-              </motion.div>
-            )}
-          </AnimatePresence>
+          {/* User info row */}
+          <Tooltip content={username ?? 'admin'} placement="right" isDisabled={!collapsed}>
+            <div className={cn(
+              "flex items-center gap-2.5 rounded-xl px-2 py-1.5",
+              collapsed && "justify-center px-0",
+            )}>
+              <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary/15 text-[11px] font-semibold text-primary">
+                {(username ?? 'A').charAt(0).toUpperCase()}
+              </div>
+              <AnimatePresence initial={false}>
+                {!collapsed && (
+                  <motion.div
+                    key="footer-user"
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1, transition: { duration: 0.1, delay: 0.08 } }}
+                    exit={{ opacity: 0, transition: { duration: 0.05 } }}
+                    className="min-w-0 flex-1"
+                  >
+                    <p className="truncate text-xs font-medium text-foreground">{username ?? 'admin'}</p>
+                    <div className="flex items-center gap-1.5">
+                      <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-success" />
+                      <span className="text-[10px] text-default-400">
+                        {t("nav.online", { defaultValue: "Online" })}
+                      </span>
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
+          </Tooltip>
+
+          {/* Collapse toggle */}
           <Tooltip
             content={
               collapsed
                 ? t("common.expandSidebar", { defaultValue: "Expand sidebar" })
-                : t("common.collapseSidebar", {
-                    defaultValue: "Collapse sidebar",
-                  })
+                : t("common.collapseSidebar", { defaultValue: "Collapse sidebar" })
             }
             placement="right"
           >
             <Button
               isIconOnly
               variant="flat"
-              className="hidden md:flex bg-default-100 hover:bg-default-200"
+              className="hidden w-full md:flex bg-default-100 hover:bg-default-200"
               size="sm"
               aria-label={collapsed
                 ? t("common.expandSidebar", { defaultValue: "Expand sidebar" })
