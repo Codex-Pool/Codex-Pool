@@ -335,6 +335,30 @@ export interface AccountPoolActionResponse {
   items: AccountPoolActionItem[]
 }
 
+export interface AccountPoolResponsesTestRequest {
+  model: string
+  input: string
+  previous_response_id?: string
+}
+
+export interface AccountPoolResponsesTestUsage {
+  input_tokens?: number
+  cached_input_tokens?: number
+  output_tokens?: number
+  reasoning_tokens?: number
+}
+
+export interface AccountPoolResponsesTestResponse {
+  response_id: string
+  assistant_text: string
+  request_id: string
+  model: string
+  status_code: number
+  latency_ms: number
+  usage?: AccountPoolResponsesTestUsage
+  previous_response_id?: string
+}
+
 export const accountsApi = {
   listAccounts: async () => {
     const response = await apiClient.get<UpstreamAccount[]>('/upstream-accounts')
@@ -497,6 +521,18 @@ export const accountPoolApi = {
         record_ids: recordIds,
       },
       { timeout: ACCOUNT_BATCH_MUTATION_TIMEOUT_MS },
+    )
+    return response.data
+  },
+
+  testResponses: async (
+    recordId: string,
+    payload: AccountPoolResponsesTestRequest,
+  ) => {
+    const response = await apiClient.post<AccountPoolResponsesTestResponse>(
+      `/account-pool/accounts/${recordId}/responses/test`,
+      payload,
+      { timeout: ACCOUNT_MUTATION_TIMEOUT_MS },
     )
     return response.data
   },

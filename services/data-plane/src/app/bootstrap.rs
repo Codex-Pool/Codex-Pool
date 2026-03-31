@@ -33,7 +33,7 @@ use crate::event::redis_sink::RedisStreamEventSink;
 use crate::event::{EventSink, NoopEventSink, SplitEventSink};
 use crate::outbound_proxy_runtime::OutboundProxyRuntime;
 use crate::proxy::{
-    proxy_handler, proxy_websocket_handler, responses_cancel_handler,
+    account_responses_test_handler, proxy_handler, proxy_websocket_handler, responses_cancel_handler,
     responses_input_items_handler, responses_input_tokens_handler, responses_retrieve_handler,
     BackgroundResponsesRuntime,
 };
@@ -714,6 +714,18 @@ async fn build_app_with_options(
 
         app = app.merge(internal_metrics_routes);
     }
+
+    let internal_responses_test_routes = Router::new()
+        .route(
+            "/internal/v1/upstream-accounts/{account_id}/responses/test",
+            post(account_responses_test_handler),
+        )
+        .route_layer(middleware::from_fn_with_state(
+            state.clone(),
+            require_internal_service_token,
+        ));
+
+    app = app.merge(internal_responses_test_routes);
 
     if include_status_routes {
         app = app

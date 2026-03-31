@@ -223,6 +223,11 @@ impl RoundRobinRouter {
         self.pick_specific(account_id)
     }
 
+    pub fn get_account_any_state(&self, account_id: Uuid) -> Option<UpstreamAccount> {
+        let accounts = self.accounts.read().unwrap();
+        accounts.iter().find(|item| item.id == account_id).cloned()
+    }
+
     pub fn sticky_stats(&self) -> StickyRoutingStats {
         StickyRoutingStats {
             sticky_session_total: self.sticky_session_total.load(Ordering::Relaxed),

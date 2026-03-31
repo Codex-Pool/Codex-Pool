@@ -113,3 +113,70 @@ test("locale files expose account-pool usage wording and reason-code mappings", 
   assert.match(zh, /unknown:\s*"未知阻断原因"/, "zh-CN should include an unknown account-pool reason-code fallback");
   assert.match(en, /unknown:\s*"Unknown blocking reason"/, "en should include an unknown account-pool reason-code fallback");
 });
+
+test("Accounts detail modal exposes the runtime-only real responses testing panel through HeroUI primitives", async () => {
+  const source = await readFile(path.join(ROOT, "pages/Accounts.tsx"), "utf8");
+  const zh = await readFile(path.join(ROOT, "locales/zh-CN.ts"), "utf8");
+  const en = await readFile(path.join(ROOT, "locales/en.ts"), "utf8");
+
+  assert.match(
+    source,
+    /accountPoolApi\.testResponses/,
+    "Accounts should call the dedicated account-pool responses test endpoint",
+  );
+  assert.match(
+    source,
+    /accountsApi\.getOAuthStatus/,
+    "Accounts should prefer runtime account supported_models for the test model options",
+  );
+  assert.match(
+    source,
+    /modelsApi\.listModels/,
+    "Accounts should fall back to the global models list when account-specific models are unavailable",
+  );
+  assert.match(
+    source,
+    /record_scope === 'runtime'/,
+    "Accounts should only expose the interactive testing panel for runtime records",
+  );
+  assert.match(
+    source,
+    /previousResponseId/,
+    "Accounts should keep track of previous_response_id for lightweight in-modal follow-up turns",
+  );
+  assert.match(
+    source,
+    /<Textarea/,
+    "Accounts should render the test prompt input with HeroUI Textarea",
+  );
+  assert.match(
+    source,
+    /<Select/,
+    "Accounts should render the test model picker with HeroUI Select",
+  );
+  assert.match(
+    source,
+    /accountPool\.detail\.sections\.realTest/,
+    "Accounts should localize the new real test section title through accountPool.detail.sections.realTest",
+  );
+  assert.match(
+    zh,
+    /realTest:\s*"真实测试"/,
+    "zh-CN should define the real responses test section title",
+  );
+  assert.match(
+    en,
+    /realTest:\s*"Real test"/,
+    "en should define the real responses test section title",
+  );
+  assert.match(
+    zh,
+    /runtimeOnly:\s*"首版真实测试仅支持 runtime 记录"/,
+    "zh-CN should explain the runtime-only limitation for the first version",
+  );
+  assert.match(
+    en,
+    /runtimeOnly:\s*"The first version of real testing only supports runtime records"/,
+    "en should explain the runtime-only limitation for the first version",
+  );
+});

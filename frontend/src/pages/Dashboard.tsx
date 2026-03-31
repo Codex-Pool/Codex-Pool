@@ -62,13 +62,6 @@ import {
 import { formatDurationMs } from '@/lib/duration-format'
 import { cn } from '@/lib/utils'
 
-const POOL_TONE_CLASS_NAMES = {
-  brand: 'border-primary-200 bg-primary-50 text-primary-700 dark:bg-primary/10 dark:text-primary-300',
-  success: 'border-success-200 bg-success-50 text-success-700 dark:bg-success/10 dark:text-success-300',
-  warning: 'border-warning-200 bg-warning-50 text-warning-700 dark:bg-warning/10 dark:text-warning-300',
-  danger: 'border-danger-200 bg-danger-50 text-danger-700 dark:bg-danger/10 dark:text-danger-300',
-} as const
-
 const POOL_PROGRESS_COLORS = {
   brand: 'primary',
   success: 'success',

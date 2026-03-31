@@ -57,6 +57,7 @@ const SEC_WEBSOCKET_PROTOCOL_HEADER: &str = "sec-websocket-protocol";
 const CODEX_CLIENT_VERSION_QUERY_KEY: &str = "client_version";
 const CODEX_MODELS_PATH_SUFFIX: &str = "/models";
 const CONVERSATION_ID_HEADER: &str = "conversation_id";
+const INTERNAL_REQUEST_ID_HEADER: &str = "x-request-id";
 const AUTH_ERROR_EJECTION_MULTIPLIER: u64 = 10;
 const AUTH_ERROR_EJECTION_MIN_SEC: u64 = 120;
 const AUTH_ERROR_EJECTION_MAX_SEC: u64 = 1800;
@@ -104,6 +105,45 @@ struct InternalOAuthRefreshPayload {
     has_access_token_fallback: bool,
     #[serde(default)]
     refresh_credential_state: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+struct ForcedAccountSelection {
+    account_id: Uuid,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct InternalAccountResponsesTestRequest {
+    model: String,
+    input: String,
+    #[serde(default)]
+    previous_response_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InternalAccountResponsesTestUsage {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    input_tokens: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    cached_input_tokens: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    output_tokens: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reasoning_tokens: Option<i64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InternalAccountResponsesTestResponse {
+    response_id: String,
+    assistant_text: String,
+    request_id: String,
+    model: String,
+    status_code: u16,
+    latency_ms: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    usage: Option<InternalAccountResponsesTestUsage>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    previous_response_id: Option<String>,
 }
 
 #[derive(Debug, Default)]
@@ -365,11 +405,246 @@ struct InternalBillingErrorBody {
     message: String,
 }
 
+fn internal_json_error(status: StatusCode, code: &'static str, message: &'static str) -> Response {
+    axum::response::IntoResponse::into_response((
+        status,
+        axum::Json(ErrorEnvelope::new(code, message)),
+    ))
+}
+
+fn ensure_internal_request_id(headers: &mut HeaderMap) -> String {
+    let request_id = headers
+        .get(INTERNAL_REQUEST_ID_HEADER)
+        .and_then(|value| value.to_str().ok())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToString::to_string)
+        .unwrap_or_else(|| Uuid::new_v4().to_string());
+    if let Ok(header_value) = HeaderValue::from_str(&request_id) {
+        headers.insert(
+            HeaderName::from_static(INTERNAL_REQUEST_ID_HEADER),
+            header_value,
+        );
+    }
+    request_id
+}
+
+fn normalize_internal_responses_test_request(
+    payload: InternalAccountResponsesTestRequest,
+) -> Result<InternalAccountResponsesTestRequest, Response> {
+    let model = payload.model.trim().to_string();
+    if model.is_empty() {
+        return Err(internal_json_error(
+            StatusCode::BAD_REQUEST,
+            "invalid_request",
+            "model must not be empty",
+        ));
+    }
+
+    let input = payload.input.trim().to_string();
+    if input.is_empty() {
+        return Err(internal_json_error(
+            StatusCode::BAD_REQUEST,
+            "invalid_request",
+            "input must not be empty",
+        ));
+    }
+
+    Ok(InternalAccountResponsesTestRequest {
+        model,
+        input,
+        previous_response_id: payload
+            .previous_response_id
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty()),
+    })
+}
+
+fn extract_internal_responses_test_assistant_text(value: &Value) -> Option<String> {
+    if let Some(output_text) = value.get("output_text").and_then(Value::as_str) {
+        let normalized = output_text.trim();
+        if !normalized.is_empty() {
+            return Some(normalized.to_string());
+        }
+    }
+
+    let mut parts = Vec::new();
+    let Some(output_items) = value.get("output").and_then(Value::as_array) else {
+        return None;
+    };
+
+    for item in output_items {
+        if let Some(text) = item.get("text").and_then(Value::as_str) {
+            let normalized = text.trim();
+            if !normalized.is_empty() {
+                parts.push(normalized.to_string());
+            }
+        }
+
+        let Some(content_items) = item.get("content").and_then(Value::as_array) else {
+            continue;
+        };
+        for content in content_items {
+            if content.get("type").and_then(Value::as_str) != Some("output_text") {
+                continue;
+            }
+            let Some(text) = content.get("text").and_then(Value::as_str) else {
+                continue;
+            };
+            let normalized = text.trim();
+            if !normalized.is_empty() {
+                parts.push(normalized.to_string());
+            }
+        }
+    }
+
+    let combined = parts.join("\n\n");
+    (!combined.trim().is_empty()).then_some(combined)
+}
+
+fn extract_internal_responses_test_usage(value: &Value) -> Option<InternalAccountResponsesTestUsage> {
+    let usage = value.get("usage")?;
+    Some(InternalAccountResponsesTestUsage {
+        input_tokens: usage.get("input_tokens").and_then(Value::as_i64),
+        cached_input_tokens: usage.get("cached_input_tokens").and_then(Value::as_i64),
+        output_tokens: usage.get("output_tokens").and_then(Value::as_i64),
+        reasoning_tokens: usage.get("reasoning_tokens").and_then(Value::as_i64),
+    })
+}
+
+async fn normalize_internal_responses_test_response(
+    request_id: String,
+    previous_response_id: Option<String>,
+    started: Instant,
+    response: Response,
+) -> Response {
+    let status = response.status();
+    if !status.is_success() {
+        return response;
+    }
+
+    let (parts, body) = response.into_parts();
+    let body = match axum::body::to_bytes(body, usize::MAX).await {
+        Ok(body) => body,
+        Err(_) => {
+            return internal_json_error(
+                StatusCode::BAD_GATEWAY,
+                "invalid_upstream_response",
+                "failed to read upstream responses body",
+            );
+        }
+    };
+    let value: Value = match serde_json::from_slice(&body) {
+        Ok(value) => value,
+        Err(_) => {
+            return internal_json_error(
+                StatusCode::BAD_GATEWAY,
+                "invalid_upstream_response",
+                "upstream responses body was not valid json",
+            );
+        }
+    };
+    let Some(response_id) = value.get("id").and_then(Value::as_str).map(str::trim) else {
+        return internal_json_error(
+            StatusCode::BAD_GATEWAY,
+            "invalid_upstream_response",
+            "upstream responses body did not include an id",
+        );
+    };
+    if response_id.is_empty() {
+        return internal_json_error(
+            StatusCode::BAD_GATEWAY,
+            "invalid_upstream_response",
+            "upstream responses body did not include an id",
+        );
+    }
+
+    let model = value
+        .get("model")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or_default()
+        .to_string();
+    let payload = InternalAccountResponsesTestResponse {
+        response_id: response_id.to_string(),
+        assistant_text: extract_internal_responses_test_assistant_text(&value).unwrap_or_default(),
+        request_id,
+        model,
+        status_code: parts.status.as_u16(),
+        latency_ms: started.elapsed().as_millis() as u64,
+        usage: extract_internal_responses_test_usage(&value),
+        previous_response_id,
+    };
+    axum::response::IntoResponse::into_response((parts.status, axum::Json(payload)))
+}
+
+pub async fn account_responses_test_handler(
+    axum::extract::Path(account_id): axum::extract::Path<Uuid>,
+    State(state): State<std::sync::Arc<AppState>>,
+    mut headers: HeaderMap,
+    axum::Json(payload): axum::Json<InternalAccountResponsesTestRequest>,
+) -> Response {
+    let payload = match normalize_internal_responses_test_request(payload) {
+        Ok(payload) => payload,
+        Err(response) => return response,
+    };
+    let Some(_account) = state.router.get_account_any_state(account_id) else {
+        return internal_json_error(StatusCode::NOT_FOUND, "not_found", "resource not found");
+    };
+    let request_id = ensure_internal_request_id(&mut headers);
+    let request_body = serde_json::json!({
+        "model": payload.model,
+        "input": payload.input,
+        "previous_response_id": payload.previous_response_id,
+    });
+    let mut request = match Request::builder()
+        .method(axum::http::Method::POST)
+        .uri("/v1/responses")
+        .header(axum::http::header::CONTENT_TYPE, "application/json")
+        .body(Body::from(request_body.to_string()))
+    {
+        Ok(request) => request,
+        Err(_) => {
+            return internal_json_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "internal_error",
+                "failed to build upstream request",
+            );
+        }
+    };
+    if let Ok(header_value) = HeaderValue::from_str(&request_id) {
+        request
+            .headers_mut()
+            .insert(
+                HeaderName::from_static(INTERNAL_REQUEST_ID_HEADER),
+                header_value,
+            );
+    }
+    request
+        .extensions_mut()
+        .insert(ForcedAccountSelection { account_id });
+
+    let started = Instant::now();
+    let response = proxy_handler(State(state), request).await;
+    normalize_internal_responses_test_response(
+        request_id,
+        payload.previous_response_id,
+        started,
+        response,
+    )
+    .await
+}
+
 pub async fn proxy_handler(
     State(state): State<std::sync::Arc<AppState>>,
     request: Request<Body>,
 ) -> Response {
     let principal = request.extensions().get::<ApiPrincipal>().cloned();
+    let forced_account_selection = request
+        .extensions()
+        .get::<ForcedAccountSelection>()
+        .cloned();
     let (parts, body) = request.into_parts();
     let path = parts.uri.path().to_string();
     let query = parts.uri.query().map(|v| v.to_string());
@@ -658,6 +933,7 @@ pub async fn proxy_handler(
     let mut last_failure: Option<(Response, StatusCode, Uuid)> = None;
     let mut did_cross_account_failover = false;
     let mut forced_distinct_failover_round = false;
+    let allow_cross_account_failover = forced_account_selection.is_none();
 
     if let Some(sticky_key) = sticky_key.as_deref() {
         if let Ok(Some(account_id)) = state.routing_cache.get_sticky_account_id(sticky_key).await {
@@ -666,114 +942,151 @@ pub async fn proxy_handler(
     }
 
     loop {
-        let alive_ring_account = if sticky_key.is_none() {
-            pick_account_from_alive_ring(&state, &tried_account_ids, None).await
-        } else {
-            None
-        };
-        let selected_from_alive_ring = alive_ring_account.is_some();
-        let account = match alive_ring_account.or_else(|| {
-            state.router.pick_for_model(
-                parsed_policy_context.model.as_deref(),
-                sticky_key.as_deref(),
-                &tried_account_ids,
-                state.sticky_prefer_non_conflicting,
-            )
-        }) {
-            Some(account) => account,
-            None => {
-                if state.enable_request_failover
-                    && !forced_distinct_failover_round
-                    && !tried_account_ids.is_empty()
-                    && state.router.enabled_total() >= MIN_DISTINCT_FAILOVER_ATTEMPTS
+        let (account, selected_from_alive_ring) =
+            if let Some(forced_account_selection) = forced_account_selection.as_ref() {
+                match state
+                    .router
+                    .get_account_any_state(forced_account_selection.account_id)
                 {
-                    forced_distinct_failover_round = true;
-                    tried_account_ids.clear();
-                    wait_for_route_update_or_deadline(&state, failover_deadline).await;
-                    continue;
+                    Some(account) => (account, false),
+                    None => {
+                        record_failover_exhausted_if_needed(&state, did_cross_account_failover);
+                        release_billing_hold_best_effort(
+                            state.clone(),
+                            billing_session.take(),
+                            Some(BillingReleaseFailureContext {
+                                release_reason: Some("no_upstream_account".to_string()),
+                                upstream_status_code: Some(StatusCode::NOT_FOUND.as_u16()),
+                                failover_action: Some("return_failure".to_string()),
+                                failover_reason_class: Some("no_upstream_account".to_string()),
+                                cross_account_failover_attempted: Some(did_cross_account_failover),
+                                ..Default::default()
+                            }),
+                        )
+                        .await;
+                        return localized_json_error_with_state(
+                            state.as_ref(),
+                            parsed_policy_context.detected_locale.as_str(),
+                            StatusCode::NOT_FOUND,
+                            "not_found",
+                            "resource not found",
+                        );
+                    }
                 }
-                if state.enable_request_failover && Instant::now() < failover_deadline {
-                    tried_account_ids.clear();
-                    wait_for_route_update_or_deadline(&state, failover_deadline).await;
-                    continue;
-                }
-
-                if let Some((response, status, account_id)) = last_failure.take() {
-                    log_failover_decision(
-                        UpstreamErrorSource::Http,
-                        Some(account_id),
-                        Some(status),
-                        None,
-                        "failover_exhausted",
-                        "none",
-                        "none",
-                        "return_failure",
-                    );
-                    record_failover_exhausted_if_needed(&state, did_cross_account_failover);
-                    emit_request_log_event(
-                        &state,
-                        account_id,
-                        principal.as_ref(),
-                        &path,
-                        method.as_str(),
-                        status,
-                        started,
-                        false,
-                        parsed_policy_context.request_id.as_deref(),
+            } else {
+                let alive_ring_account = if sticky_key.is_none() {
+                    pick_account_from_alive_ring(&state, &tried_account_ids, None).await
+                } else {
+                    None
+                };
+                let selected_from_alive_ring = alive_ring_account.is_some();
+                let account = match alive_ring_account.or_else(|| {
+                    state.router.pick_for_model(
                         parsed_policy_context.model.as_deref(),
-                        parsed_policy_context.requested_service_tier.as_deref(),
+                        sticky_key.as_deref(),
+                        &tried_account_ids,
+                        state.sticky_prefer_non_conflicting,
                     )
-                    .await;
-                    release_billing_hold_best_effort(
-                        state.clone(),
-                        billing_session.take(),
-                        Some(BillingReleaseFailureContext {
-                            release_reason: Some("failover_exhausted".to_string()),
-                            upstream_status_code: Some(status.as_u16()),
-                            failover_action: Some("return_failure".to_string()),
-                            failover_reason_class: Some("failover_exhausted".to_string()),
-                            cross_account_failover_attempted: Some(did_cross_account_failover),
-                            ..Default::default()
-                        }),
-                    )
-                    .await;
-                    return response;
-                }
+                }) {
+                    Some(account) => account,
+                    None => {
+                        if state.enable_request_failover
+                            && !forced_distinct_failover_round
+                            && !tried_account_ids.is_empty()
+                            && state.router.enabled_total() >= MIN_DISTINCT_FAILOVER_ATTEMPTS
+                        {
+                            forced_distinct_failover_round = true;
+                            tried_account_ids.clear();
+                            wait_for_route_update_or_deadline(&state, failover_deadline).await;
+                            continue;
+                        }
+                        if state.enable_request_failover && Instant::now() < failover_deadline {
+                            tried_account_ids.clear();
+                            wait_for_route_update_or_deadline(&state, failover_deadline).await;
+                            continue;
+                        }
 
-                log_failover_decision(
-                    UpstreamErrorSource::Http,
-                    None,
-                    Some(StatusCode::SERVICE_UNAVAILABLE),
-                    None,
-                    "no_upstream_account",
-                    "none",
-                    "none",
-                    "return_failure",
-                );
-                record_failover_exhausted_if_needed(&state, did_cross_account_failover);
-                release_billing_hold_best_effort(
-                    state.clone(),
-                    billing_session.take(),
-                    Some(BillingReleaseFailureContext {
-                        release_reason: Some("no_upstream_account".to_string()),
-                        upstream_status_code: Some(StatusCode::SERVICE_UNAVAILABLE.as_u16()),
-                        failover_action: Some("return_failure".to_string()),
-                        failover_reason_class: Some("no_upstream_account".to_string()),
-                        cross_account_failover_attempted: Some(did_cross_account_failover),
-                        ..Default::default()
-                    }),
-                )
-                .await;
-                return localized_json_error_with_state(
-                    state.as_ref(),
-                    parsed_policy_context.detected_locale.as_str(),
-                    StatusCode::SERVICE_UNAVAILABLE,
-                    "no_upstream_account",
-                    "no enabled upstream account is available",
-                );
-            }
-        };
-        let routing_decision = if selected_from_alive_ring {
+                        if let Some((response, status, account_id)) = last_failure.take() {
+                            log_failover_decision(
+                                UpstreamErrorSource::Http,
+                                Some(account_id),
+                                Some(status),
+                                None,
+                                "failover_exhausted",
+                                "none",
+                                "none",
+                                "return_failure",
+                            );
+                            record_failover_exhausted_if_needed(&state, did_cross_account_failover);
+                            emit_request_log_event(
+                                &state,
+                                account_id,
+                                principal.as_ref(),
+                                &path,
+                                method.as_str(),
+                                status,
+                                started,
+                                false,
+                                parsed_policy_context.request_id.as_deref(),
+                                parsed_policy_context.model.as_deref(),
+                                parsed_policy_context.requested_service_tier.as_deref(),
+                            )
+                            .await;
+                            release_billing_hold_best_effort(
+                                state.clone(),
+                                billing_session.take(),
+                                Some(BillingReleaseFailureContext {
+                                    release_reason: Some("failover_exhausted".to_string()),
+                                    upstream_status_code: Some(status.as_u16()),
+                                    failover_action: Some("return_failure".to_string()),
+                                    failover_reason_class: Some("failover_exhausted".to_string()),
+                                    cross_account_failover_attempted: Some(did_cross_account_failover),
+                                    ..Default::default()
+                                }),
+                            )
+                            .await;
+                            return response;
+                        }
+
+                        log_failover_decision(
+                            UpstreamErrorSource::Http,
+                            None,
+                            Some(StatusCode::SERVICE_UNAVAILABLE),
+                            None,
+                            "no_upstream_account",
+                            "none",
+                            "none",
+                            "return_failure",
+                        );
+                        record_failover_exhausted_if_needed(&state, did_cross_account_failover);
+                        release_billing_hold_best_effort(
+                            state.clone(),
+                            billing_session.take(),
+                            Some(BillingReleaseFailureContext {
+                                release_reason: Some("no_upstream_account".to_string()),
+                                upstream_status_code: Some(StatusCode::SERVICE_UNAVAILABLE.as_u16()),
+                                failover_action: Some("return_failure".to_string()),
+                                failover_reason_class: Some("no_upstream_account".to_string()),
+                                cross_account_failover_attempted: Some(did_cross_account_failover),
+                                ..Default::default()
+                            }),
+                        )
+                        .await;
+                        return localized_json_error_with_state(
+                            state.as_ref(),
+                            parsed_policy_context.detected_locale.as_str(),
+                            StatusCode::SERVICE_UNAVAILABLE,
+                            "no_upstream_account",
+                            "no enabled upstream account is available",
+                        );
+                    }
+                };
+
+                (account, selected_from_alive_ring)
+            };
+        let routing_decision = if forced_account_selection.is_some() {
+            "forced_account"
+        } else if selected_from_alive_ring {
             "alive_ring"
         } else if sticky_key.is_some() {
             "router_with_sticky"
@@ -797,7 +1110,7 @@ pub async fn proxy_handler(
         )
         .await;
 
-        if state.shared_routing_cache_enabled {
+        if forced_account_selection.is_none() && state.shared_routing_cache_enabled {
             if let Ok(true) = state.routing_cache.is_unhealthy(account.id).await {
                 state.router.mark_unhealthy(
                     account.id,
@@ -808,15 +1121,17 @@ pub async fn proxy_handler(
             }
         }
 
-        if let Some(sticky_key) = sticky_key.as_deref() {
-            let _ = state
-                .routing_cache
-                .set_sticky_account_id(
-                    sticky_key,
-                    account.id,
-                    Duration::from_secs(ROUTING_CACHE_STICKY_TTL_SEC),
-                )
-                .await;
+        if forced_account_selection.is_none() {
+            if let Some(sticky_key) = sticky_key.as_deref() {
+                let _ = state
+                    .routing_cache
+                    .set_sticky_account_id(
+                        sticky_key,
+                        account.id,
+                        Duration::from_secs(ROUTING_CACHE_STICKY_TTL_SEC),
+                    )
+                    .await;
+            }
         }
 
         let upstream_url = match build_upstream_url(
@@ -1150,7 +1465,7 @@ pub async fn proxy_handler(
                         "upstream_transport_error",
                         "upstream request failed",
                     );
-                    if should_cross_account_failover(
+                    if allow_cross_account_failover && should_cross_account_failover(
                         &state,
                         parsed_policy_context.model.as_deref(),
                         sticky_key.as_deref(),
@@ -1513,7 +1828,8 @@ pub async fn proxy_handler(
                     continue;
                 }
 
-                let should_failover_across_accounts = should_cross_account_failover(
+                let should_failover_across_accounts = allow_cross_account_failover
+                    && should_cross_account_failover(
                     &state,
                     parsed_policy_context.model.as_deref(),
                     sticky_key.as_deref(),
@@ -1830,7 +2146,8 @@ pub async fn proxy_handler(
                             status,
                             error_context.as_ref(),
                         );
-                        if should_cross_account_failover(
+                        if allow_cross_account_failover
+                            && should_cross_account_failover(
                             &state,
                             parsed_policy_context.model.as_deref(),
                             sticky_key.as_deref(),
@@ -2219,7 +2536,8 @@ pub async fn proxy_handler(
                 continue;
             }
 
-            let should_failover_across_accounts = should_cross_account_failover(
+            let should_failover_across_accounts = allow_cross_account_failover
+                && should_cross_account_failover(
                 &state,
                 parsed_policy_context.model.as_deref(),
                 sticky_key.as_deref(),
@@ -3808,6 +4126,155 @@ mod entry_route_selection_tests {
         .expect("alive ring should skip disallowed free account");
 
         assert_eq!(picked.id, paid.id);
+    }
+
+    #[tokio::test]
+    async fn account_responses_test_handler_targets_disabled_account_and_logs_request_without_tenant()
+    {
+        let upstream = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/v1/responses"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "id": "resp_internal_test",
+                "status": "completed",
+                "model": "gpt-5.4",
+                "usage": {
+                    "input_tokens": 9,
+                    "cached_input_tokens": 0,
+                    "output_tokens": 3,
+                    "reasoning_tokens": 0
+                },
+                "output": [{
+                    "type": "message",
+                    "content": [{
+                        "type": "output_text",
+                        "text": "pong"
+                    }]
+                }]
+            })))
+            .mount(&upstream)
+            .await;
+
+        let control_plane = MockServer::start().await;
+        let account = UpstreamAccount {
+            id: Uuid::new_v4(),
+            label: "internal-test-disabled".to_string(),
+            mode: UpstreamMode::CodexOauth,
+            base_url: upstream.uri(),
+            bearer_token: "internal-test-token".to_string(),
+            chatgpt_account_id: Some("acct-internal-test".to_string()),
+            enabled: false,
+            priority: 100,
+            created_at: chrono::Utc::now(),
+        };
+        let live_result_path = format!(
+            "/internal/v1/upstream-accounts/{}/health/live-result",
+            account.id
+        );
+        let seen_ok_path = format!("/internal/v1/upstream-accounts/{}/health/seen-ok", account.id);
+        let model_seen_ok_path =
+            format!("/internal/v1/upstream-accounts/{}/models/seen-ok", account.id);
+
+        Mock::given(method("POST"))
+            .and(path(live_result_path.clone()))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({"ok": true})))
+            .mount(&control_plane)
+            .await;
+        Mock::given(method("POST"))
+            .and(path(seen_ok_path.clone()))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({"ok": true})))
+            .mount(&control_plane)
+            .await;
+        Mock::given(method("POST"))
+            .and(path(model_seen_ok_path.clone()))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({"ok": true})))
+            .mount(&control_plane)
+            .await;
+
+        let reporter = SeenOkReporter::new(
+            control_plane.uri(),
+            Arc::<str>::from("cp-internal-test-token"),
+            Duration::from_millis(250),
+            Duration::from_secs(0),
+        )
+        .expect("reporter must build");
+        let sink = Arc::new(RecordingSink::default());
+        let state = test_state_with_sink_and_reporter(
+            vec![account.clone()],
+            sink.clone(),
+            Some(Arc::new(reporter)),
+        );
+
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            HeaderName::from_static(INTERNAL_REQUEST_ID_HEADER),
+            HeaderValue::from_static("req-internal-responses-test"),
+        );
+        let response = account_responses_test_handler(
+            axum::extract::Path(account.id),
+            State(state),
+            headers,
+            axum::Json(InternalAccountResponsesTestRequest {
+                model: "gpt-5.4".to_string(),
+                input: "ping".to_string(),
+                previous_response_id: Some("resp_previous".to_string()),
+            }),
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = response
+            .into_body()
+            .collect()
+            .await
+            .expect("body")
+            .to_bytes();
+        let payload: Value = serde_json::from_slice(&body).expect("json body");
+        assert_eq!(payload["response_id"], "resp_internal_test");
+        assert_eq!(payload["assistant_text"], "pong");
+        assert_eq!(payload["request_id"], "req-internal-responses-test");
+        assert_eq!(payload["model"], "gpt-5.4");
+        assert_eq!(payload["status_code"], 200);
+        assert_eq!(payload["previous_response_id"], "resp_previous");
+        assert_eq!(payload["usage"]["input_tokens"], 9);
+        assert_eq!(payload["usage"]["output_tokens"], 3);
+
+        let upstream_requests = upstream.received_requests().await.unwrap();
+        assert_eq!(upstream_requests.len(), 1);
+        assert_eq!(upstream_requests[0].url.path(), "/v1/responses");
+        let upstream_body: Value =
+            serde_json::from_slice(&upstream_requests[0].body).expect("upstream body json");
+        assert_eq!(upstream_body["model"], "gpt-5.4");
+        assert_eq!(upstream_body["input"], "ping");
+        assert_eq!(upstream_body["previous_response_id"], "resp_previous");
+
+        let mut live_result_body: Option<Value> = None;
+        for _ in 0..20 {
+            let requests = control_plane.received_requests().await.unwrap();
+            if let Some(request) = requests
+                .iter()
+                .find(|request| request.url.path() == live_result_path)
+            {
+                live_result_body = Some(serde_json::from_slice(&request.body).unwrap());
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        let live_result_body = live_result_body.expect("passive live-result report");
+        assert_eq!(live_result_body["source"], "passive");
+        assert_eq!(live_result_body["status"], "ok");
+
+        let events = sink.events();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].account_id, account.id);
+        assert_eq!(events[0].tenant_id, None);
+        assert_eq!(events[0].api_key_id, None);
+        assert_eq!(events[0].path, "/v1/responses");
+        assert_eq!(events[0].status_code, 200);
+        assert_eq!(
+            events[0].request_id.as_deref(),
+            Some("req-internal-responses-test")
+        );
     }
 
     #[tokio::test]

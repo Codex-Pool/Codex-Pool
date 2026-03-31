@@ -33,6 +33,21 @@ test('accountsApi exposes the main branch account management surface', () => {
   })
 })
 
+test('accountPoolApi exposes the account-pool detail testing surface', async () => {
+  const source = await readFile(ACCOUNTS_API_PATH, 'utf8')
+
+  ;[
+    'getSummary',
+    'listRecords',
+    'getRecord',
+    'getSignalHeatmap',
+    'runAction',
+    'testResponses',
+  ].forEach((method) => {
+    assert.match(source, new RegExp(`${method}\\s*:`))
+  })
+})
+
 test('adminTenantsApi exposes the main branch tenant management surface', () => {
   const requiredMethods = [
     'listTenants',

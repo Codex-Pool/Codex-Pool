@@ -28,6 +28,7 @@ import {
   TableColumn,
   TableHeader,
   TableRow,
+  Textarea,
   type Selection,
   type SortDescriptor,
 } from '@heroui/react'
@@ -43,14 +44,17 @@ import {
 import { useTranslation } from 'react-i18next'
 
 import {
+  accountsApi,
   accountPoolApi,
   type AccountPoolAction,
   type AccountPoolOperatorState,
   type AccountPoolReasonClass,
   type AccountPoolRecord,
   type AccountPoolRecordScope,
+  type AccountPoolResponsesTestResponse,
 } from '@/api/accounts'
 import { localizeApiErrorDisplay, localizeOAuthErrorCodeDisplay } from '@/api/errorI18n'
+import { modelsApi } from '@/api/models'
 import { SignalHeatmapCanvas, SignalHeatmapMini } from '@/features/accounts/signal-heatmap-canvas'
 import {
   sortAccountPoolRecords,
@@ -75,6 +79,14 @@ import { cn } from '@/lib/utils'
 type StateFilter = 'all' | AccountPoolOperatorState
 type ScopeFilter = 'all' | AccountPoolRecordScope
 type ReasonClassFilter = 'all' | AccountPoolReasonClass
+type ResponsesTestMessageRole = 'user' | 'assistant'
+
+interface AccountPoolResponsesTestMessage {
+  id: string
+  role: ResponsesTestMessageRole
+  text: string
+  meta?: AccountPoolResponsesTestResponse
+}
 
 const TABLE_PAGE_SIZE_OPTIONS = [10, 20, 50]
 const ACCOUNT_POOL_SORTABLE_COLUMNS = new Set<AccountPoolSortColumn>([
@@ -116,6 +128,40 @@ function formatDateTime(value?: string) {
     return '-'
   }
   return formatAbsoluteDateTime(value)
+}
+
+function resolveResponsesTestUsageLines(
+  response: AccountPoolResponsesTestResponse | undefined,
+  t: ReturnType<typeof useTranslation>['t'],
+) {
+  if (!response?.usage) {
+    return []
+  }
+
+  const items = [
+    {
+      key: 'input_tokens',
+      label: t('accountPool.detail.test.inputTokens'),
+      value: response.usage.input_tokens,
+    },
+    {
+      key: 'cached_input_tokens',
+      label: t('accountPool.detail.test.cachedInputTokens'),
+      value: response.usage.cached_input_tokens,
+    },
+    {
+      key: 'output_tokens',
+      label: t('accountPool.detail.test.outputTokens'),
+      value: response.usage.output_tokens,
+    },
+    {
+      key: 'reasoning_tokens',
+      label: t('accountPool.detail.test.reasoningTokens'),
+      value: response.usage.reasoning_tokens,
+    },
+  ]
+
+  return items.filter((item) => typeof item.value === 'number')
 }
 
 function getStateColor(state: AccountPoolOperatorState) {
@@ -550,6 +596,11 @@ export default function Accounts() {
   const [currentPage, setCurrentPage] = useState(1)
   const [sortDescriptor, setSortDescriptor] = useState<SortDescriptor | null>(null)
   const [selectedRecordId, setSelectedRecordId] = useState<string | null>(null)
+  const [testPrompt, setTestPrompt] = useState('')
+  const [selectedTestModel, setSelectedTestModel] = useState('')
+  const [testMessages, setTestMessages] = useState<AccountPoolResponsesTestMessage[]>([])
+  const [previousResponseId, setPreviousResponseId] = useState<string | null>(null)
+  const [testError, setTestError] = useState<string | null>(null)
   /** 乐观反馈：记录 ID → 当前动效状态 */
   const [rowFeedback, setRowFeedback] = useState<Map<string, 'pending' | 'success' | 'error'>>(new Map())
 
@@ -562,8 +613,19 @@ export default function Accounts() {
     })
   }, [])
 
+  const resetResponsesTestState = useCallback(() => {
+    setTestPrompt('')
+    setSelectedTestModel('')
+    setTestMessages([])
+    setPreviousResponseId(null)
+    setTestError(null)
+  }, [])
+
   const openRecord = useCallback((id: string) => setSelectedRecordId(id), [])
-  const closeRecord = useCallback(() => setSelectedRecordId(null), [])
+  const closeRecord = useCallback(() => {
+    resetResponsesTestState()
+    setSelectedRecordId(null)
+  }, [resetResponsesTestState])
   const [deleteTarget, setDeleteTarget] = useState<AccountPoolRecord | null>(null)
   const locale = i18n.resolvedLanguage ?? i18n.language
 
@@ -596,6 +658,24 @@ export default function Accounts() {
     queryFn: () => accountPoolApi.getSignalHeatmap(selectedRecordId!),
     enabled: Boolean(selectedRecordId),
     staleTime: 15_000,
+    refetchOnWindowFocus: 'always',
+  })
+
+  const isRuntimeRecord = selectedRecord?.record_scope === 'runtime'
+
+  const { data: selectedRuntimeOAuthStatus } = useQuery({
+    queryKey: ['accountPoolRecordOAuthStatus', selectedRecordId],
+    queryFn: () => accountsApi.getOAuthStatus(selectedRecordId!),
+    enabled: isRuntimeRecord,
+    staleTime: 60_000,
+    refetchOnWindowFocus: 'always',
+  })
+
+  const { data: availableModels } = useQuery({
+    queryKey: ['accountPoolResponsesTestModels'],
+    queryFn: modelsApi.listModels,
+    enabled: isRuntimeRecord,
+    staleTime: 60_000,
     refetchOnWindowFocus: 'always',
   })
 
@@ -650,7 +730,7 @@ export default function Accounts() {
       if (variables.action === 'delete') {
         setDeleteTarget(null)
         if (selectedRecordId === variables.record.id) {
-          setSelectedRecordId(null)
+          closeRecord()
         }
       }
 
@@ -749,6 +829,113 @@ export default function Accounts() {
   ]
 
   const selectedLabel = selectedRecord ? getRecordLabel(selectedRecord) : null
+  const testModelOptions = useMemo(() => {
+    const seen = new Set<string>()
+    const options: string[] = []
+
+    ;(selectedRuntimeOAuthStatus?.supported_models ?? []).forEach((model) => {
+      const normalized = model.trim()
+      if (!normalized || seen.has(normalized)) {
+        return
+      }
+      seen.add(normalized)
+      options.push(normalized)
+    })
+
+    ;(availableModels?.data ?? []).forEach((model) => {
+      const normalized = model.id.trim()
+      if (!normalized || seen.has(normalized) || model.availability_status === 'unavailable') {
+        return
+      }
+      seen.add(normalized)
+      options.push(normalized)
+    })
+
+    return options
+  }, [availableModels?.data, selectedRuntimeOAuthStatus?.supported_models])
+
+  useEffect(() => {
+    resetResponsesTestState()
+  }, [resetResponsesTestState, selectedRecordId])
+
+  useEffect(() => {
+    if (selectedRecord?.record_scope !== 'runtime') {
+      setSelectedTestModel('')
+      return
+    }
+
+    setSelectedTestModel((current) => {
+      if (current && testModelOptions.includes(current)) {
+        return current
+      }
+      return testModelOptions[0] ?? ''
+    })
+  }, [selectedRecord?.record_scope, testModelOptions])
+
+  const testMutation = useMutation({
+    mutationFn: (payload: { model: string; input: string; previous_response_id?: string }) => {
+      if (!selectedRecordId) {
+        throw new Error('missing_selected_record')
+      }
+      return accountPoolApi.testResponses(selectedRecordId, payload)
+    },
+    onSuccess: (response, variables) => {
+      const assistantText =
+        response.assistant_text.trim() || t('accountPool.detail.test.emptyAssistant')
+
+      setTestMessages((current) => [
+        ...current,
+        {
+          id: `user-${crypto.randomUUID()}`,
+          role: 'user',
+          text: variables.input,
+        },
+        {
+          id: `assistant-${response.response_id}`,
+          role: 'assistant',
+          text: assistantText,
+          meta: response,
+        },
+      ])
+      setPreviousResponseId(response.response_id)
+      setTestPrompt('')
+      setTestError(null)
+    },
+    onError: (error) => {
+      setTestError(localizeApiErrorDisplay(t, error, t('accountPool.messages.actionFailed')).label)
+    },
+  })
+
+  const clearResponsesConversation = useCallback(() => {
+    setTestMessages([])
+    setPreviousResponseId(null)
+    setTestError(null)
+  }, [])
+
+  const handleSendResponsesTest = useCallback(() => {
+    if (!selectedRecordId || selectedRecord?.record_scope !== 'runtime') {
+      return
+    }
+
+    const input = testPrompt.trim()
+    if (!input || !selectedTestModel) {
+      return
+    }
+
+    setTestError(null)
+    testMutation.mutate({
+      model: selectedTestModel,
+      input,
+      previous_response_id: previousResponseId ?? undefined,
+    })
+  }, [
+    previousResponseId,
+    selectedRecord?.record_scope,
+    selectedRecordId,
+    selectedTestModel,
+    testMutation,
+    testPrompt,
+  ])
 
   return (
     <PageContent className="space-y-6">
@@ -1434,6 +1621,164 @@ export default function Accounts() {
                           {t('accountPool.fields.rateLimitsFetchedAt')}: {formatDateTime(selectedRecord.rate_limits_fetched_at)}
                         </div>
                       </div>
+
+                      <Card
+                        className="border border-default-200/70 bg-content1/70 shadow-none lg:col-span-2"
+                        radius="lg"
+                      >
+                        <CardHeader className="flex flex-col items-start gap-2 px-4 pb-0 pt-4">
+                          <div className="flex w-full flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                            <div className="space-y-1">
+                              <h3 className="text-sm font-semibold text-foreground">
+                                {t('accountPool.detail.sections.realTest')}
+                              </h3>
+                              <p className="text-sm leading-6 text-default-600">
+                                {t('accountPool.detail.test.description')}
+                              </p>
+                            </div>
+                            <Chip size="sm" variant="flat">
+                              {selectedRecord.record_scope === 'runtime'
+                                ? t('accountPool.scope.runtime')
+                                : t('accountPool.scope.inventory')}
+                            </Chip>
+                          </div>
+                        </CardHeader>
+                        <CardBody className="space-y-4 px-4 pb-4 pt-4">
+                          {selectedRecord.record_scope === 'runtime' ? (
+                            <>
+                              <div className="grid gap-4 lg:grid-cols-[minmax(0,220px)_minmax(0,1fr)]">
+                                <Select
+                                  aria-label={t('accountPool.detail.test.modelLabel')}
+                                  disallowEmptySelection
+                                  isDisabled={testMutation.isPending || testModelOptions.length === 0}
+                                  label={t('accountPool.detail.test.modelLabel')}
+                                  placeholder={t('accountPool.detail.test.noModels')}
+                                  selectedKeys={selectedTestModel ? [selectedTestModel] : []}
+                                  size="sm"
+                                  variant="bordered"
+                                  onSelectionChange={(keys) => {
+                                    setSelectedTestModel(normalizeSelection(keys))
+                                  }}
+                                >
+                                  {testModelOptions.map((model) => (
+                                    <SelectItem key={model}>
+                                      {model}
+                                    </SelectItem>
+                                  ))}
+                                </Select>
+                                <Textarea
+                                  aria-label={t('accountPool.detail.test.promptLabel')}
+                                  isDisabled={testMutation.isPending || testModelOptions.length === 0}
+                                  label={t('accountPool.detail.test.promptLabel')}
+                                  minRows={4}
+                                  placeholder={t('accountPool.detail.test.promptPlaceholder')}
+                                  value={testPrompt}
+                                  variant="bordered"
+                                  onValueChange={setTestPrompt}
+                                />
+                              </div>
+
+                              {testModelOptions.length === 0 ? (
+                                <div className="rounded-large border border-dashed border-default-200 px-4 py-3 text-sm text-default-600">
+                                  {t('accountPool.detail.test.noModels')}
+                                </div>
+                              ) : null}
+
+                              {testError ? (
+                                <div className="rounded-large border border-danger/40 px-4 py-3 text-sm text-danger-600">
+                                  {testError}
+                                </div>
+                              ) : null}
+
+                              <div className="flex flex-wrap justify-end gap-2">
+                                <Button
+                                  isDisabled={
+                                    testMutation.isPending
+                                    || (testMessages.length === 0 && !previousResponseId)
+                                  }
+                                  size="sm"
+                                  variant="light"
+                                  onPress={clearResponsesConversation}
+                                >
+                                  {t('accountPool.detail.test.clearSession')}
+                                </Button>
+                                <Button
+                                  color="primary"
+                                  isDisabled={
+                                    testMutation.isPending
+                                    || !selectedTestModel
+                                    || testPrompt.trim().length === 0
+                                  }
+                                  isLoading={testMutation.isPending}
+                                  size="sm"
+                                  onPress={handleSendResponsesTest}
+                                >
+                                  {t('accountPool.detail.test.send')}
+                                </Button>
+                              </div>
+
+                              {testMessages.length > 0 ? (
+                                <div className="space-y-3">
+                                  {testMessages.map((message) => {
+                                    const usageLines = resolveResponsesTestUsageLines(message.meta, t)
+                                    return (
+                                      <Card
+                                        key={message.id}
+                                        className="border border-default-200/70 bg-content1 shadow-none"
+                                        radius="lg"
+                                      >
+                                        <CardBody className="space-y-3 px-4 py-4">
+                                          <div className="flex items-center justify-between gap-3">
+                                            <Chip
+                                              color={message.role === 'assistant' ? 'primary' : 'default'}
+                                              size="sm"
+                                              variant="flat"
+                                            >
+                                              {message.role === 'assistant'
+                                                ? t('accountPool.detail.test.assistantLabel')
+                                                : t('accountPool.detail.test.userLabel')}
+                                            </Chip>
+                                            {message.meta ? (
+                                              <Chip size="sm" variant="flat">
+                                                {t('accountPool.detail.test.latency')}: {message.meta.latency_ms}ms
+                                              </Chip>
+                                            ) : null}
+                                          </div>
+                                          <div className="whitespace-pre-wrap break-words text-sm leading-6 text-foreground">
+                                            {message.text}
+                                          </div>
+                                          {message.meta ? (
+                                            <div className="flex flex-wrap gap-2 text-xs text-default-500">
+                                              <Chip size="sm" variant="flat">
+                                                {t('accountPool.detail.test.requestId')}: {message.meta.request_id}
+                                              </Chip>
+                                              <Chip size="sm" variant="flat">
+                                                {t('accountPool.detail.test.responseId')}: {message.meta.response_id}
+                                              </Chip>
+                                              <Chip size="sm" variant="flat">
+                                                {t('accountPool.detail.test.modelLabel')}: {message.meta.model}
+                                              </Chip>
+                                              {usageLines.map((item) => (
+                                                <Chip key={item.key} size="sm" variant="flat">
+                                                  {item.label}: {item.value}
+                                                </Chip>
+                                              ))}
+                                            </div>
+                                          ) : null}
+                                        </CardBody>
+                                      </Card>
+                                    )
+                                  })}
+                                </div>
+                              ) : null}
+                            </>
+                          ) : (
+                            <div className="rounded-large border border-dashed border-default-200 px-4 py-4 text-sm leading-6 text-default-600">
+                              {t('accountPool.detail.test.runtimeOnly')}
+                            </div>
+                          )}
+                        </CardBody>
+                      </Card>
                     </div>
                   </div>
                 ) : (
@@ -1475,7 +1820,7 @@ export default function Accounts() {
                       {t('accountPool.actions.delete')}
                     </Button>
                   </div>
-                  <Button size="sm" variant="light" onPress={() => setSelectedRecordId(null)}>
+                  <Button size="sm" variant="light" onPress={closeRecord}>
                     {t('common.close')}
                   </Button>
                 </ModalFooter>

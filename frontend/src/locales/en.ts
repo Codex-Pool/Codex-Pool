@@ -1982,7 +1982,28 @@ export default {
                 profile: "Account profile",
                 recentSignal: "Recent signal heatmap",
                 credentials: "Credential posture",
-                quota: "Usage summary"
+                quota: "Usage summary",
+                realTest: "Real test"
+            },
+            test: {
+                description: "Send a real Responses conversation against this runtime account. The result counts as request traffic and does not count as active patrol.",
+                runtimeOnly: "The first version of real testing only supports runtime records",
+                modelLabel: "Test model",
+                promptLabel: "Test input",
+                promptPlaceholder: "Enter the prompt to send through this account…",
+                send: "Send test",
+                clearSession: "Clear session",
+                noModels: "No models available",
+                emptyAssistant: "This response did not return any displayable text.",
+                assistantLabel: "Assistant",
+                userLabel: "User",
+                requestId: "Request ID",
+                responseId: "Response ID",
+                latency: "Latency",
+                inputTokens: "Input tokens",
+                cachedInputTokens: "Cached input tokens",
+                outputTokens: "Output tokens",
+                reasoningTokens: "Reasoning tokens"
             }
         },
         fields: {

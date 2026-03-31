@@ -2240,6 +2240,10 @@ pub fn build_app_with_store_and_services(
             get(get_account_pool_signal_heatmap),
         )
         .route(
+            "/api/v1/account-pool/accounts/{record_id}/responses/test",
+            post(test_account_pool_record_responses),
+        )
+        .route(
             "/api/v1/account-pool/actions",
             post(operate_account_pool_records),
         )

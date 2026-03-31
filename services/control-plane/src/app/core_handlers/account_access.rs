@@ -1239,6 +1239,48 @@ fn account_pool_action_error_item(err: anyhow::Error) -> AccountPoolActionError 
     }
 }
 
+#[derive(Debug, Clone, Deserialize, Serialize)]
+struct AccountPoolResponsesTestRequest {
+    model: String,
+    input: String,
+    #[serde(default)]
+    previous_response_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+struct AccountPoolResponsesTestUsage {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    input_tokens: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    cached_input_tokens: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    output_tokens: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reasoning_tokens: Option<i64>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+struct AccountPoolResponsesTestResponse {
+    response_id: String,
+    assistant_text: String,
+    request_id: String,
+    model: String,
+    status_code: u16,
+    latency_ms: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    usage: Option<AccountPoolResponsesTestUsage>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    previous_response_id: Option<String>,
+}
+
+fn account_pool_responses_test_error(
+    status: StatusCode,
+    code: impl Into<String>,
+    message: impl Into<String>,
+) -> (StatusCode, Json<ErrorEnvelope>) {
+    (status, Json(ErrorEnvelope::new(code, message)))
+}
+
 async fn get_account_pool_summary(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -1369,6 +1411,96 @@ async fn get_account_pool_signal_heatmap(
         item.latest_signal_source = record.last_signal_source.clone();
     }
     Ok(Json(detail))
+}
+
+async fn test_account_pool_record_responses(
+    Path(record_id): Path<Uuid>,
+    State(state): State<AppState>,
+    mut headers: HeaderMap,
+    Json(req): Json<AccountPoolResponsesTestRequest>,
+) -> Result<Json<AccountPoolResponsesTestResponse>, (StatusCode, Json<ErrorEnvelope>)> {
+    let _principal = require_admin_principal(&state, &headers)?;
+    let model = req.model.trim().to_string();
+    if model.is_empty() {
+        return Err(invalid_request_error("model must not be empty"));
+    }
+    let input = req.input.trim().to_string();
+    if input.is_empty() {
+        return Err(invalid_request_error("input must not be empty"));
+    }
+
+    let record = state
+        .store
+        .account_pool_record(record_id)
+        .await
+        .map_err(internal_error)?;
+    if !matches!(record.record_scope, AccountPoolRecordScope::Runtime) {
+        return Err(invalid_request_error(
+            "real responses test only supports runtime records",
+        ));
+    }
+
+    let request_id = ensure_request_id(&mut headers);
+    let base_url = {
+        state
+            .runtime_config
+            .read()
+            .expect("runtime_config lock poisoned")
+            .data_plane_base_url
+            .trim_end_matches('/')
+            .to_string()
+    };
+    let url = format!(
+        "{base_url}/internal/v1/upstream-accounts/{record_id}/responses/test"
+    );
+    let client = reqwest::Client::new();
+    let response = client
+        .post(url)
+        .bearer_auth(state.internal_auth_token.as_ref())
+        .header(REQUEST_ID_HEADER, request_id.as_str())
+        .json(&AccountPoolResponsesTestRequest {
+            model,
+            input,
+            previous_response_id: req
+                .previous_response_id
+                .map(|value| value.trim().to_string())
+                .filter(|value| !value.is_empty()),
+        })
+        .send()
+        .await
+        .map_err(|err| internal_error(anyhow!("data-plane responses test request failed: {err}")))?;
+
+    let status = response.status();
+    let body = response
+        .bytes()
+        .await
+        .map_err(|err| internal_error(anyhow!("failed to read data-plane responses test body: {err}")))?;
+
+    if !status.is_success() {
+        if let Ok(value) = serde_json::from_slice::<serde_json::Value>(&body) {
+            if let Some(error) = value.get("error") {
+                let code = error
+                    .get("code")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or("request_failed");
+                let message = error
+                    .get("message")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or("request failed");
+                return Err(account_pool_responses_test_error(status, code, message));
+            }
+        }
+
+        return Err(account_pool_responses_test_error(
+            status,
+            "request_failed",
+            "request failed",
+        ));
+    }
+
+    let payload = serde_json::from_slice::<AccountPoolResponsesTestResponse>(&body)
+        .map_err(|err| internal_error(anyhow!("failed to decode data-plane responses test body: {err}")))?;
+    Ok(Json(payload))
 }
 
 async fn operate_account_pool_records(

@@ -1982,7 +1982,28 @@ export default {
                 profile: "账号画像",
                 recentSignal: "最近信号热图",
                 credentials: "凭证状态",
-                quota: "用量概览"
+                quota: "用量概览",
+                realTest: "真实测试"
+            },
+            test: {
+                description: "对当前 runtime 账号发起一次真实的 Responses 会话请求，结果按用户请求记账，不计入主动巡检。",
+                runtimeOnly: "首版真实测试仅支持 runtime 记录",
+                modelLabel: "测试模型",
+                promptLabel: "测试输入",
+                promptPlaceholder: "输入要发送给该账号的 prompt…",
+                send: "发送测试",
+                clearSession: "清空会话",
+                noModels: "暂无可选模型",
+                emptyAssistant: "本次响应未返回可展示的文本内容。",
+                assistantLabel: "助手",
+                userLabel: "用户",
+                requestId: "请求 ID",
+                responseId: "响应 ID",
+                latency: "耗时",
+                inputTokens: "输入 tokens",
+                cachedInputTokens: "缓存输入 tokens",
+                outputTokens: "输出 tokens",
+                reasoningTokens: "推理 tokens"
             }
         },
         fields: {

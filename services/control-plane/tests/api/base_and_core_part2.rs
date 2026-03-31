@@ -2480,3 +2480,295 @@ async fn oauth_import_returns_refresh_token_reused_error() {
     let json: Value = serde_json::from_slice(&body).unwrap();
     assert_eq!(json["error"]["code"], "refresh_token_reused");
 }
+
+#[tokio::test]
+async fn account_pool_runtime_responses_test_route_forwards_to_data_plane_with_internal_token() {
+    let cipher_key = base64::engine::general_purpose::STANDARD.encode([61_u8; 32]);
+    let cipher = CredentialCipher::from_base64_key(&cipher_key).unwrap();
+    let store = InMemoryStore::new_with_oauth(
+        Arc::new(InventoryProbeOAuthTokenClient {
+            rate_limits: vec![OAuthRateLimitSnapshot {
+                limit_id: Some("five_hours".to_string()),
+                limit_name: Some("5 hours".to_string()),
+                primary: Some(OAuthRateLimitWindow {
+                    used_percent: 12.0,
+                    window_minutes: Some(300),
+                    resets_at: Some(chrono::Utc::now() + chrono::Duration::minutes(40)),
+                }),
+                secondary: None,
+            }],
+        }),
+        Some(cipher),
+    );
+    store
+        .queue_oauth_refresh_token(ImportOAuthRefreshTokenRequest {
+            label: "pool-runtime-responses-test".to_string(),
+            base_url: "https://chatgpt.com/backend-api/codex".to_string(),
+            refresh_token: "rt-pool-runtime-responses-test".to_string(),
+            fallback_access_token: Some("ak-pool-runtime-responses-test".to_string()),
+            fallback_token_expires_at: Some(chrono::Utc::now() + chrono::Duration::hours(2)),
+            chatgpt_account_id: Some("acct_pool_runtime_responses_test".to_string()),
+            mode: Some(codex_pool_core::model::UpstreamMode::CodexOauth),
+            enabled: Some(true),
+            priority: Some(100),
+            chatgpt_plan_type: Some("pro".to_string()),
+            source_type: Some("codex".to_string()),
+        })
+        .await
+        .unwrap();
+    assert_eq!(store.activate_oauth_refresh_token_vault().await.unwrap(), 1);
+    let account_id = store
+        .list_upstream_accounts()
+        .await
+        .unwrap()
+        .into_iter()
+        .next()
+        .expect("runtime account")
+        .id;
+
+    let forwarded = Arc::new(Mutex::new(Vec::<Value>::new()));
+    let data_plane_app = axum::Router::new().route(
+        "/internal/v1/upstream-accounts/{account_id}/responses/test",
+        axum::routing::post({
+            let forwarded = forwarded.clone();
+            move |axum::extract::Path(account_id): axum::extract::Path<String>,
+                  headers: axum::http::HeaderMap,
+                  body: String| {
+                let forwarded = forwarded.clone();
+                async move {
+                    let payload: Value = serde_json::from_str(&body).unwrap();
+                    forwarded.lock().unwrap().push(json!({
+                        "account_id": account_id,
+                        "authorization": headers
+                            .get("authorization")
+                            .and_then(|value| value.to_str().ok()),
+                        "request_id": headers
+                            .get("x-request-id")
+                            .and_then(|value| value.to_str().ok()),
+                        "payload": payload,
+                    }));
+
+                    axum::Json(json!({
+                        "response_id": "resp_test_runtime",
+                        "assistant_text": "pong",
+                        "request_id": "req_test_runtime",
+                        "model": "gpt-5.4",
+                        "status_code": 200,
+                        "latency_ms": 42,
+                        "usage": {
+                            "input_tokens": 11,
+                            "cached_input_tokens": 0,
+                            "output_tokens": 7,
+                            "reasoning_tokens": 0
+                        },
+                        "previous_response_id": "resp_prev_runtime"
+                    }))
+                }
+            }
+        }),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        axum::serve(listener, data_plane_app).await.unwrap();
+    });
+
+    let app = build_app_with_store(Arc::new(store));
+    let admin_token = login_admin_token(&app).await;
+
+    let config_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("PUT")
+                .uri("/api/v1/admin/config")
+                .header("content-type", "application/json")
+                .header("authorization", format!("Bearer {admin_token}"))
+                .body(Body::from(
+                    json!({
+                        "data_plane_base_url": format!("http://{addr}")
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(config_response.status(), StatusCode::OK);
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!(
+                    "/api/v1/account-pool/accounts/{account_id}/responses/test"
+                ))
+                .header("content-type", "application/json")
+                .header("authorization", format!("Bearer {admin_token}"))
+                .body(Body::from(
+                    json!({
+                        "model": "gpt-5.4",
+                        "input": "ping",
+                        "previous_response_id": "resp_prev_runtime"
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    let status = response.status();
+    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "{}",
+        String::from_utf8_lossy(&body)
+    );
+    let payload: Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(payload["response_id"], "resp_test_runtime");
+    assert_eq!(payload["assistant_text"], "pong");
+    assert_eq!(payload["request_id"], "req_test_runtime");
+    assert_eq!(payload["previous_response_id"], "resp_prev_runtime");
+
+    let forwarded = forwarded.lock().unwrap();
+    assert_eq!(forwarded.len(), 1);
+    assert_eq!(forwarded[0]["account_id"], account_id.to_string());
+    assert_eq!(
+        forwarded[0]["authorization"],
+        format!("Bearer {}", internal_service_token())
+    );
+    assert_eq!(forwarded[0]["payload"]["model"], "gpt-5.4");
+    assert_eq!(forwarded[0]["payload"]["input"], "ping");
+    assert_eq!(
+        forwarded[0]["payload"]["previous_response_id"],
+        "resp_prev_runtime"
+    );
+    assert!(forwarded[0]["request_id"].is_string());
+}
+
+#[tokio::test]
+async fn account_pool_inventory_responses_test_route_rejects_without_forwarding() {
+    let cipher_key = base64::engine::general_purpose::STANDARD.encode([62_u8; 32]);
+    let cipher = CredentialCipher::from_base64_key(&cipher_key).unwrap();
+    let store = InMemoryStore::new_with_oauth(
+        Arc::new(InventoryProbeOAuthTokenClient { rate_limits: Vec::new() }),
+        Some(cipher),
+    );
+    store
+        .queue_oauth_refresh_token(ImportOAuthRefreshTokenRequest {
+            label: "pool-inventory-responses-test".to_string(),
+            base_url: "https://chatgpt.com/backend-api/codex".to_string(),
+            refresh_token: "rt-pool-inventory-responses-test".to_string(),
+            fallback_access_token: Some("ak-pool-inventory-responses-test".to_string()),
+            fallback_token_expires_at: Some(chrono::Utc::now() + chrono::Duration::hours(2)),
+            chatgpt_account_id: Some("acct_pool_inventory_responses_test".to_string()),
+            mode: Some(codex_pool_core::model::UpstreamMode::CodexOauth),
+            enabled: Some(true),
+            priority: Some(100),
+            chatgpt_plan_type: Some("pro".to_string()),
+            source_type: Some("codex".to_string()),
+        })
+        .await
+        .unwrap();
+
+    let forwarded = Arc::new(Mutex::new(Vec::<Value>::new()));
+    let data_plane_app = axum::Router::new().route(
+        "/internal/v1/upstream-accounts/{account_id}/responses/test",
+        axum::routing::post({
+            let forwarded = forwarded.clone();
+            move |axum::extract::Path(account_id): axum::extract::Path<String>, body: String| {
+                let forwarded = forwarded.clone();
+                async move {
+                    forwarded.lock().unwrap().push(json!({
+                        "account_id": account_id,
+                        "body": body,
+                    }));
+                    axum::Json(json!({
+                        "response_id": "unexpected"
+                    }))
+                }
+            }
+        }),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        axum::serve(listener, data_plane_app).await.unwrap();
+    });
+
+    let app = build_app_with_store(Arc::new(store));
+    let admin_token = login_admin_token(&app).await;
+
+    let config_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("PUT")
+                .uri("/api/v1/admin/config")
+                .header("content-type", "application/json")
+                .header("authorization", format!("Bearer {admin_token}"))
+                .body(Body::from(
+                    json!({
+                        "data_plane_base_url": format!("http://{addr}")
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(config_response.status(), StatusCode::OK);
+
+    let records_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/account-pool/accounts")
+                .header("authorization", format!("Bearer {admin_token}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(records_response.status(), StatusCode::OK);
+    let records_body = to_bytes(records_response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let records: Vec<Value> = serde_json::from_slice(&records_body).unwrap();
+    let record_id = records
+        .iter()
+        .find(|item| item["label"] == "pool-inventory-responses-test")
+        .and_then(|item| item["id"].as_str())
+        .expect("inventory record id")
+        .to_string();
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!(
+                    "/api/v1/account-pool/accounts/{record_id}/responses/test"
+                ))
+                .header("content-type", "application/json")
+                .header("authorization", format!("Bearer {admin_token}"))
+                .body(Body::from(
+                    json!({
+                        "model": "gpt-5.4",
+                        "input": "ping"
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let payload: Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(payload["error"]["code"], "invalid_request");
+    assert!(forwarded.lock().unwrap().is_empty());
+}
