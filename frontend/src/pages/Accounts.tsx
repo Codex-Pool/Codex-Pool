@@ -1404,8 +1404,8 @@ export default function Accounts() {
               </TableColumn>
               <TableColumn key="account" allowsSorting>{t('accountPool.columns.account')}</TableColumn>
               <TableColumn key="operationalStatus" allowsSorting>{t('accountPool.columns.operationalStatus')}</TableColumn>
-              <TableColumn key="quota" allowsSorting>{t('accountPool.columns.quota')}</TableColumn>
-              <TableColumn key="recentSignal" allowsSorting>{t('accountPool.columns.recentSignal')}</TableColumn>
+              <TableColumn key="quota" allowsSorting width={276}>{t('accountPool.columns.quota')}</TableColumn>
+              <TableColumn key="recentSignal" allowsSorting width={216}>{t('accountPool.columns.recentSignal')}</TableColumn>
               <TableColumn key="actions">{t('accountPool.columns.actions')}</TableColumn>
             </TableHeader>
             <TableBody
@@ -1477,8 +1477,8 @@ export default function Accounts() {
                         ) : null}
                       </div>
                     </TableCell>
-                    <TableCell>
-                      <div className="space-y-3">
+                    <TableCell className="w-[276px]">
+                      <div className="min-w-[248px] space-y-3">
                         {(() => {
                           const usageRows = buildUsageRows(record, t)
 
@@ -1496,6 +1496,7 @@ export default function Accounts() {
                                 <div key={item.key} className="rounded-large border border-default-200 bg-content1/70 px-3 py-2">
                                   <div className="flex items-center justify-between gap-3 text-xs text-default-500">
                                     <span>{item.compactLabel}</span>
+                                    <span className="tabular-nums text-[11px]">{item.resetText}</span>
                                     <span className="tabular-nums">{item.remainingText}</span>
                                   </div>
                                   <Progress
@@ -1512,13 +1513,13 @@ export default function Accounts() {
                         })()}
                       </div>
                     </TableCell>
-                    <TableCell>
+                    <TableCell className="w-[216px]">
                       {(() => {
                         const signal = getRecentSignalDisplay(record, t)
                         const heatmap = record.recent_signal_heatmap
 
                         return (
-                          <div className="min-w-[208px] space-y-2">
+                          <div className="min-w-[184px] space-y-2">
                             <div className="flex items-center justify-between gap-2">
                               <div className="text-xs font-semibold uppercase tracking-[0.12em] text-default-500">
                                 {heatmap ? t('accountPool.recentSignal.window12h') : signal.label}
