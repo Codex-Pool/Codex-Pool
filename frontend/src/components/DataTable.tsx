@@ -49,10 +49,12 @@ import {
   MoreVertical,
   Plus,
   Search,
+  X,
 } from "lucide-react"
 import { useTranslation } from "react-i18next"
 
 import { cn } from "@/lib/utils"
+import { Checkbox } from "@/components/ui/checkbox"
 import { EmptyState } from "@/components/ui/empty-state"
 
 export interface DataTableColumn<T> {
@@ -67,6 +69,13 @@ export interface DataTableColumn<T> {
 export interface StatusOption {
   uid: string
   name: string
+}
+
+export interface BatchActionItem {
+  key: string
+  label: string
+  icon?: ReactNode
+  color?: "default" | "danger"
 }
 
 type SharedDataTableProps<T, TValue> = {
@@ -99,6 +108,12 @@ type SharedDataTableProps<T, TValue> = {
   isLoading?: boolean
   showToolbar?: boolean
   showPageControls?: boolean
+  enableRowSelection?: boolean
+  getRowId?: (row: T) => string
+  selectedKeys?: Set<string>
+  onSelectionChange?: (keys: Set<string>) => void
+  batchActions?: BatchActionItem[]
+  onBatchAction?: (actionKey: string, selectedIds: string[]) => void
 }
 
 export type DataTableProps<T, TValue = unknown> = SharedDataTableProps<T, TValue>
@@ -177,6 +192,12 @@ export function DataTable<T, TValue = unknown>({
   isLoading = false,
   showToolbar = true,
   showPageControls = true,
+  enableRowSelection = false,
+  getRowId,
+  selectedKeys: controlledSelectedKeys,
+  onSelectionChange,
+  batchActions,
+  onBatchAction,
 }: DataTableProps<T, TValue>) {
   const { t } = useTranslation()
   const resolvedDefaultPageSize = defaultPageSize ?? defaultRowsPerPage
@@ -197,6 +218,22 @@ export function DataTable<T, TValue = unknown>({
     pageSize: resolvedDefaultPageSize,
   })
   const searchInputId = useId()
+
+  // ── Selection state ──
+  const [internalSelectedKeys, setInternalSelectedKeys] = useState<Set<string>>(new Set())
+  const resolvedSelectedKeys = controlledSelectedKeys ?? internalSelectedKeys
+  const setSelectedKeys = (next: Set<string>) => {
+    if (controlledSelectedKeys === undefined) setInternalSelectedKeys(next)
+    onSelectionChange?.(next)
+  }
+  const resolvedGetRowId = useMemo<(row: T, index: number) => string>(() => {
+    if (getRowId) return (row) => getRowId(row)
+    return (row, index) => {
+      const r = row as Record<string, unknown>
+      return r.id != null ? String(r.id) : String(index)
+    }
+  }, [getRowId])
+  const selectionCount = resolvedSelectedKeys.size
 
   const simpleMode = columns.length > 0 && isSimpleColumn(columns[0])
   const simpleColumns = useMemo(
@@ -253,6 +290,24 @@ export function DataTable<T, TValue = unknown>({
     onFilteredDataChange?.(filteredData)
   }, [filteredData, onFilteredDataChange])
 
+  const filteredRowIds = useMemo(
+    () => filteredData.map((row, index) => resolvedGetRowId(row, index)),
+    [filteredData, resolvedGetRowId],
+  )
+
+  useEffect(() => {
+    if (!enableRowSelection) {
+      return
+    }
+
+    const validIds = new Set(filteredRowIds)
+    const cleaned = new Set([...resolvedSelectedKeys].filter((id) => validIds.has(id)))
+    if (cleaned.size === resolvedSelectedKeys.size) {
+      return
+    }
+    setSelectedKeys(cleaned)
+  }, [enableRowSelection, filteredRowIds, resolvedSelectedKeys])
+
   useEffect(() => {
     setPagination((prev) => ({ ...prev, pageIndex: 0 }))
   }, [normalizedKeyword, statusFilter])
@@ -273,8 +328,39 @@ export function DataTable<T, TValue = unknown>({
   }, [simpleColumns, simpleMode, visibleColumnIds])
 
   const tableColumns = useMemo<ColumnDef<T, TValue>[]>(() => {
+    const selectCol: ColumnDef<T, TValue> | null = enableRowSelection ? {
+      id: "__select__",
+      size: 40,
+      enableSorting: false,
+      header: () => {
+        return (
+          <Checkbox
+            checked={allCurrentPageSelected ? true : someCurrentPageSelected ? "indeterminate" : false}
+            onCheckedChange={toggleCurrentPageSelection}
+            aria-label={t("common.table.selectAll", { defaultValue: "Select page" })}
+          />
+        )
+      },
+      cell: ({ row }) => {
+        const rowId = resolvedGetRowId(row.original, row.index)
+        return (
+          <Checkbox
+            checked={resolvedSelectedKeys.has(rowId)}
+            onCheckedChange={(value) => {
+              const next = new Set(resolvedSelectedKeys)
+              value ? next.add(rowId) : next.delete(rowId)
+              setSelectedKeys(next)
+            }}
+            aria-label={t("common.table.selectRow", { defaultValue: "Select row" })}
+          />
+        )
+      },
+    } : null
+
     if (!simpleMode) {
-      return advancedColumns
+      const cols = [...advancedColumns]
+      if (selectCol) cols.unshift(selectCol)
+      return cols
     }
 
     const resolved = activeSimpleColumns.map<ColumnDef<T, TValue>>((column) => ({
@@ -362,11 +448,15 @@ export function DataTable<T, TValue = unknown>({
       })
     }
 
+    if (selectCol) resolved.unshift(selectCol)
     return resolved
   }, [
     activeSimpleColumns,
     advancedColumns,
+    enableRowSelection,
     onRowAction,
+    resolvedGetRowId,
+    resolvedSelectedKeys,
     rowActions,
     simpleMode,
     t,
@@ -389,21 +479,51 @@ export function DataTable<T, TValue = unknown>({
   })
 
   const rows = table.getRowModel().rows
+  const currentPageRowIds = useMemo(
+    () => rows.map((row) => resolvedGetRowId(row.original, row.index)),
+    [resolvedGetRowId, rows],
+  )
+  const allCurrentPageSelected =
+    currentPageRowIds.length > 0
+    && currentPageRowIds.every((id) => resolvedSelectedKeys.has(id))
+  const someCurrentPageSelected =
+    !allCurrentPageSelected
+    && currentPageRowIds.some((id) => resolvedSelectedKeys.has(id))
+  const allFilteredSelected =
+    filteredRowIds.length > 0
+    && filteredRowIds.every((id) => resolvedSelectedKeys.has(id))
+  const canSelectAcrossPages = filteredRowIds.length > currentPageRowIds.length
   const pageCount = Math.max(1, table.getPageCount())
   const totalRows = filteredData.length
   const startRow = totalRows === 0 ? 0 : pagination.pageIndex * pagination.pageSize + 1
   const endRow =
     totalRows === 0 ? 0 : Math.min(totalRows, (pagination.pageIndex + 1) * pagination.pageSize)
 
+  const toggleCurrentPageSelection = (value: boolean) => {
+    const next = new Set(resolvedSelectedKeys)
+    for (const id of currentPageRowIds) {
+      value ? next.add(id) : next.delete(id)
+    }
+    setSelectedKeys(next)
+  }
+
+  const toggleFilteredSelection = (value: boolean) => {
+    const next = new Set(resolvedSelectedKeys)
+    for (const id of filteredRowIds) {
+      value ? next.add(id) : next.delete(id)
+    }
+    setSelectedKeys(next)
+  }
+
   return (
     <div
       className={cn(
-        "overflow-hidden rounded-[1.2rem] border border-default-200/70 bg-content1/88 shadow-[0_16px_40px_rgba(79,90,112,0.08)]",
+        "overflow-hidden rounded-large border-small border-default-200 bg-content1 shadow-small",
         className,
       )}
     >
       {showToolbar ? (
-        <div className="flex flex-col gap-4 border-b border-default-200/70 bg-[linear-gradient(180deg,hsl(var(--heroui-primary)/0.04),transparent)] px-4 py-4 sm:px-5">
+        <div className="flex flex-col gap-4 border-b border-default-200 bg-default-50/50 px-4 py-4 sm:px-5">
           {(title || subtitle) && (
             <div className="space-y-1">
               {title ? (
@@ -414,6 +534,67 @@ export function DataTable<T, TValue = unknown>({
               {subtitle ? (
                 <p className="text-sm leading-6 text-default-600">{subtitle}</p>
               ) : null}
+            </div>
+          )}
+
+          {enableRowSelection && (
+            <div className={cn(
+              "w-full overflow-hidden transition-all duration-200",
+              selectionCount > 0 ? "max-h-14 opacity-100" : "max-h-0 opacity-0 pointer-events-none",
+            )}>
+              <div className="w-full rounded-large border border-default-200 bg-default-100/80 px-3.5 py-2">
+                <div className="flex w-full flex-wrap items-center gap-2.5">
+                  {canSelectAcrossPages ? (
+                    <>
+                      <Checkbox
+                        checked={allFilteredSelected}
+                        onCheckedChange={toggleFilteredSelection}
+                        aria-label={t("common.table.selectFiltered", {
+                          defaultValue: "Select all filtered results ({{count}})",
+                          count: filteredRowIds.length,
+                        })}
+                      >
+                        {t("common.table.selectFiltered", {
+                          defaultValue: "Select all filtered results ({{count}})",
+                          count: filteredRowIds.length,
+                        })}
+                      </Checkbox>
+                      <div className="h-4 w-px bg-default-300" />
+                    </>
+                  ) : null}
+                  <span className="text-sm font-semibold tabular-nums text-foreground">
+                    {t("common.table.selectedCount", { defaultValue: "{{count}} selected", count: selectionCount })}
+                  </span>
+                  {batchActions && batchActions.length > 0 && (
+                    <>
+                      {canSelectAcrossPages ? null : <div className="h-4 w-px bg-default-300" />}
+                      {batchActions.map((action) => (
+                        <Button
+                          key={action.key}
+                          size="sm"
+                          variant="flat"
+                          color={action.color === "danger" ? "danger" : "default"}
+                          startContent={action.icon}
+                          onPress={() => onBatchAction?.(action.key, [...resolvedSelectedKeys])}
+                        >
+                          {action.label}
+                        </Button>
+                      ))}
+                    </>
+                  )}
+                  <div className="ml-auto">
+                    <Button
+                      isIconOnly
+                      size="sm"
+                      variant="light"
+                      aria-label={t("common.table.clearSelection", { defaultValue: "Clear selection" })}
+                      onPress={() => setSelectedKeys(new Set())}
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
+                </div>
+              </div>
             </div>
           )}
 
@@ -519,7 +700,7 @@ export function DataTable<T, TValue = unknown>({
       ) : null}
 
       {showPageControls ? (
-        <div className="px-4 pb-2 pt-3 sm:px-5">
+        <div className="border-b border-default-100 px-4 pb-2 pt-3 sm:px-5">
           <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-default-500">
             <span className="tabular-nums">
               {t("common.table.totalItems", {
@@ -570,14 +751,14 @@ export function DataTable<T, TValue = unknown>({
             "max-h-[calc(100vh-300px)] overflow-x-auto bg-transparent shadow-none",
           table: cn("w-full min-w-max", density === "compact" && "text-xs"),
           th: cn(
-            "bg-default-100/50 text-default-500 text-tiny uppercase font-semibold first:rounded-s-lg last:rounded-e-lg",
+            "bg-default-100/60 text-default-500 text-xs font-semibold uppercase tracking-[0.08em] first:rounded-s-lg last:rounded-e-lg",
             density === "compact" && "text-[10px]",
           ),
           td: cn(
             "py-3 text-sm text-foreground",
             density === "compact" && "py-2 text-xs",
           ),
-          tr: "data-[hover=true]:bg-content2/30 transition-colors",
+          tr: "data-[hover=true]:bg-content2/35 transition-colors",
           emptyWrapper: "h-40",
         }}
       >
@@ -637,9 +818,16 @@ export function DataTable<T, TValue = unknown>({
               typeof rowClassName === "function"
                 ? rowClassName(row.original)
                 : rowClassName
+            const isRowSelected = enableRowSelection && resolvedSelectedKeys.has(resolvedGetRowId(row.original, row.index))
 
             return (
-              <TableRow key={row.id} className={resolvedRowClassName}>
+              <TableRow
+                key={row.id}
+                className={cn(
+                  isRowSelected && "bg-primary/5 data-[hover=true]:bg-primary/8",
+                  resolvedRowClassName,
+                )}
+              >
                 {row.getVisibleCells().map((cell) => (
                   <TableCell key={cell.id}>
                     {flexRender(cell.column.columnDef.cell, cell.getContext())}
@@ -652,7 +840,7 @@ export function DataTable<T, TValue = unknown>({
       </Table>
 
       {showPageControls ? (
-        <div className="flex flex-col gap-3 border-t border-default-200/70 bg-content2/22 px-4 py-3 text-xs text-default-500 sm:px-5 xl:flex-row xl:items-center xl:justify-between">
+        <div className="flex flex-col gap-3 border-t border-default-200 bg-default-50/50 px-4 py-3 text-xs text-default-500 sm:px-5 xl:flex-row xl:items-center xl:justify-between">
           <div className="tabular-nums">
             {t("common.table.range", {
               start: startRow,

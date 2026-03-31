@@ -443,6 +443,7 @@ export default {
         table: {
             allItemsSelected: "All items selected",
             columns: "Columns",
+            clearSelection: "Clear selection",
             dataTableAria: "Data table",
             firstPage: "First page",
             go: "Go",
@@ -456,7 +457,10 @@ export default {
             rowsPerPage: "Rows per page",
             searchLabel: "Search table",
             searchPlaceholder: "Search in current list…",
-            selectedCount: "{{count}} of {{total}} selected",
+            selectAll: "Select page",
+            selectFiltered: "Select all filtered results ({{count}})",
+            selectRow: "Select row",
+            selectedCount: "{{count}} selected",
             statusLabel: "Status",
             statusFilter: "Status filter",
             totalItems: "Total {{count}} items"

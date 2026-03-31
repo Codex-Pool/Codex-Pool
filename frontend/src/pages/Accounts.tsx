@@ -40,6 +40,7 @@ import {
   RotateCcw,
   Search,
   Trash2,
+  X,
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
@@ -77,6 +78,7 @@ import {
   formatRateLimitResetText,
   getPlanLabel,
 } from '@/features/accounts/utils'
+import { Checkbox } from '@/components/ui/checkbox'
 import { formatRelativeTime } from '@/lib/time'
 import { notify } from '@/lib/notification'
 import { cn } from '@/lib/utils'
@@ -625,6 +627,8 @@ export default function Accounts() {
   const [currentPage, setCurrentPage] = useState(1)
   const [sortDescriptor, setSortDescriptor] = useState<SortDescriptor | null>(null)
   const [selectedRecordId, setSelectedRecordId] = useState<string | null>(null)
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  const [batchDeletePending, setBatchDeletePending] = useState(false)
   const [testPrompt, setTestPrompt] = useState('')
   const [selectedTestModel, setSelectedTestModel] = useState('')
   const [testMessages, setTestMessages] = useState<AccountPoolResponsesTestMessage[]>([])
@@ -739,9 +743,37 @@ export default function Accounts() {
     const start = (resolvedPage - 1) * rowsPerPage
     return sortedRecords.slice(start, start + rowsPerPage)
   }, [resolvedPage, rowsPerPage, sortedRecords])
+  const currentPageRecordIds = useMemo(() => paginatedRecords.map((record) => record.id), [paginatedRecords])
   const visibleRangeStart = sortedRecords.length === 0 ? 0 : (resolvedPage - 1) * rowsPerPage + 1
   const visibleRangeEnd =
     sortedRecords.length === 0 ? 0 : Math.min(sortedRecords.length, resolvedPage * rowsPerPage)
+
+  // ── Selection: 过滤结果的 ID 集合，用于全选和清理无效选中 ──
+  const filteredRecordIds = useMemo(() => sortedRecords.map((r) => r.id), [sortedRecords])
+  const selectedRecords = useMemo(
+    () => sortedRecords.filter((record) => selectedIds.has(record.id)),
+    [selectedIds, sortedRecords],
+  )
+  const allCurrentPageSelected =
+    currentPageRecordIds.length > 0
+    && currentPageRecordIds.every((id) => selectedIds.has(id))
+  const someCurrentPageSelected =
+    !allCurrentPageSelected
+    && currentPageRecordIds.some((id) => selectedIds.has(id))
+  const allFilteredSelected =
+    filteredRecordIds.length > 0
+    && filteredRecordIds.every((id) => selectedIds.has(id))
+  const canSelectAcrossPages = filteredRecordIds.length > currentPageRecordIds.length
+  const canBatchRestore =
+    selectedRecords.length > 0
+    && selectedRecords.every((record) => canRunAccountPoolAction(record, 'restore'))
+  useEffect(() => {
+    const validSet = new Set(filteredRecordIds)
+    setSelectedIds((prev) => {
+      const cleaned = new Set([...prev].filter((id) => validSet.has(id)))
+      return cleaned.size === prev.size ? prev : cleaned
+    })
+  }, [filteredRecordIds])
 
   const invalidateQueries = useCallback(async () => {
     await Promise.all([
@@ -805,6 +837,53 @@ export default function Accounts() {
           action: t(`accountPool.actions.${variables.action}`),
         }),
         description: localizeApiErrorDisplay(t, error, fallback).label,
+      })
+    },
+  })
+
+  const batchActionMutation = useMutation({
+    mutationFn: ({ action, ids }: { action: AccountPoolAction; ids: string[] }) =>
+      accountPoolApi.runAction(action, ids),
+    onSuccess: async (response, variables) => {
+      setSelectedIds(new Set())
+      setBatchDeletePending(false)
+      await invalidateQueries()
+      const successCount = response.items.filter((item) => item.ok).length
+      const failedCount = response.items.filter((item) => !item.ok).length
+      if (failedCount === 0) {
+        notify({
+          variant: 'success',
+          title: t('accountPool.messages.batchSuccessTitle', {
+            defaultValue: 'Batch {{action}} completed',
+            action: t(`accountPool.actions.${variables.action}`),
+          }),
+          description: t('accountPool.messages.batchSuccessDescription', {
+            defaultValue: '{{count}} records processed successfully',
+            count: successCount,
+          }),
+        })
+      } else {
+        notify({
+          variant: 'warning',
+          title: t('accountPool.messages.batchPartialTitle', {
+            defaultValue: 'Batch {{action}} partially completed',
+            action: t(`accountPool.actions.${variables.action}`),
+          }),
+          description: t('accountPool.messages.batchPartialDescription', {
+            defaultValue: '{{success}} succeeded, {{failed}} failed',
+            success: successCount,
+            failed: failedCount,
+          }),
+        })
+      }
+    },
+    onError: (_error, variables) => {
+      notify({
+        variant: 'error',
+        title: t('accountPool.messages.batchFailedTitle', {
+          defaultValue: 'Batch {{action}} failed',
+          action: t(`accountPool.actions.${variables.action}`),
+        }),
       })
     },
   })
@@ -940,6 +1019,26 @@ export default function Accounts() {
     setPreviousResponseId(null)
     setTestError(null)
   }, [])
+
+  const togglePageSelection = useCallback((value: boolean) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev)
+      for (const id of currentPageRecordIds) {
+        value ? next.add(id) : next.delete(id)
+      }
+      return next
+    })
+  }, [currentPageRecordIds])
+
+  const toggleFilteredSelection = useCallback((value: boolean) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev)
+      for (const id of filteredRecordIds) {
+        value ? next.add(id) : next.delete(id)
+      }
+      return next
+    })
+  }, [filteredRecordIds])
 
   const handleSendResponsesTest = useCallback(() => {
     if (!selectedRecordId || selectedRecord?.record_scope !== 'runtime') {
@@ -1206,6 +1305,75 @@ export default function Accounts() {
               </Select>
             </div>
           </div>
+
+          {/* ── Batch action bar ── */}
+          <div className={cn(
+            'w-full overflow-hidden transition-all duration-200',
+            selectedIds.size > 0 ? 'max-h-14 opacity-100' : 'max-h-0 opacity-0 pointer-events-none',
+          )}>
+            <div className="w-full rounded-large border border-default-200 bg-default-100/80 px-3.5 py-2">
+              <div className="flex w-full flex-wrap items-center gap-2.5">
+                {canSelectAcrossPages ? (
+                  <>
+                    <Checkbox
+                      checked={allFilteredSelected}
+                      isDisabled={batchActionMutation.isPending}
+                      onCheckedChange={toggleFilteredSelection}
+                      aria-label={t('common.table.selectFiltered', {
+                        defaultValue: 'Select all filtered results ({{count}})',
+                        count: filteredRecordIds.length,
+                      })}
+                    >
+                      {t('common.table.selectFiltered', {
+                        defaultValue: 'Select all filtered results ({{count}})',
+                        count: filteredRecordIds.length,
+                      })}
+                    </Checkbox>
+                    <div className="h-4 w-px bg-default-300" />
+                  </>
+                ) : null}
+                <span className="text-sm font-semibold tabular-nums text-foreground">
+                {t('common.table.selectedCount', { defaultValue: '{{count}} selected', count: selectedIds.size })}
+                </span>
+                <Button
+                  size="sm"
+                  variant="flat"
+                  isDisabled={batchActionMutation.isPending}
+                  onPress={() => batchActionMutation.mutate({ action: 'reprobe', ids: [...selectedIds] })}
+                >
+                  {t('accountPool.actions.reprobe')}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="flat"
+                  isDisabled={batchActionMutation.isPending || !canBatchRestore}
+                  onPress={() => batchActionMutation.mutate({ action: 'restore', ids: [...selectedIds] })}
+                >
+                  {t('accountPool.actions.restore')}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="flat"
+                  color="danger"
+                  isDisabled={batchActionMutation.isPending}
+                  onPress={() => setBatchDeletePending(true)}
+                >
+                  {t('accountPool.actions.delete')}
+                </Button>
+                <div className="ml-auto">
+                  <Button
+                    isIconOnly
+                    size="sm"
+                    variant="light"
+                    aria-label={t('common.table.clearSelection', { defaultValue: 'Clear selection' })}
+                    onPress={() => setSelectedIds(new Set())}
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </Button>
+                </div>
+              </div>
+            </div>
+          </div>
         </CardHeader>
 
         <CardBody className="gap-4 px-5 pb-5 pt-0">
@@ -1227,6 +1395,13 @@ export default function Accounts() {
             }}
           >
             <TableHeader>
+              <TableColumn key="__select__" width={40}>
+                <Checkbox
+                  checked={allCurrentPageSelected ? true : someCurrentPageSelected ? 'indeterminate' : false}
+                  onCheckedChange={togglePageSelection}
+                  aria-label={t('common.table.selectAll', { defaultValue: 'Select page' })}
+                />
+              </TableColumn>
               <TableColumn key="account" allowsSorting>{t('accountPool.columns.account')}</TableColumn>
               <TableColumn key="operationalStatus" allowsSorting>{t('accountPool.columns.operationalStatus')}</TableColumn>
               <TableColumn key="quota" allowsSorting>{t('accountPool.columns.quota')}</TableColumn>
@@ -1251,8 +1426,22 @@ export default function Accounts() {
                     rowFeedback.get(record.id) === 'success' && 'row-action-success',
                     rowFeedback.get(record.id) === 'error' && 'row-action-error',
                     rowFeedback.get(record.id) === 'pending' && 'opacity-60 transition-opacity',
+                    selectedIds.has(record.id) && 'bg-primary/5',
                   )}
                 >
+                  <TableCell>
+                    <Checkbox
+                      checked={selectedIds.has(record.id)}
+                      onCheckedChange={(value) => {
+                        setSelectedIds((prev) => {
+                          const next = new Set(prev)
+                          value ? next.add(record.id) : next.delete(record.id)
+                          return next
+                        })
+                      }}
+                      aria-label={t('common.table.selectRow', { defaultValue: 'Select row' })}
+                    />
+                  </TableCell>
                   <TableCell>
                     <div className="min-w-[240px] space-y-2">
                       <div className="font-medium text-foreground">
@@ -1269,79 +1458,57 @@ export default function Accounts() {
                     </div>
                   </TableCell>
                   <TableCell>
-                    <div className="min-w-[250px] space-y-2">
+                    <div className="space-y-2">
                       <div className="flex flex-wrap items-center gap-2">
-                        <Chip
-                          color={getStateColor(record.operator_state)}
-                          size="sm"
-                          variant="flat"
-                          className={record.operator_state === 'cooling' ? 'cooling-pulse' : undefined}
-                        >
+                        <Chip color={getStateColor(record.operator_state)} size="sm" variant="flat">
                           {getStateLabel(record.operator_state, t)}
                         </Chip>
                         <Chip color={getReasonColor(record.reason_class)} size="sm" variant="flat">
                           {getReasonLabel(record.reason_class, t)}
                         </Chip>
-                        {record.operator_state === 'cooling' && (
-                          <CoolingCountdown nextActionAt={record.next_action_at} t={t} />
-                        )}
                       </div>
-                      <div className="text-xs leading-5 text-default-600">
-                        {getReasonCodeLabel(record.reason_code, t)}
+                      <div className="text-xs leading-5 text-default-500">
+                        {t('accountPool.fields.reasonCode')}: {getReasonCodeLabel(record.reason_code, t)}
                       </div>
-                      <div className="text-xs text-default-500">
-                        {t('accountPool.fields.nextAction')}: {formatDateTime(record.next_action_at)}
-                      </div>
+                      {record.operator_state === 'cooling' ? (
+                        <CoolingCountdown nextActionAt={record.next_action_at} t={t} />
+                      ) : null}
                     </div>
                   </TableCell>
                   <TableCell>
-                    {(() => {
-                      const usageRows = buildUsageRows(record, t)
+                    <div className="space-y-3">
+                      {(() => {
+                        const usageRows = buildUsageRows(record, t)
 
-                      if (usageRows.length === 0) {
+                        if (usageRows.length === 0) {
+                          return (
+                            <div className="text-xs text-default-500">
+                              {t('accounts.rateLimits.unavailable')}
+                            </div>
+                          )
+                        }
+
                         return (
-                          <div className="min-w-[190px] text-xs leading-5 text-default-500">
-                            {t('accounts.rateLimits.unavailable')}
+                          <div className="grid gap-2">
+                            {usageRows.map((item) => (
+                              <div key={item.key} className="rounded-large border border-default-200 bg-content1/70 px-3 py-2">
+                                <div className="flex items-center justify-between gap-3 text-xs text-default-500">
+                                  <span>{item.compactLabel}</span>
+                                  <span className="tabular-nums">{item.remainingText}</span>
+                                </div>
+                                <Progress
+                                  aria-label={`${item.bucketLabel} ${item.remainingText}`}
+                                  className="mt-2"
+                                  color={getUsageProgressColor(item.remainingPercent)}
+                                  size="sm"
+                                  value={item.remainingPercent}
+                                />
+                              </div>
+                            ))}
                           </div>
                         )
-                      }
-
-                      const multi = usageRows.length > 1
-                      return (
-                        <div className={cn('min-w-[190px]', multi ? 'space-y-1' : 'space-y-2')}>
-                          {usageRows.map((item) => (
-                            <div
-                              key={item.key}
-                              className={cn(
-                                'rounded-large border border-default-200 bg-content2/35',
-                                multi ? 'px-3 py-1' : 'px-3 py-2',
-                              )}
-                            >
-                              <div className="flex items-center justify-between gap-3">
-                                <div className="text-xs font-semibold uppercase tracking-[0.12em] text-default-500">
-                                  {item.compactLabel}
-                                </div>
-                                <div className="tabular-nums text-sm font-semibold text-foreground">
-                                  {item.remainingText}
-                                </div>
-                              </div>
-                              <Progress
-                                aria-label={`${item.bucketLabel} ${item.remainingText}`}
-                                className={multi ? 'mt-1' : 'mt-2'}
-                                color={getUsageProgressColor(item.remainingPercent)}
-                                size="sm"
-                                value={item.remainingPercent}
-                              />
-                              {!multi && (
-                                <div className="mt-1 text-xs leading-4 text-default-500">
-                                  {item.resetText}
-                                </div>
-                              )}
-                            </div>
-                          ))}
-                        </div>
-                      )
-                    })()}
+                      })()}
+                    </div>
                   </TableCell>
                   <TableCell>
                     {(() => {
@@ -1390,14 +1557,13 @@ export default function Accounts() {
                       )
                     })()}
                   </TableCell>
-                  <TableCell>
-                    <div className="flex min-w-[88px] items-center gap-1">
+                  <TableCell className="w-[132px]">
+                    <div className="flex items-center justify-end gap-1">
                       <Button
                         isIconOnly
                         aria-label={t('accountPool.actions.inspect')}
-                        title={t('accountPool.actions.inspect')}
                         size="sm"
-                        variant="flat"
+                        variant="light"
                         onPress={() => openRecord(record.id)}
                       >
                         <Eye className="h-4 w-4" />
@@ -1407,8 +1573,6 @@ export default function Accounts() {
                           <Button
                             isIconOnly
                             aria-label={t('accountPool.actions.more')}
-                            title={t('accountPool.actions.more')}
-                            isDisabled={actionMutation.isPending}
                             size="sm"
                             variant="light"
                           >
@@ -1417,24 +1581,27 @@ export default function Accounts() {
                         </DropdownTrigger>
                         <DropdownMenu
                           aria-label={t('accountPool.actions.more')}
-                          disabledKeys={[
-                            ...(!canRunAccountPoolAction(record, 'reprobe') || actionMutation.isPending
-                              ? ['reprobe']
-                              : []),
-                            ...(!canRunAccountPoolAction(record, 'restore') || actionMutation.isPending
-                              ? ['restore']
-                              : []),
-                            ...(actionMutation.isPending ? ['delete'] : []),
-                          ]}
                           onAction={(key) => runAccountAction(record, String(key) as AccountPoolAction)}
                         >
-                          <DropdownItem key="reprobe" startContent={<RefreshCcw className="h-4 w-4" />}>
+                          <DropdownItem
+                            key="reprobe"
+                            startContent={<RefreshCcw className="h-4 w-4" />}
+                          >
                             {t('accountPool.actions.reprobe')}
                           </DropdownItem>
-                          <DropdownItem key="restore" startContent={<RotateCcw className="h-4 w-4" />}>
+                          <DropdownItem
+                            key="restore"
+                            isDisabled={!canRunAccountPoolAction(record, 'restore')}
+                            startContent={<RotateCcw className="h-4 w-4" />}
+                          >
                             {t('accountPool.actions.restore')}
                           </DropdownItem>
-                          <DropdownItem key="delete" className="text-danger" color="danger" startContent={<Trash2 className="h-4 w-4" />}>
+                          <DropdownItem
+                            key="delete"
+                            className="text-danger"
+                            color="danger"
+                            startContent={<Trash2 className="h-4 w-4" />}
+                          >
                             {t('accountPool.actions.delete')}
                           </DropdownItem>
                         </DropdownMenu>
@@ -1445,19 +1612,17 @@ export default function Accounts() {
               )}
             </TableBody>
           </Table>
-
-          <div className="flex flex-col gap-3 border-t border-default-200 pt-3 text-xs text-default-500 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex flex-col gap-3 border-t border-default-200 px-0 pt-4 text-xs text-default-500 sm:flex-row sm:items-center sm:justify-between">
             <div className="tabular-nums">
               {t('common.table.range', {
                 start: visibleRangeStart,
                 end: visibleRangeEnd,
-                total: filteredRecords.length,
+                total: sortedRecords.length,
               })}
             </div>
             <Pagination
-              color="primary"
-              isCompact
               page={resolvedPage}
+              size="sm"
               total={totalPages}
               onChange={setCurrentPage}
             />
@@ -1926,6 +2091,55 @@ export default function Accounts() {
                       return
                     }
                     actionMutation.mutate({ action: 'delete', record: deleteTarget })
+                  }}
+                >
+                  {t('accountPool.actions.delete')}
+                </Button>
+              </ModalFooter>
+            </>
+          )}
+        </ModalContent>
+      </Modal>
+
+      {/* ── Batch delete confirmation ── */}
+      <Modal
+        classNames={{
+          base: 'border-small border-default-200 bg-content1 shadow-large',
+          backdrop: 'bg-black/48 backdrop-blur-[2px]',
+        }}
+        isOpen={batchDeletePending}
+        size="md"
+        onOpenChange={(open) => {
+          if (!open) setBatchDeletePending(false)
+        }}
+      >
+        <ModalContent>
+          {() => (
+            <>
+              <ModalHeader className="flex flex-col gap-1">
+                <div className="text-lg font-semibold tracking-[-0.02em] text-foreground">
+                  {t('accountPool.messages.batchDeleteTitle', {
+                    defaultValue: 'Delete {{count}} records?',
+                    count: selectedIds.size,
+                  })}
+                </div>
+                <div className="text-sm leading-6 text-default-600">
+                  {t('accountPool.messages.batchDeleteDescription', {
+                    defaultValue: 'This action will mark selected records for deletion. This cannot be undone easily.',
+                  })}
+                </div>
+              </ModalHeader>
+              <ModalFooter>
+                <Button size="sm" variant="light" onPress={() => setBatchDeletePending(false)}>
+                  {t('common.cancel')}
+                </Button>
+                <Button
+                  color="danger"
+                  isLoading={batchActionMutation.isPending}
+                  size="sm"
+                  variant="flat"
+                  onPress={() => {
+                    batchActionMutation.mutate({ action: 'delete', ids: [...selectedIds] })
                   }}
                 >
                   {t('accountPool.actions.delete')}

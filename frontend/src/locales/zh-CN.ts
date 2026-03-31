@@ -443,6 +443,7 @@ export default {
         table: {
             allItemsSelected: "已选择全部条目",
             columns: "列",
+            clearSelection: "清除选择",
             dataTableAria: "数据表格",
             firstPage: "第一页",
             go: "跳转",
@@ -456,7 +457,10 @@ export default {
             rowsPerPage: "每页条数",
             searchLabel: "搜索表格",
             searchPlaceholder: "搜索当前列表…",
-            selectedCount: "已选 {{count}} / {{total}} 条",
+            selectAll: "全选本页",
+            selectFiltered: "全选当前筛选结果（{{count}} 条）",
+            selectRow: "选择当前行",
+            selectedCount: "已选 {{count}} 条",
             statusLabel: "状态",
             statusFilter: "状态筛选",
             totalItems: "共 {{count}} 条"
