@@ -15,6 +15,11 @@ test('admin client uses shared auth client contract instead of localStorage redi
   assert.match(source, /getAdminAccessToken/, 'admin client should read token from admin session')
   assert.match(source, /AUTH_REQUIRED_EVENT/, 'admin client should export auth required event')
   assert.match(source, /LOGIN_FAILED_EVENT/, 'admin client should export login failed event')
+  assert.match(
+    source,
+    /\/account-pool\/accounts\/.*\/responses\/test|shouldDispatchAuthRequired/,
+    'admin client should keep account-pool real test 401s from triggering global auth expiry handling',
+  )
   assert.doesNotMatch(
     source,
     /localStorage\.getItem\('access_token'\)/,

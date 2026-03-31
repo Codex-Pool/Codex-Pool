@@ -19,6 +19,7 @@ interface AuthClientOptions {
   authRequiredDetail?: unknown
   logDevErrors?: boolean
   unwrapResponseData?: boolean
+  shouldDispatchAuthRequired?: (error: AxiosError<ApiErrorBody>) => boolean
 }
 
 function hasAuthorizationHeader(config: InternalAxiosRequestConfig): boolean {
@@ -55,7 +56,12 @@ export function createAuthApiClient(options: AuthClientOptions): AxiosInstance {
         window.dispatchEvent(new CustomEvent(options.loginFailedEvent))
       }
 
-      if (status === 401 && !options.isAuthEndpoint(url)) {
+      const shouldDispatchAuthRequired =
+        status === 401
+        && !options.isAuthEndpoint(url)
+        && (options.shouldDispatchAuthRequired?.(error) ?? true)
+
+      if (shouldDispatchAuthRequired) {
         window.dispatchEvent(
           new CustomEvent(options.authRequiredEvent, {
             detail: options.authRequiredDetail,

@@ -23,6 +23,15 @@ function isAuthEndpoint(url?: string): boolean {
   )
 }
 
+function shouldDispatchAdminAuthRequired(error: Parameters<NonNullable<Parameters<typeof createAuthApiClient>[0]['shouldDispatchAuthRequired']>>[0]) {
+  const url = error?.config?.url
+  if (!url) {
+    return true
+  }
+
+  return !/\/account-pool\/accounts\/[^/]+\/responses\/test(?:\?.*)?$/.test(url)
+}
+
 export const apiClient = createAuthApiClient({
   baseURL: '/api/v1',
   timeout: 10_000,
@@ -34,6 +43,7 @@ export const apiClient = createAuthApiClient({
   authRequiredDetail: { reason: SESSION_EXPIRED_REASON },
   logDevErrors: true,
   unwrapResponseData: false,
+  shouldDispatchAuthRequired: shouldDispatchAdminAuthRequired,
 })
 
 export function extractApiErrorMessage(error: unknown): string | null {

@@ -53,6 +53,11 @@ import {
   type AccountPoolRecordScope,
   type AccountPoolResponsesTestResponse,
 } from '@/api/accounts'
+import {
+  extractApiErrorCodeFrom,
+  extractApiErrorMessageFrom,
+  extractApiErrorStatusFrom,
+} from '@/api/client'
 import { localizeApiErrorDisplay, localizeOAuthErrorCodeDisplay } from '@/api/errorI18n'
 import { modelsApi } from '@/api/models'
 import { SignalHeatmapCanvas, SignalHeatmapMini } from '@/features/accounts/signal-heatmap-canvas'
@@ -86,6 +91,13 @@ interface AccountPoolResponsesTestMessage {
   role: ResponsesTestMessageRole
   text: string
   meta?: AccountPoolResponsesTestResponse
+}
+
+interface AccountPoolResponsesTestErrorState {
+  label: string
+  rawMessage: string | null
+  code: string | null
+  status: number | null
 }
 
 const TABLE_PAGE_SIZE_OPTIONS = [10, 20, 50]
@@ -162,6 +174,23 @@ function resolveResponsesTestUsageLines(
   ]
 
   return items.filter((item) => typeof item.value === 'number')
+}
+
+function buildResponsesTestErrorState(
+  error: unknown,
+  t: ReturnType<typeof useTranslation>['t'],
+): AccountPoolResponsesTestErrorState {
+  const display = localizeApiErrorDisplay(t, error, t('accountPool.messages.actionFailed'))
+  const rawMessage = extractApiErrorMessageFrom(error)?.trim() ?? null
+  const code = extractApiErrorCodeFrom(error)?.trim() ?? null
+  const status = extractApiErrorStatusFrom(error)
+
+  return {
+    label: display.label,
+    rawMessage: rawMessage || null,
+    code: code || null,
+    status,
+  }
 }
 
 function getStateColor(state: AccountPoolOperatorState) {
@@ -600,7 +629,7 @@ export default function Accounts() {
   const [selectedTestModel, setSelectedTestModel] = useState('')
   const [testMessages, setTestMessages] = useState<AccountPoolResponsesTestMessage[]>([])
   const [previousResponseId, setPreviousResponseId] = useState<string | null>(null)
-  const [testError, setTestError] = useState<string | null>(null)
+  const [testError, setTestError] = useState<AccountPoolResponsesTestErrorState | null>(null)
   /** 乐观反馈：记录 ID → 当前动效状态 */
   const [rowFeedback, setRowFeedback] = useState<Map<string, 'pending' | 'success' | 'error'>>(new Map())
 
@@ -902,7 +931,7 @@ export default function Accounts() {
       setTestError(null)
     },
     onError: (error) => {
-      setTestError(localizeApiErrorDisplay(t, error, t('accountPool.messages.actionFailed')).label)
+      setTestError(buildResponsesTestErrorState(error, t))
     },
   })
 
@@ -1685,8 +1714,34 @@ export default function Accounts() {
                               ) : null}
 
                               {testError ? (
-                                <div className="rounded-large border border-danger/40 px-4 py-3 text-sm text-danger-600">
-                                  {testError}
+                                <div className="space-y-3 rounded-large border border-danger/40 px-4 py-3">
+                                  <div className="text-sm text-danger-600">
+                                    {testError.label}
+                                  </div>
+                                  {testError.rawMessage ? (
+                                    <div className="space-y-2 rounded-large border border-default-200/70 bg-content1/70 px-3 py-3">
+                                      <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-default-500">
+                                        {t('accountPool.detail.test.rawError')}
+                                      </div>
+                                      <div className="whitespace-pre-wrap break-words font-mono text-xs leading-6 text-foreground">
+                                        {testError.rawMessage}
+                                      </div>
+                                    </div>
+                                  ) : null}
+                                  {testError.code || typeof testError.status === 'number' ? (
+                                    <div className="flex flex-wrap gap-2 text-xs text-default-500">
+                                      {typeof testError.status === 'number' ? (
+                                        <Chip size="sm" variant="flat">
+                                          {t('accountPool.detail.test.statusCode')}: {testError.status}
+                                        </Chip>
+                                      ) : null}
+                                      {testError.code ? (
+                                        <Chip size="sm" variant="flat">
+                                          {t('accountPool.detail.test.errorCode')}: {testError.code}
+                                        </Chip>
+                                      ) : null}
+                                    </div>
+                                  ) : null}
                                 </div>
                               ) : null}
 

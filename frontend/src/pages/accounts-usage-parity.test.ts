@@ -146,6 +146,11 @@ test("Accounts detail modal exposes the runtime-only real responses testing pane
   );
   assert.match(
     source,
+    /extractApiErrorMessageFrom/,
+    "Accounts should surface the raw responses test error message for operator debugging",
+  );
+  assert.match(
+    source,
     /<Textarea/,
     "Accounts should render the test prompt input with HeroUI Textarea",
   );
@@ -158,6 +163,11 @@ test("Accounts detail modal exposes the runtime-only real responses testing pane
     source,
     /accountPool\.detail\.sections\.realTest/,
     "Accounts should localize the new real test section title through accountPool.detail.sections.realTest",
+  );
+  assert.match(
+    source,
+    /accountPool\.detail\.test\.rawError/,
+    "Accounts should localize the raw error label for the real test debug panel",
   );
   assert.match(
     zh,
@@ -175,8 +185,18 @@ test("Accounts detail modal exposes the runtime-only real responses testing pane
     "zh-CN should explain the runtime-only limitation for the first version",
   );
   assert.match(
+    zh,
+    /rawError:\s*"原始报错"/,
+    "zh-CN should define the raw responses test error label",
+  );
+  assert.match(
     en,
     /runtimeOnly:\s*"The first version of real testing only supports runtime records"/,
     "en should explain the runtime-only limitation for the first version",
+  );
+  assert.match(
+    en,
+    /rawError:\s*"Raw error"/,
+    "en should define the raw responses test error label",
   );
 });
