@@ -1027,7 +1027,7 @@ impl ControlPlaneStore for PostgresStore {
         rate_limits: Vec<OAuthRateLimitSnapshot>,
         observed_at: DateTime<Utc>,
     ) -> Result<()> {
-        self.persist_rate_limit_cache_success(account_id, rate_limits, observed_at)
+        self.persist_rate_limit_cache_success(account_id, rate_limits, observed_at, None)
             .await
     }
 }

@@ -904,7 +904,7 @@ impl ControlPlaneStore for InMemoryStore {
         rate_limits: Vec<OAuthRateLimitSnapshot>,
         observed_at: DateTime<Utc>,
     ) -> Result<()> {
-        self.persist_rate_limit_cache_success_inner(account_id, rate_limits, observed_at);
+        self.persist_rate_limit_cache_success_inner(account_id, rate_limits, observed_at, None);
         Ok(())
     }
 
@@ -956,7 +956,7 @@ mod tests {
         UpsertOneTimeSessionAccountRequest,
     };
     use crate::crypto::CredentialCipher;
-    use crate::oauth::{OAuthTokenClient, OAuthTokenInfo};
+    use crate::oauth::{OAuthTokenClient, OAuthTokenInfo, OAuthUsageSnapshot};
     use crate::system_events::{
         sqlite_repo::SqliteSystemEventRepo, SystemEventLogRuntime, SystemEventQuery,
         SystemEventRepository,
@@ -1212,6 +1212,20 @@ mod tests {
                 }),
                 secondary: None,
             }])
+        }
+
+        async fn fetch_usage(
+            &self,
+            access_token: &str,
+            base_url: Option<&str>,
+            chatgpt_account_id: Option<&str>,
+        ) -> Result<OAuthUsageSnapshot, crate::oauth::OAuthTokenClientError> {
+            Ok(OAuthUsageSnapshot {
+                rate_limits: self
+                    .fetch_rate_limits(access_token, base_url, chatgpt_account_id)
+                    .await?,
+                chatgpt_plan_type: Some("plus".to_string()),
+            })
         }
     }
 
@@ -2105,6 +2119,7 @@ mod tests {
             .expect("oauth account status");
         assert_eq!(status.rate_limits.len(), 1);
         assert_eq!(status.rate_limits[0].limit_id.as_deref(), Some("five_hours"));
+        assert_eq!(status.chatgpt_plan_type.as_deref(), Some("plus"));
         assert!(status.rate_limits_fetched_at.is_some());
         assert!(status.rate_limits_expires_at.is_some());
         assert!(status.rate_limits_last_error_code.is_none());
@@ -2280,6 +2295,7 @@ mod tests {
         assert_eq!(status.auth_provider, UpstreamAuthProvider::LegacyBearer);
         assert_eq!(status.rate_limits.len(), 1);
         assert_eq!(status.rate_limits[0].limit_id.as_deref(), Some("five_hours"));
+        assert_eq!(status.chatgpt_plan_type.as_deref(), Some("plus"));
         assert!(status.rate_limits_fetched_at.is_some());
     }
 
@@ -2317,6 +2333,7 @@ mod tests {
         assert_eq!(status.auth_provider, UpstreamAuthProvider::LegacyBearer);
         assert_eq!(status.rate_limits.len(), 1);
         assert_eq!(status.rate_limits[0].limit_id.as_deref(), Some("five_hours"));
+        assert_eq!(status.chatgpt_plan_type.as_deref(), Some("plus"));
         assert!(status.rate_limits_fetched_at.is_some());
     }
 
@@ -2353,6 +2370,7 @@ mod tests {
         assert_eq!(status.auth_provider, UpstreamAuthProvider::LegacyBearer);
         assert_eq!(status.rate_limits.len(), 1);
         assert_eq!(status.rate_limits[0].limit_id.as_deref(), Some("five_hours"));
+        assert_eq!(status.chatgpt_plan_type.as_deref(), Some("plus"));
         assert!(status.rate_limits_fetched_at.is_some());
     }
 

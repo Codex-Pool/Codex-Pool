@@ -815,6 +815,7 @@ impl PostgresStore {
         account_id: Uuid,
         rate_limits: Vec<OAuthRateLimitSnapshot>,
         fetched_at: DateTime<Utc>,
+        chatgpt_plan_type: Option<String>,
     ) -> Result<()> {
         let (blocked_until, block_reason) = derive_rate_limit_block(&rate_limits, fetched_at);
         let expires_at = blocked_until
@@ -827,6 +828,26 @@ impl PostgresStore {
             .begin()
             .await
             .context("failed to start oauth rate-limit success transaction")?;
+
+        if let Some(plan_type) = chatgpt_plan_type
+            .map(|raw| raw.trim().to_string())
+            .filter(|raw| !raw.is_empty())
+        {
+            sqlx::query(
+                r#"
+                UPDATE upstream_account_session_profiles
+                SET chatgpt_plan_type = $2, updated_at = $3
+                WHERE account_id = $1
+                  AND chatgpt_plan_type IS DISTINCT FROM $2
+                "#,
+            )
+            .bind(account_id)
+            .bind(plan_type)
+            .bind(fetched_at)
+            .execute(tx.as_mut())
+            .await
+            .context("failed to update oauth session profile plan type from usage")?;
+        }
 
         sqlx::query(
             r#"
@@ -976,11 +997,16 @@ impl PostgresStore {
     async fn persist_rate_limit_success_outcome(
         &self,
         account_id: Uuid,
-        rate_limits: Vec<OAuthRateLimitSnapshot>,
+        usage: crate::oauth::OAuthUsageSnapshot,
         fetched_at: DateTime<Utc>,
     ) -> (bool, Option<String>) {
         match self
-            .persist_rate_limit_cache_success(account_id, rate_limits, fetched_at)
+            .persist_rate_limit_cache_success(
+                account_id,
+                usage.rate_limits,
+                fetched_at,
+                usage.chatgpt_plan_type,
+            )
             .await
         {
             Ok(()) => (true, None),
@@ -1255,10 +1281,10 @@ impl PostgresStore {
                         )
                         .await
                     {
-                        Ok(rate_limits) => {
+                        Ok(usage) => {
                             self.persist_rate_limit_success_outcome(
                                 account_id,
-                                rate_limits,
+                                usage,
                                 fetched_at,
                             )
                             .await
@@ -1315,10 +1341,10 @@ impl PostgresStore {
                                         )
                                         .await
                                     {
-                                        Ok(rate_limits) => {
+                                        Ok(usage) => {
                                             self.persist_rate_limit_success_outcome(
                                                 account_id,
-                                                rate_limits,
+                                                usage,
                                                 refetched_at,
                                             )
                                             .await

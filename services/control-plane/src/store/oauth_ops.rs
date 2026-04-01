@@ -313,17 +313,22 @@ impl InMemoryStore {
 
         match self
             .oauth_client
-            .fetch_rate_limits(
+            .fetch_usage(
                 &access_token,
                 Some(&account.base_url),
                 account.chatgpt_account_id.as_deref(),
             )
             .await
         {
-            Ok(rate_limits) => {
+            Ok(usage) => {
                 let (blocked_until, block_reason) =
-                    derive_rate_limit_block(&rate_limits, checked_at);
-                self.persist_rate_limit_cache_success_inner(account_id, rate_limits, checked_at);
+                    derive_rate_limit_block(&usage.rate_limits, checked_at);
+                self.persist_rate_limit_cache_success_inner(
+                    account_id,
+                    usage.rate_limits,
+                    checked_at,
+                    usage.chatgpt_plan_type,
+                );
 
                 if let Some(reason_code) = block_reason {
                     self.record_account_probe_result_inner(
@@ -1534,6 +1539,7 @@ impl InMemoryStore {
                 account.id,
                 record.admission_rate_limits.clone(),
                 record.admission_checked_at.unwrap_or(now),
+                None,
             );
         }
         self.record_account_probe_result_inner(
@@ -1777,7 +1783,7 @@ impl InMemoryStore {
     async fn fetch_live_rate_limits_result(
         &self,
         target: &InMemoryRateLimitRefreshTarget,
-    ) -> Result<Vec<OAuthRateLimitSnapshot>, (String, String)> {
+    ) -> Result<crate::oauth::OAuthUsageSnapshot, (String, String)> {
         let access_token = match &target.token_source {
             InMemoryRateLimitRefreshTokenSource::EncryptedAccessToken(access_token_enc) => {
                 let Some(cipher) = self.credential_cipher.as_ref() else {
@@ -1795,11 +1801,11 @@ impl InMemoryStore {
             }
         };
         if access_token.trim().is_empty() {
-            return Ok(Vec::new());
+            return Ok(crate::oauth::OAuthUsageSnapshot::default());
         }
 
         self.oauth_client
-            .fetch_rate_limits(
+            .fetch_usage(
                 &access_token,
                 Some(&target.base_url),
                 target.chatgpt_account_id.as_deref(),
@@ -1813,6 +1819,7 @@ impl InMemoryStore {
         account_id: Uuid,
         rate_limits: Vec<OAuthRateLimitSnapshot>,
         fetched_at: DateTime<Utc>,
+        chatgpt_plan_type: Option<String>,
     ) {
         let (blocked_until, block_reason) = derive_rate_limit_block(&rate_limits, fetched_at);
         let expires_at = blocked_until
@@ -1828,6 +1835,14 @@ impl InMemoryStore {
                 last_error,
             },
         );
+        if let Some(plan_type) = chatgpt_plan_type
+            .map(|raw| raw.trim().to_string())
+            .filter(|raw| !raw.is_empty())
+        {
+            if let Some(profile) = self.session_profiles.write().unwrap().get_mut(&account_id) {
+                profile.chatgpt_plan_type = Some(plan_type);
+            }
+        }
         self.revision.fetch_add(1, Ordering::Relaxed);
     }
 
@@ -1961,11 +1976,12 @@ impl InMemoryStore {
             .map(|target| async move {
                 let fetched_at = Utc::now();
                 match self.fetch_live_rate_limits_result(&target).await {
-                    Ok(rate_limits) => {
+                    Ok(usage) => {
                         self.persist_rate_limit_cache_success_inner(
                             target.account_id,
-                            rate_limits,
+                            usage.rate_limits,
                             fetched_at,
+                            usage.chatgpt_plan_type,
                         );
                         (true, None)
                     }

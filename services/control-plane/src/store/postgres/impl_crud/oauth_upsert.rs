@@ -301,16 +301,16 @@ impl PostgresStore {
             return;
         }
         let fetched_at = Utc::now();
-        let rate_limits = match self
+        let usage = match self
             .oauth_client
-            .fetch_rate_limits(
+            .fetch_usage(
                 access_token,
                 Some(base_url),
                 chatgpt_account_id.as_deref(),
             )
             .await
         {
-            Ok(rate_limits) => rate_limits,
+            Ok(usage) => usage,
             Err(err) => {
                 tracing::warn!(
                     account_id = %account_id,
@@ -322,7 +322,12 @@ impl PostgresStore {
         };
 
         if let Err(err) = self
-            .persist_rate_limit_cache_success(account_id, rate_limits, fetched_at)
+            .persist_rate_limit_cache_success(
+                account_id,
+                usage.rate_limits,
+                fetched_at,
+                usage.chatgpt_plan_type,
+            )
             .await
         {
             tracing::warn!(
@@ -1459,6 +1464,7 @@ impl PostgresStore {
                     account_id,
                     record.admission_rate_limits.clone(),
                     record.admission_checked_at.unwrap_or(now),
+                    record.chatgpt_plan_type.clone(),
                 )
                 .await
             {

@@ -490,11 +490,11 @@ impl PostgresStore {
         bearer_token: Option<String>,
         base_url: Option<String>,
         chatgpt_account_id: Option<String>,
-    ) -> Result<Vec<OAuthRateLimitSnapshot>, (String, String)> {
+    ) -> Result<crate::oauth::OAuthUsageSnapshot, (String, String)> {
         let access_token = match auth_provider {
             UpstreamAuthProvider::OAuthRefreshToken => {
                 let Some(access_token_enc) = access_token_enc else {
-                    return Ok(Vec::new());
+                    return Ok(crate::oauth::OAuthUsageSnapshot::default());
                 };
                 let Some(cipher) = self.credential_cipher.as_ref() else {
                     return Err((
@@ -512,11 +512,11 @@ impl PostgresStore {
             UpstreamAuthProvider::LegacyBearer => bearer_token.unwrap_or_default(),
         };
         if access_token.trim().is_empty() {
-            return Ok(Vec::new());
+            return Ok(crate::oauth::OAuthUsageSnapshot::default());
         }
 
         self.oauth_client
-            .fetch_rate_limits(
+            .fetch_usage(
                 &access_token,
                 base_url.as_deref(),
                 chatgpt_account_id.as_deref(),

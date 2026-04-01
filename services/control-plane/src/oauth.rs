@@ -109,6 +109,12 @@ pub struct OAuthTokenInfo {
     pub groups: Option<Vec<Value>>,
 }
 
+#[derive(Debug, Clone, Default)]
+pub struct OAuthUsageSnapshot {
+    pub rate_limits: Vec<OAuthRateLimitSnapshot>,
+    pub chatgpt_plan_type: Option<String>,
+}
+
 #[derive(Debug, Error)]
 pub enum OAuthTokenClientError {
     #[error("oauth token endpoint is not configured")]
@@ -162,6 +168,20 @@ pub trait OAuthTokenClient: Send + Sync {
         _chatgpt_account_id: Option<&str>,
     ) -> Result<Vec<OAuthRateLimitSnapshot>, OAuthTokenClientError> {
         Ok(Vec::new())
+    }
+
+    async fn fetch_usage(
+        &self,
+        access_token: &str,
+        base_url: Option<&str>,
+        chatgpt_account_id: Option<&str>,
+    ) -> Result<OAuthUsageSnapshot, OAuthTokenClientError> {
+        Ok(OAuthUsageSnapshot {
+            rate_limits: self
+                .fetch_rate_limits(access_token, base_url, chatgpt_account_id)
+                .await?,
+            chatgpt_plan_type: None,
+        })
     }
 }
 
@@ -480,6 +500,8 @@ struct OAuthTokenEndpointError {
 #[derive(Debug, Deserialize)]
 struct RateLimitStatusPayload {
     #[serde(default)]
+    plan_type: Option<String>,
+    #[serde(default)]
     rate_limit: Option<RateLimitStatusDetails>,
     #[serde(default)]
     additional_rate_limits: Option<Vec<AdditionalRateLimitDetails>>,
@@ -716,9 +738,21 @@ impl OAuthTokenClient for OpenAiOAuthClient {
         base_url: Option<&str>,
         chatgpt_account_id: Option<&str>,
     ) -> Result<Vec<OAuthRateLimitSnapshot>, OAuthTokenClientError> {
+        Ok(self
+            .fetch_usage(access_token, base_url, chatgpt_account_id)
+            .await?
+            .rate_limits)
+    }
+
+    async fn fetch_usage(
+        &self,
+        access_token: &str,
+        base_url: Option<&str>,
+        chatgpt_account_id: Option<&str>,
+    ) -> Result<OAuthUsageSnapshot, OAuthTokenClientError> {
         let trimmed_access_token = access_token.trim();
         if trimmed_access_token.is_empty() {
-            return Ok(Vec::new());
+            return Ok(OAuthUsageSnapshot::default());
         }
 
         let usage_url = resolve_usage_endpoint(base_url);
@@ -783,7 +817,7 @@ impl OAuthTokenClient for OpenAiOAuthClient {
             .json::<RateLimitStatusPayload>()
             .await
             .map_err(|_| OAuthTokenClientError::Parse)?;
-        Ok(rate_limit_snapshots_from_payload(payload))
+        Ok(usage_snapshot_from_payload(payload))
     }
 
     async fn fetch_workspace_name(
@@ -921,11 +955,14 @@ fn resolve_workspace_check_endpoint(base_url: Option<&str>) -> Option<String> {
     ))
 }
 
-fn rate_limit_snapshots_from_payload(
-    payload: RateLimitStatusPayload,
-) -> Vec<OAuthRateLimitSnapshot> {
+fn usage_snapshot_from_payload(payload: RateLimitStatusPayload) -> OAuthUsageSnapshot {
+    let RateLimitStatusPayload {
+        plan_type,
+        rate_limit,
+        additional_rate_limits,
+    } = payload;
     let mut snapshots = Vec::new();
-    if let Some(rate_limit) = payload.rate_limit {
+    if let Some(rate_limit) = rate_limit {
         if let Some(snapshot) =
             to_rate_limit_snapshot(Some("codex".to_string()), None, Some(rate_limit))
         {
@@ -933,7 +970,7 @@ fn rate_limit_snapshots_from_payload(
         }
     }
 
-    if let Some(additional_limits) = payload.additional_rate_limits {
+    if let Some(additional_limits) = additional_rate_limits {
         for limit in additional_limits {
             if let Some(snapshot) =
                 to_rate_limit_snapshot(limit.metered_feature, limit.limit_name, limit.rate_limit)
@@ -943,7 +980,10 @@ fn rate_limit_snapshots_from_payload(
         }
     }
 
-    snapshots
+    OAuthUsageSnapshot {
+        rate_limits: snapshots,
+        chatgpt_plan_type: normalize_optional_string(plan_type),
+    }
 }
 
 fn to_rate_limit_snapshot(
@@ -1373,8 +1413,8 @@ mod tests {
     use super::{
         classify_oauth_error_code, parse_access_token_claims, parse_id_token_claims,
         parse_workspace_name_from_accounts_check, resolve_openai_oauth_client_id,
-        resolve_usage_endpoint, resolve_workspace_check_endpoint, OAuthRefreshErrorCode,
-        OAuthTokenEndpointError,
+        resolve_usage_endpoint, resolve_workspace_check_endpoint, usage_snapshot_from_payload,
+        OAuthRefreshErrorCode, OAuthTokenEndpointError, RateLimitStatusPayload,
     };
     use base64::Engine;
     use chrono::{DateTime, Utc};
@@ -1468,6 +1508,38 @@ mod tests {
     fn resolve_workspace_check_endpoint_skips_non_chatgpt_base() {
         let endpoint = resolve_workspace_check_endpoint(Some("https://example.com/codex"));
         assert_eq!(endpoint, None);
+    }
+
+    #[test]
+    fn usage_snapshot_from_payload_reads_plan_type_and_windows() {
+        let payload = serde_json::from_value::<RateLimitStatusPayload>(json!({
+            "plan_type": "plus",
+            "rate_limit": {
+                "primary_window": {
+                    "used_percent": 10.0,
+                    "limit_window_seconds": 18000,
+                    "reset_at": 1775046647
+                },
+                "secondary_window": {
+                    "used_percent": 40.0,
+                    "limit_window_seconds": 604800,
+                    "reset_at": 1775565047
+                }
+            }
+        }))
+        .expect("parse usage payload");
+
+        let usage = usage_snapshot_from_payload(payload);
+        assert_eq!(usage.chatgpt_plan_type.as_deref(), Some("plus"));
+        assert_eq!(usage.rate_limits.len(), 1);
+        assert_eq!(usage.rate_limits[0].primary.as_ref().and_then(|w| w.window_minutes), Some(300));
+        assert_eq!(
+            usage.rate_limits[0]
+                .secondary
+                .as_ref()
+                .and_then(|w| w.window_minutes),
+            Some(10080)
+        );
     }
 
     #[test]
