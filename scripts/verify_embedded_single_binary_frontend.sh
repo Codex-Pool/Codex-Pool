@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-IMAGE_TAG="${1:-codex-pool-rust:ci}"
+IMAGE_TAG="${1:-codex-pool-personal:ci}"
 PORT_BASE="${PORT_BASE:-18090}"
 TIMEOUT_SEC="${TIMEOUT_SEC:-30}"
 
@@ -28,8 +28,7 @@ run_check() {
     -e "ADMIN_USERNAME=admin" \
     -e "ADMIN_PASSWORD=admin123456" \
     -e "ADMIN_JWT_SECRET=test-admin-jwt-secret" \
-    "$IMAGE_TAG" \
-    control-plane >/dev/null
+    "$IMAGE_TAG" >/dev/null
 
   local deadline=$((SECONDS + TIMEOUT_SEC))
   while (( SECONDS < deadline )); do

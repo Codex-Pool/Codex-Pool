@@ -206,11 +206,8 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Build Rust runtime image
-        run: docker build -f docker/rust-runtime.Dockerfile -t codex-pool-rust:ci .
+      - name: Build Personal runtime image
+        run: docker build -f docker/personal.runtime.Dockerfile -t codex-pool-personal:ci .
 
       - name: Verify embedded single-binary frontend
-        run: bash scripts/verify_embedded_single_binary_frontend.sh codex-pool-rust:ci
-
-      - name: Build frontend runtime image
-        run: docker build -f docker/frontend.runtime.Dockerfile -t codex-pool-frontend:ci .
+        run: bash scripts/verify_embedded_single_binary_frontend.sh codex-pool-personal:ci

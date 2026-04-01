@@ -19,7 +19,7 @@
 
 - 当前仓库对外主推的是 `personal`：单实例、单管理员入口、SQLite 存储、内嵌管理台。
 - `team` 和 `business` 仍在开发中，仓库里已有部分代码、文档和编排文件，但**暂不作为公开稳定使用路径承诺**。
-- 推荐的公开使用方式是：本地构建 `personal` 二进制，配置环境变量后直接运行。
+- 推荐的公开使用方式是：直接拉取 GHCR 预构建的 `personal` 镜像并用 Docker Compose 启动。
 
 ## 它能做什么
 
@@ -46,7 +46,62 @@ Codex-Pool 用于把多个上游账号统一纳入一个管理面和一个兼容
 
 如果你要公开部署或对外文档化，建议默认只写 `personal`，不要把 `team` / `business` 当作已稳定发布能力。
 
-## Personal 快速开始
+## Personal Docker 快速开始
+
+### 1. 准备依赖
+
+- Docker
+- Docker Compose
+
+### 2. 准备环境变量
+
+以 [`docker/.env.personal.example`](./docker/.env.personal.example) 为模板准备一份本地环境文件：
+
+```bash
+cp docker/.env.personal.example .env.personal
+```
+
+你至少需要替换这些值：
+
+- `CONTROL_PLANE_INTERNAL_AUTH_TOKEN`
+- `CONTROL_PLANE_API_KEY_HMAC_KEYS`
+- `CREDENTIALS_ENCRYPTION_KEY`
+- `ADMIN_PASSWORD`
+- `ADMIN_JWT_SECRET`
+
+默认镜像是：
+
+```bash
+PERSONAL_IMAGE=ghcr.io/codex-pool/codex-pool-personal:latest
+```
+
+如果你要锁定正式版本，也可以改成类似：
+
+```bash
+PERSONAL_IMAGE=ghcr.io/codex-pool/codex-pool-personal:v0.1.0
+```
+
+### 3. 启动
+
+```bash
+docker compose --env-file .env.personal -f docker-compose.personal.yml up -d
+```
+
+启动后访问：
+
+- 管理台：`http://127.0.0.1:${PERSONAL_APP_PORT:-8090}`
+- 健康检查：`http://127.0.0.1:${PERSONAL_APP_PORT:-8090}/livez`
+
+### 4. 关于平台架构
+
+官方预构建镜像会发布 Linux 双架构：
+
+- `linux/amd64`
+- `linux/arm64`
+
+所以在 Intel Linux、Apple Silicon macOS，以及大多数使用 Docker Desktop 的 Windows 环境里，都会自动拉取合适的 Linux 镜像。
+
+## Personal 源码构建（开发者）
 
 ### 1. 准备依赖
 
@@ -74,54 +129,6 @@ cargo build --release -p control-plane --no-default-features --features sqlite-b
 ```text
 target/release/codex-pool-personal
 ```
-
-### 4. 配置环境变量
-
-可以把 [`docker/.env.personal.example`](./docker/.env.personal.example) 当作参考模板，但推荐你自己创建一份本地环境文件，例如 `.env.runtime`，不要把真实值提交进仓库。
-
-`personal` 至少需要这些变量：
-
-| 变量 | 说明 |
-| --- | --- |
-| `PERSONAL_SQLITE_PATH` | SQLite 文件路径 |
-| `CONTROL_PLANE_INTERNAL_AUTH_TOKEN` | control-plane / data-plane 内部鉴权 token |
-| `CONTROL_PLANE_API_KEY_HMAC_KEYS` | API Key HMAC key ring，格式 `kid:base64_secret` |
-| `CREDENTIALS_ENCRYPTION_KEY` | 凭据加密密钥，Base64 编码的 32 字节密钥 |
-| `ADMIN_PASSWORD` | 管理台管理员密码 |
-| `ADMIN_JWT_SECRET` | 管理台 JWT secret |
-
-常用可选变量：
-
-| 变量 | 说明 |
-| --- | --- |
-| `ADMIN_USERNAME` | 管理台用户名，未显式设置时通常使用 `admin` |
-| `PERSONAL_APP_PORT` | 监听端口，常见为 `8090` |
-| `RUST_LOG` | 日志级别 |
-
-示例：
-
-```bash
-export PERSONAL_SQLITE_PATH="$PWD/codex-pool-personal.sqlite"
-export CONTROL_PLANE_INTERNAL_AUTH_TOKEN="$(openssl rand -hex 32)"
-export CONTROL_PLANE_API_KEY_HMAC_KEYS="k1:$(openssl rand -base64 32)"
-export CREDENTIALS_ENCRYPTION_KEY="$(openssl rand -base64 32)"
-export ADMIN_USERNAME="admin"
-export ADMIN_PASSWORD="replace-with-your-own-password"
-export ADMIN_JWT_SECRET="$(openssl rand -base64 32)"
-export PERSONAL_APP_PORT="8090"
-export RUST_LOG="info"
-```
-
-### 5. 运行
-
-```bash
-target/release/codex-pool-personal
-```
-
-启动后访问：
-
-- 管理台：`http://127.0.0.1:${PERSONAL_APP_PORT:-8090}`
-- 健康检查：`http://127.0.0.1:${PERSONAL_APP_PORT:-8090}/health`
 
 ## 管理员鉴权
 

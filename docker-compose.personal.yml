@@ -2,11 +2,7 @@ name: codex-pool-personal
 
 services:
   app:
-    image: ${CONTROL_PLANE_IMAGE:-codex-pool-rust:local}
-    build:
-      context: .
-      dockerfile: docker/rust-runtime.Dockerfile
-    command: ["control-plane"]
+    image: ${PERSONAL_IMAGE:-ghcr.io/codex-pool/codex-pool-personal:latest}
     restart: unless-stopped
     environment:
       CODEX_POOL_EDITION: personal
