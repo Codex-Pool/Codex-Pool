@@ -407,7 +407,7 @@ export default function Dashboard() {
       {/* ── Pool 数据概览（紧凑分组） ── */}
       <div className="space-y-5">
         {/* Primary KPIs — with sparkline */}
-        <DashboardMetricGrid variant="primary" className="xl:grid-cols-4">
+        <DashboardMetricGrid variant="primary" gridClassName="xl:grid-cols-4">
           {primaryMetrics.map((metric) => (
             <DashboardMetricCard
               key={metric.id}
@@ -423,7 +423,7 @@ export default function Dashboard() {
         </DashboardMetricGrid>
 
         {/* Secondary KPIs — compact */}
-        <DashboardMetricGrid variant="secondary" className="mt-3 xl:grid-cols-4">
+        <DashboardMetricGrid variant="secondary" className="mt-3" gridClassName="xl:grid-cols-4">
           {secondaryMetrics.map((metric) => (
             <DashboardMetricCard
               key={metric.id}

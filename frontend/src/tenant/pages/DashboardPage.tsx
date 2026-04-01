@@ -525,7 +525,7 @@ export function TenantDashboardPage() {
           </PagePanel>
         )}
       >
-        <DashboardMetricGrid className="xl:grid-cols-3">
+        <DashboardMetricGrid gridClassName="xl:grid-cols-3">
           {kpiCards.map((item) => (
             <DashboardMetricCard
               key={item.title}

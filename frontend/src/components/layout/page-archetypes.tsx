@@ -443,24 +443,45 @@ export function DashboardShell({
 
 interface DashboardMetricGridProps extends HTMLAttributes<HTMLDivElement> {
   variant?: 'primary' | 'secondary'
+  gridClassName?: string
 }
 
 export function DashboardMetricGrid({
   className,
+  gridClassName,
   children,
   variant = 'primary',
   ...props
 }: DashboardMetricGridProps) {
   const overview = describeDashboardOverviewLayout()
 
+  if (overview.metricPresentation === 'strip') {
+    return (
+      <PagePanel
+        as="div"
+        className={cn('overflow-hidden px-0 py-0 sm:px-0 sm:py-0 lg:px-0 lg:py-0', className)}
+        {...props}
+      >
+        <div
+          className={cn(
+            'grid gap-px bg-default-100 sm:grid-cols-2 2xl:grid-cols-4',
+            variant === 'secondary' && 'xl:grid-cols-4',
+            gridClassName,
+          )}
+        >
+          {children}
+        </div>
+      </PagePanel>
+    )
+  }
+
   return (
     <div
       className={cn(
-        overview.metricPresentation === 'strip' &&
-          'grid gap-px overflow-hidden rounded-large border-small border-default-200 bg-default-100 sm:grid-cols-2 2xl:grid-cols-4',
-        overview.metricPresentation !== 'strip' && 'grid gap-3 sm:grid-cols-2 2xl:grid-cols-4',
+        'grid gap-3 sm:grid-cols-2 2xl:grid-cols-4',
         variant === 'secondary' && 'xl:grid-cols-4',
         className,
+        gridClassName,
       )}
       {...props}
     >
