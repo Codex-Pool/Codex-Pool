@@ -449,6 +449,10 @@ function getReasonCodeLabel(
   }
 }
 
+function hasReasonCode(reasonCode: string | undefined) {
+  return Boolean((reasonCode ?? '').trim())
+}
+
 function buildUsageRows(
   record: AccountPoolRecord,
   t: ReturnType<typeof useTranslation>['t'],
@@ -550,6 +554,14 @@ function getRecentSignalSummaryText(
     relative: formatRelativeTime(record.updated_at, language, true),
     detail: t('accountPool.recentSignal.updatedFallback'),
   })
+}
+
+function getRecentSignalInlineSummaryText(
+  record: AccountPoolRecord,
+  language: string,
+  t: ReturnType<typeof useTranslation>['t'],
+) {
+  return getRecentSignalSummaryText(record, language, t).replace(/\s*·\s*/g, '·')
 }
 
 function getHeatmapActivityLabel(
@@ -1441,8 +1453,8 @@ export default function Accounts() {
             classNames={{
               base: 'min-h-[30rem]',
               wrapper: 'bg-transparent px-0 py-0 shadow-none',
-              th: 'bg-default-100/60 text-xs font-semibold uppercase tracking-[0.12em] text-default-500',
-              td: 'align-top py-4 text-sm text-foreground',
+              th: 'whitespace-nowrap bg-default-100/60 text-xs font-semibold uppercase tracking-[0.12em] text-default-500',
+              td: 'whitespace-nowrap align-top py-4 text-sm text-foreground',
               tr: 'data-[hover=true]:bg-content2/35 transition-colors',
               emptyWrapper: 'h-56',
             }}
@@ -1502,36 +1514,38 @@ export default function Accounts() {
                       />
                     </TableCell>
                     <TableCell>
-                      <div className="min-w-[240px] space-y-2">
-                        <div className="font-medium text-foreground">
+                      <div className="min-w-[240px] space-y-2 overflow-hidden">
+                        <div className="truncate font-medium text-foreground">
                           {getRecordLabel(record)}
                         </div>
-                        <div className="flex flex-wrap items-center gap-2 text-xs leading-5 text-default-500">
-                          <Chip color={getPlanChipColor(record.chatgpt_plan_type)} size="sm" variant="flat">
+                        <div className="flex min-w-0 items-center gap-2 overflow-hidden text-xs leading-5 text-default-500">
+                          <Chip className="shrink-0" color={getPlanChipColor(record.chatgpt_plan_type)} size="sm" variant="flat">
                             {getPlanLabel(record.chatgpt_plan_type, t)}
                           </Chip>
-                          <Chip size="sm" variant="flat">
+                          <Chip className="shrink-0" size="sm" variant="flat">
                             {getScopeLabel(record.record_scope, t)}
                           </Chip>
                           {getRecordSecondaryLabel(record) ? (
-                            <span>{getRecordSecondaryLabel(record)}</span>
+                            <span className="min-w-0 truncate">{getRecordSecondaryLabel(record)}</span>
                           ) : null}
                         </div>
                       </div>
                     </TableCell>
                     <TableCell>
-                      <div className="space-y-2">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <Chip color={getStateColor(record.operator_state)} size="sm" variant="flat">
+                      <div className="min-w-0 space-y-2 overflow-hidden">
+                        <div className="flex items-center gap-2 overflow-hidden">
+                          <Chip className="shrink-0" color={getStateColor(record.operator_state)} size="sm" variant="flat">
                             {getStateLabel(record.operator_state, t)}
                           </Chip>
-                          <Chip color={getReasonColor(record.reason_class)} size="sm" variant="flat">
+                          <Chip className="shrink-0" color={getReasonColor(record.reason_class)} size="sm" variant="flat">
                             {getReasonLabel(record.reason_class, t)}
                           </Chip>
                         </div>
-                        <div className="text-xs leading-5 text-default-500">
-                          {t('accountPool.fields.reasonCode')}: {getReasonCodeLabel(record.reason_code, t)}
-                        </div>
+                        {hasReasonCode(record.reason_code) ? (
+                          <div className="truncate text-xs leading-5 text-default-500">
+                            {t('accountPool.fields.reasonCode')}: {getReasonCodeLabel(record.reason_code, t)}
+                          </div>
+                        ) : null}
                         {record.operator_state === 'cooling' ? (
                           <CoolingCountdown nextActionAt={record.next_action_at} t={t} />
                         ) : null}
@@ -1585,9 +1599,9 @@ export default function Accounts() {
                                 {heatmap ? t('accountPool.recentSignal.window12h') : signal.label}
                               </div>
                               {heatmap ? (
-                                <Chip size="sm" variant="flat">
-                                  {getHeatmapActivityLabel(heatmap, t)}
-                                </Chip>
+                                <div className="min-w-0 truncate text-right text-xs text-default-500">
+                                  {getRecentSignalInlineSummaryText(record, locale, t)}
+                                </div>
                               ) : null}
                             </div>
                             {heatmap ? (
@@ -1602,16 +1616,13 @@ export default function Accounts() {
                                   windowStart={heatmap.window_start}
                                   visibleCount={12}
                                 />
-                                <div className="text-xs leading-5 text-default-500">
-                                  {getRecentSignalSummaryText(record, locale, t)}
-                                </div>
                               </>
                             ) : (
                               <>
-                                <div className="text-sm font-medium text-foreground">
+                                <div className="truncate text-sm font-medium text-foreground">
                                   {signal.timestamp}
                                 </div>
-                                <div className="text-xs leading-5 text-default-500">
+                                <div className="truncate text-xs leading-5 text-default-500">
                                   {signal.detail}
                                 </div>
                               </>
