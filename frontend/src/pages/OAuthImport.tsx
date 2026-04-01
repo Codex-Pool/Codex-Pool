@@ -305,7 +305,7 @@ export default function OAuthImport() {
         <motion.div variants={item}>
           <DockedPageIntro
             archetype="workspace"
-            title={t("oauthImport.title")}
+            title={t("nav.oauthImport")}
             description={t("oauthImport.subtitle")}
           />
         </motion.div>

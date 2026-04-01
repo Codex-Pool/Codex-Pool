@@ -194,7 +194,7 @@ export default function Usage() {
     <PageContent className="space-y-6">
       <DockedPageIntro
         archetype="workspace"
-        title={t('usage.title')}
+        title={t('nav.usage')}
         description={t('usage.subtitle')}
         actions={(
           <Button

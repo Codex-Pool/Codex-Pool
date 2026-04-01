@@ -610,7 +610,7 @@ export default function Tenants() {
       <div className="space-y-6 overflow-y-auto pr-1">
         <DockedPageIntro
           archetype="workspace"
-          title={t('tenants.title', { defaultValue: 'Tenants' })}
+          title={t('nav.tenants')}
           description={t('tenants.subtitle', {
             defaultValue: 'Check tenant availability and manage profiles, API keys, and usage.',
           })}

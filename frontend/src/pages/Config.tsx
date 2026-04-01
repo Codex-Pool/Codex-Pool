@@ -167,7 +167,7 @@ export default function Config() {
     <PageContent className="space-y-6">
       <DockedPageIntro
         archetype="settings"
-        title={t('config.title')}
+        title={t('nav.config')}
         description={t('config.subtitle')}
         actions={(
           <div className="flex flex-wrap gap-2">

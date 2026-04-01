@@ -402,7 +402,7 @@ export default function Dashboard() {
     <PageContent className="space-y-10">
       <DockedPageIntro
         archetype="workspace"
-        title={t('dashboard.title')}
+        title={t('nav.dashboard')}
         description={t('dashboard.subtitle')}
       />
 

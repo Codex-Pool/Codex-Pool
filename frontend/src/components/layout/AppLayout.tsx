@@ -212,8 +212,32 @@ export default function AppLayout({
   })();
   const compactHeaderTitle =
     pageHeader?.title ?? activeNavigationContext?.itemLabel ?? null;
+  const showCompactHeaderTitle =
+    compactHeaderTitle != null
+    && (pageHeader?.mode !== "dock-on-scroll" || !pageHeaderBodyVisible);
   const showDockedPageActions =
     pageHeader?.mode === "dock-on-scroll" && !pageHeaderBodyVisible;
+  const compactHeaderRevealTransition = {
+    duration: 0.2,
+    ease: [0.16, 1, 0.3, 1],
+  } as const;
+  const compactHeaderRevealMotion = {
+    initial: {
+      opacity: 0,
+      y: -6,
+      clipPath: "inset(0 0 100% 0)",
+    },
+    animate: {
+      opacity: 1,
+      y: 0,
+      clipPath: "inset(0 0 0% 0)",
+    },
+    exit: {
+      opacity: 0,
+      y: -6,
+      clipPath: "inset(0 0 100% 0)",
+    },
+  } as const;
   const mobileDrawerPlacementClassName =
     drawerPlacement === "right"
       ? "right-0 left-auto translate-x-full"
@@ -483,37 +507,44 @@ export default function AppLayout({
                   </p>
                 ) : null}
                 <AnimatePresence initial={false} mode="popLayout">
-                  <motion.div
-                    key={
-                      showDockedPageActions ? "header-docked" : "header-inline"
-                    }
-                    initial={{ opacity: 0, y: -6 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: -6 }}
-                    transition={{ duration: 0.16, ease: [0.16, 1, 0.3, 1] }}
-                    className="min-w-0"
-                  >
-                    <p
-                      className={cn(
-                        "truncate font-semibold tracking-[-0.025em] text-foreground",
-                        showDockedPageActions
-                          ? "text-base sm:text-lg"
-                          : "text-sm sm:text-[15px]",
-                      )}
+                  {showCompactHeaderTitle ? (
+                    <motion.div
+                      key={
+                        showDockedPageActions ? "header-docked" : "header-inline"
+                      }
+                      {...compactHeaderRevealMotion}
+                      transition={compactHeaderRevealTransition}
+                      className="min-w-0 overflow-hidden"
                     >
-                      {compactHeaderTitle}
-                    </p>
-                  </motion.div>
+                      <p
+                        className={cn(
+                          "truncate font-semibold tracking-[-0.025em] text-foreground",
+                          showDockedPageActions
+                            ? "text-base sm:text-lg"
+                            : "text-sm sm:text-[15px]",
+                        )}
+                      >
+                        {compactHeaderTitle}
+                      </p>
+                    </motion.div>
+                  ) : null}
                 </AnimatePresence>
               </div>
             </div>
 
             <div className="ml-auto flex items-center gap-2">
-              {showDockedPageActions && pageHeader?.actions ? (
-                <div className="hidden items-center gap-2 lg:flex">
-                  {pageHeader.actions}
-                </div>
-              ) : null}
+              <AnimatePresence initial={false} mode="popLayout">
+                {showDockedPageActions && pageHeader?.actions ? (
+                  <motion.div
+                    key="header-docked-actions"
+                    {...compactHeaderRevealMotion}
+                    transition={compactHeaderRevealTransition}
+                    className="hidden overflow-hidden lg:flex lg:items-center lg:gap-2"
+                  >
+                    {pageHeader.actions}
+                  </motion.div>
+                ) : null}
+              </AnimatePresence>
               <LanguageToggle />
               <ThemeToggleButton />
               <Button

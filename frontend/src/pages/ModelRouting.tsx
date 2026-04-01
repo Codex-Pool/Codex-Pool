@@ -903,7 +903,7 @@ export default function ModelRouting() {
       <div className="space-y-4 md:space-y-5">
         <DockedPageIntro
           archetype="workspace"
-          title={t('modelRoutingPage.title')}
+          title={t('nav.modelRouting')}
           description={t('modelRoutingPage.subtitle')}
           actions={(
             <>

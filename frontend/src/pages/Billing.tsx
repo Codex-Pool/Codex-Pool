@@ -247,7 +247,7 @@ function CreditBillingPage() {
     <PageContent className="space-y-6">
       <DockedPageIntro
         archetype="workspace"
-        title={t("billing.title")}
+        title={t("nav.billing")}
         description={t("billing.subtitle")}
         actions={
           <Button

@@ -913,7 +913,7 @@ export default function Models() {
     <PageContent className="space-y-6">
       <DockedPageIntro
         archetype="workspace"
-        title={t("models.title")}
+        title={t("nav.models")}
         description={t("models.subtitle")}
         actions={
           <div className="flex flex-wrap gap-2">

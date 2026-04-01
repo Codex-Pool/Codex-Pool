@@ -1115,7 +1115,7 @@ export default function Accounts() {
     <PageContent className="space-y-6">
       <DockedPageIntro
         archetype="workspace"
-        title={t('accountPool.title')}
+        title={t('nav.accounts')}
         description={t('accountPool.subtitle')}
         actions={(
           <Button

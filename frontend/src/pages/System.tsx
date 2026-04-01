@@ -253,7 +253,7 @@ export default function System() {
     <PageContent className="space-y-6">
       <DockedPageIntro
         archetype="workspace"
-        title={t('system.title')}
+        title={t('nav.system')}
         description={t('system.subtitle')}
         actions={(
           <Button

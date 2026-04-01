@@ -535,7 +535,7 @@ export default function ImportJobs() {
     <PageContent className="space-y-6">
       <DockedPageIntro
         archetype="workspace"
-        title={t("importJobs.title")}
+        title={t("nav.importJobs")}
         description={t("importJobs.description")}
         actions={
           <Button

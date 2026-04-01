@@ -469,7 +469,7 @@ export default function Groups() {
     <PageContent className="space-y-6 lg:space-y-7">
       <DockedPageIntro
         archetype="workspace"
-        title={t("groupsPage.title")}
+        title={t("nav.apiKeyGroups")}
         description={t("groupsPage.subtitle")}
         actions={
           <div className="flex flex-wrap gap-2">

@@ -294,7 +294,7 @@ export default function Proxies() {
     <PageContent className="space-y-6">
       <DockedPageIntro
         archetype="workspace"
-        title={t('proxies.title', { defaultValue: 'Outbound Proxy Pool' })}
+        title={t('nav.proxies')}
         description={t('proxies.subtitle', {
           defaultValue: 'Configure a global outbound proxy pool for all upstream traffic. This replaces the old node-health placeholder page.',
         })}
