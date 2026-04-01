@@ -7,15 +7,21 @@ import {
   type CardProps as HeroCardProps,
 } from "@heroui/react"
 
+import { resolvePanelShellClassName, type PanelShellTone } from "@/lib/panel-shell"
 import { cn } from "@/lib/utils"
 
-function Card({ className, ...props }: HeroCardProps) {
+interface CardProps extends HeroCardProps {
+  tone?: PanelShellTone
+}
+
+function Card({ className, tone = "primary", shadow, ...props }: CardProps) {
   return (
     <HeroCard
       radius="lg"
-      shadow="sm"
+      shadow={shadow ?? "none"}
       className={cn(
-        "border-small border-default-200 bg-content1 text-foreground",
+        resolvePanelShellClassName(tone),
+        "text-foreground",
         className,
       )}
       {...props}
@@ -66,6 +72,8 @@ function CardContent({ className, ...props }: React.ComponentProps<typeof HeroCa
   return <HeroCardBody className={cn("px-4 py-4", className)} {...props} />
 }
 
+const CardBody = CardContent
+
 function CardFooter({ className, ...props }: React.ComponentProps<typeof HeroCardFooter>) {
   return <HeroCardFooter className={cn("px-4 py-4", className)} {...props} />
 }
@@ -73,6 +81,7 @@ function CardFooter({ className, ...props }: React.ComponentProps<typeof HeroCar
 export {
   Card,
   CardHeader,
+  CardBody,
   CardFooter,
   CardTitle,
   CardAction,

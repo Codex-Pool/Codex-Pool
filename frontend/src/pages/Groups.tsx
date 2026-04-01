@@ -2,9 +2,6 @@ import { useCallback, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Button,
-  Card,
-  CardBody,
-  CardHeader,
   Checkbox,
   Chip,
   Input,
@@ -39,6 +36,7 @@ import {
   AntigravityDialogActions,
   AntigravityDialogShell,
 } from "@/components/layout/dialog-archetypes";
+import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import {
   groupsApi,
   type ApiKeyGroupAdminListResponse,
@@ -498,7 +496,7 @@ export default function Groups() {
           return (
             <Card
               key={card.key}
-              className="border-small border-default-200 bg-content1 shadow-small"
+             
             >
               <CardBody className="px-5 py-5">
                 <div className="flex items-start justify-between gap-3">
@@ -523,7 +521,7 @@ export default function Groups() {
         })}
       </div>
 
-      <Card className="border-small border-default-200 bg-content1 shadow-small">
+      <Card>
         <CardHeader className="flex flex-col items-start gap-4 px-5 pb-4 pt-5">
           <div className="space-y-1">
             <div className="flex flex-wrap items-center gap-2">

@@ -2,9 +2,6 @@ import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Button,
-  Card,
-  CardBody,
-  CardHeader,
   Chip,
   Divider,
   Dropdown,
@@ -31,6 +28,7 @@ import {
 import { useTranslation } from "react-i18next";
 
 import { localizeApiErrorDisplay } from "@/api/errorI18n";
+import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import {
   modelsApi,
   type AdminModelSectionItem,
@@ -989,7 +987,7 @@ export default function Models() {
       />
 
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1.35fr)_minmax(0,0.95fr)]">
-        <Card className="border-small border-default-200 bg-content1 shadow-small">
+        <Card>
           <CardHeader className="px-5 pb-3 pt-5">
             <div>
               <h2 className="text-lg font-semibold tracking-[-0.02em] text-foreground">
@@ -1004,7 +1002,7 @@ export default function Models() {
           </CardBody>
         </Card>
 
-        <Card className="border-small border-default-200 bg-content1 shadow-small">
+        <Card>
           <CardHeader className="px-5 pb-3 pt-5">
             <div>
               <h2 className="text-lg font-semibold tracking-[-0.02em] text-foreground">
@@ -1084,7 +1082,7 @@ export default function Models() {
         </Card>
       </div>
 
-      <Card className="border-small border-default-200 bg-content1 shadow-small">
+      <Card>
         <CardHeader className="flex flex-col items-start gap-4 px-5 pb-3 pt-5">
           <div>
             <h2 className="text-lg font-semibold tracking-[-0.02em] text-foreground">

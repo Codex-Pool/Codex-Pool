@@ -1,8 +1,5 @@
 import {
   Button,
-  Card,
-  CardBody,
-  CardHeader,
   Chip,
   Divider,
   Input,
@@ -20,6 +17,7 @@ import { useTranslation } from 'react-i18next'
 import { localizeApiErrorDisplay } from '@/api/errorI18n'
 import type { RuntimeConfigSnapshot } from '@/api/types'
 import { systemApi } from '@/api/system'
+import { Card, CardBody, CardHeader } from '@/components/ui/card'
 import { useTheme } from '@/components/use-theme'
 import { useUiPreferences } from '@/components/use-ui-preferences'
 import {
@@ -205,7 +203,7 @@ export default function Config() {
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         {overviewCards.map((card) => (
-          <Card key={card.title} className="border-small border-default-200 bg-content1 shadow-small">
+          <Card key={card.title}>
             <CardBody className="space-y-5 p-4">
               <div className={card.toneClassName + ' flex h-10 w-10 items-center justify-center rounded-large'}>
                 {card.icon}
@@ -227,7 +225,7 @@ export default function Config() {
       </div>
 
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1.25fr)_minmax(0,0.95fr)]">
-        <Card className="border-small border-default-200 bg-content1 shadow-small">
+        <Card>
           <CardHeader className="px-5 pb-3 pt-5">
             <div className="space-y-1">
               <h2 className="text-lg font-semibold tracking-[-0.02em] text-foreground">
@@ -270,7 +268,7 @@ export default function Config() {
           </CardBody>
         </Card>
 
-        <Card className="border-small border-default-200 bg-content1 shadow-small">
+        <Card>
           <CardHeader className="px-5 pb-3 pt-5">
             <div className="space-y-1">
               <h2 className="text-lg font-semibold tracking-[-0.02em] text-foreground">
@@ -318,7 +316,7 @@ export default function Config() {
       </div>
 
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1.18fr)_minmax(0,0.94fr)]">
-        <Card className="border-small border-default-200 bg-content1 shadow-small">
+        <Card>
           <CardHeader className="px-5 pb-3 pt-5">
             <div className="space-y-1">
               <h2 className="text-lg font-semibold tracking-[-0.02em] text-foreground">
@@ -437,7 +435,7 @@ export default function Config() {
           </CardBody>
         </Card>
 
-        <Card className="border-small border-default-200 bg-content1 shadow-small">
+        <Card>
           <CardHeader className="px-5 pb-3 pt-5">
             <div className="space-y-1">
               <h2 className="text-lg font-semibold tracking-[-0.02em] text-foreground">
@@ -503,7 +501,7 @@ export default function Config() {
         </Card>
       </div>
 
-      <Card className="border-small border-default-200 bg-content1 shadow-small">
+      <Card>
         <CardHeader className="px-5 pb-3 pt-5">
           <div className="space-y-1">
             <h2 className="text-lg font-semibold tracking-[-0.02em] text-foreground">

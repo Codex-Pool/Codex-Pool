@@ -2,9 +2,6 @@ import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import {
   Button,
-  Card,
-  CardBody,
-  CardHeader,
   Chip,
   Divider,
   Input,
@@ -45,6 +42,7 @@ import {
   DockedPageIntro,
   PageContent,
 } from '@/components/layout/page-archetypes'
+import { Card, CardBody, CardHeader } from '@/components/ui/card'
 import { formatDurationMs } from '@/lib/duration-format'
 import { cn } from '@/lib/utils'
 
@@ -435,7 +433,7 @@ export default function Logs() {
       />
 
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1.35fr)_minmax(0,0.95fr)] xl:items-start">
-        <Card className="border-small border-default-200 bg-content1 shadow-small xl:self-start">
+        <Card className="xl:self-start">
           <CardHeader className="px-5 pb-3 pt-5">
             <div className="space-y-1">
               <h2 className="text-lg font-semibold tracking-[-0.02em] text-foreground">
@@ -547,7 +545,7 @@ export default function Logs() {
         </Card>
       </div>
 
-      <Card className="border-small border-default-200 bg-content1 shadow-small">
+      <Card>
         <CardHeader className="flex flex-col items-start gap-4 px-5 pb-3 pt-5 xl:flex-row xl:justify-between">
           <div className="space-y-1">
             <h2 className="text-lg font-semibold tracking-[-0.02em] text-foreground">

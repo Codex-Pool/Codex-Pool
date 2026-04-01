@@ -2,9 +2,6 @@ import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import {
   Button,
-  Card,
-  CardBody,
-  CardHeader,
   Chip,
   Input,
   Pagination,
@@ -34,6 +31,7 @@ import {
 } from 'recharts'
 
 import { usageApi } from '@/api/usage'
+import { Card, CardBody, CardHeader } from '@/components/ui/card'
 import {
   DockedPageIntro,
   PageContent,
@@ -214,7 +212,7 @@ export default function Usage() {
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         {overviewMetrics.map((metric) => (
-          <Card key={metric.title} className="border-small border-default-200 bg-content1 shadow-small">
+          <Card key={metric.title}>
             <CardBody className="space-y-5 p-4">
               <div className={metric.toneClassName + ' flex h-10 w-10 items-center justify-center rounded-large'}>
                 {metric.icon}
@@ -236,7 +234,7 @@ export default function Usage() {
       </div>
 
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1.35fr)_minmax(0,0.95fr)]">
-        <Card className="border-small border-default-200 bg-content1 shadow-small">
+        <Card>
           <CardHeader className="px-5 pb-3 pt-5">
             <div className="space-y-1">
               <h2 className="text-lg font-semibold tracking-[-0.02em] text-foreground">
@@ -266,7 +264,7 @@ export default function Usage() {
           </CardBody>
         </Card>
 
-        <Card className="border-small border-default-200 bg-content1 shadow-small">
+        <Card>
           <CardHeader className="px-5 pb-3 pt-5">
             <div className="space-y-1">
               <h2 className="text-lg font-semibold tracking-[-0.02em] text-foreground">
@@ -330,7 +328,7 @@ export default function Usage() {
       </div>
 
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1.35fr)_minmax(0,0.95fr)]">
-        <Card className="border-small border-default-200 bg-content1 shadow-small">
+        <Card>
           <CardHeader className="px-5 pb-3 pt-5">
             <div className="space-y-1">
               <h2 className="text-lg font-semibold tracking-[-0.02em] text-foreground">
@@ -362,7 +360,7 @@ export default function Usage() {
           </CardBody>
         </Card>
 
-        <Card className="border-small border-default-200 bg-content1 shadow-small">
+        <Card>
           <CardHeader className="px-5 pb-3 pt-5">
             <div className="space-y-1">
               <h2 className="text-lg font-semibold tracking-[-0.02em] text-foreground">
@@ -409,7 +407,7 @@ export default function Usage() {
         </Card>
       </div>
 
-      <Card className="border-small border-default-200 bg-content1 shadow-small">
+      <Card>
         <CardHeader className="flex flex-col items-start gap-4 px-5 pb-3 pt-5">
           <div className="space-y-1">
             <h2 className="text-lg font-semibold tracking-[-0.02em] text-foreground">

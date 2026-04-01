@@ -11,6 +11,7 @@
     "i18n:check": "node scripts/i18n/check-key-parity.mjs",
     "i18n:hardcode": "node scripts/i18n/check-hardcoded-copy.mjs",
     "i18n:runtime-check": "node scripts/i18n/check-missing-runtime-keys.mjs",
+    "card-shells:check": "node scripts/check-page-card-shells.mjs",
     "lint": "eslint .",
     "preview": "vite preview"
   },

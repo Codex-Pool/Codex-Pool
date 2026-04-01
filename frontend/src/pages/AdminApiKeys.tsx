@@ -2,9 +2,6 @@ import { useCallback, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Button,
-  Card,
-  CardBody,
-  CardHeader,
   Chip,
   Input,
   Pagination,
@@ -32,6 +29,7 @@ import {
 import { useTranslation } from "react-i18next";
 
 import { localizeApiErrorDisplay } from "@/api/errorI18n";
+import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import {
   apiKeysApi,
   type ApiKey,
@@ -222,7 +220,7 @@ export default function AdminApiKeys() {
 
       <div className="grid gap-6 xl:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
         <Card
-          className={`border-small border-default-200 bg-content1 shadow-small ${createdKey ? "" : "xl:col-span-2"}`}
+          className={createdKey ? undefined : "xl:col-span-2"}
         >
           <CardHeader className="px-5 pb-3 pt-5">
             <div className="space-y-3">
@@ -354,7 +352,7 @@ export default function AdminApiKeys() {
         ) : null}
       </div>
 
-      <Card className="border-small border-default-200 bg-content1 shadow-small">
+      <Card>
         <CardHeader className="flex flex-col items-start gap-4 px-5 pb-4 pt-5">
           <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
             <div className="space-y-2">

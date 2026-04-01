@@ -1,9 +1,6 @@
 import { useMemo } from 'react'
 import {
   Button,
-  Card,
-  CardBody,
-  CardHeader,
   Chip,
   Divider,
   Progress,
@@ -15,6 +12,7 @@ import { useTranslation } from 'react-i18next'
 
 import { adminApi } from '@/api/settings'
 import { DEFAULT_SYSTEM_CAPABILITIES, systemApi } from '@/api/system'
+import { Card, CardBody, CardHeader } from '@/components/ui/card'
 import {
   DockedPageIntro,
   PageContent,
@@ -276,7 +274,7 @@ export default function System() {
           return (
             <Card
               key={card.label}
-              className="border-small border-default-200 bg-content1 shadow-small"
+             
             >
               <CardBody className="space-y-5 p-4">
                 <div className={cn(
@@ -304,7 +302,7 @@ export default function System() {
       </div>
 
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1.35fr)_minmax(0,0.95fr)]">
-        <Card className="border-small border-default-200 bg-content1 shadow-small">
+        <Card>
           <CardHeader className="px-5 pb-3 pt-5">
             <div className="space-y-1">
               <h2 className="text-lg font-semibold tracking-[-0.02em] text-foreground">
@@ -424,7 +422,7 @@ export default function System() {
           </CardBody>
         </Card>
 
-        <Card className="border-small border-default-200 bg-content1 shadow-small">
+        <Card>
           <CardHeader className="px-5 pb-3 pt-5">
             <div className="space-y-1">
               <h2 className="text-lg font-semibold tracking-[-0.02em] text-foreground">
@@ -468,7 +466,7 @@ export default function System() {
       </div>
 
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)]">
-        <Card className="border-small border-default-200 bg-content1 shadow-small">
+        <Card>
           <CardHeader className="px-5 pb-3 pt-5">
             <div className="space-y-1">
               <h2 className="text-lg font-semibold tracking-[-0.02em] text-foreground">
@@ -496,7 +494,7 @@ export default function System() {
           </CardBody>
         </Card>
 
-        <Card className="border-small border-default-200 bg-content1 shadow-small">
+        <Card>
           <CardHeader className="px-5 pb-3 pt-5">
             <div className="space-y-1">
               <h2 className="text-lg font-semibold tracking-[-0.02em] text-foreground">
@@ -525,7 +523,7 @@ export default function System() {
         </Card>
       </div>
 
-      <Card className="border-small border-default-200 bg-content1 shadow-small">
+      <Card>
         <CardHeader className="px-5 pb-3 pt-5">
           <div className="space-y-1">
             <h2 className="text-lg font-semibold tracking-[-0.02em] text-foreground">

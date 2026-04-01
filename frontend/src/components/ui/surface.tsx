@@ -8,32 +8,33 @@ import {
   CardHeader,
   CardTitle,
 } from '@/components/ui/card'
+import { resolvePanelShellClassName } from '@/lib/panel-shell'
 import { cn } from '@/lib/utils'
 
 type SurfaceTone = 'default' | 'muted' | 'brand' | 'success' | 'warning' | 'danger'
 
 const SURFACE_TONE_CLASS_NAMES: Record<SurfaceTone, string> = {
-  default: 'border-small border-default-200 bg-content1 text-foreground',
-  muted: 'border-small border-default-200 bg-content2 text-foreground',
+  default: `${resolvePanelShellClassName('primary')} text-foreground`,
+  muted: `${resolvePanelShellClassName('secondary')} text-foreground`,
   brand: 'border-small border-primary/20 bg-primary/[0.05] text-foreground dark:bg-primary/[0.08]',
   success: 'border-small border-success/20 bg-success/[0.05] text-foreground dark:bg-success/[0.08]',
   warning: 'border-small border-warning/20 bg-warning/[0.05] text-foreground dark:bg-warning/[0.08]',
   danger: 'border-small border-danger/20 bg-danger/[0.05] text-foreground dark:bg-danger/[0.08]',
 }
 
-interface SurfaceCardProps extends ComponentProps<typeof Card> {
+interface SurfaceCardProps extends Omit<ComponentProps<typeof Card>, 'tone'> {
   tone?: SurfaceTone
 }
 
 export function SurfaceCard({
   tone = 'default',
-  shadow = 'sm',
+  shadow,
   className,
   ...props
 }: SurfaceCardProps) {
   return (
     <Card
-      shadow={shadow}
+      shadow={shadow ?? 'none'}
       className={cn(SURFACE_TONE_CLASS_NAMES[tone], className)}
       {...props}
     />

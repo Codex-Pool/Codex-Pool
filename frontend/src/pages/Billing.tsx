@@ -1,9 +1,6 @@
 import { useMemo, useState } from "react";
 import {
   Button,
-  Card,
-  CardBody,
-  CardHeader,
   Chip,
   Input,
   Pagination,
@@ -41,6 +38,7 @@ import {
 import { billingApi } from "@/api/billing";
 import { DEFAULT_SYSTEM_CAPABILITIES, systemApi } from "@/api/system";
 import { tenantsApi } from "@/api/tenants";
+import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import {
   DockedPageIntro,
   PageContent,
@@ -301,7 +299,7 @@ function CreditBillingPage() {
       ) : (
         <>
           <div className="grid gap-6 xl:grid-cols-[minmax(0,1.25fr)_minmax(0,0.95fr)]">
-            <Card className="border-small border-default-200 bg-content1 shadow-small">
+            <Card>
               <CardHeader className="px-5 pb-3 pt-5">
                 <div className="space-y-1">
                   <h2 className="text-lg font-semibold tracking-[-0.02em] text-foreground">
@@ -356,7 +354,7 @@ function CreditBillingPage() {
               </CardBody>
             </Card>
 
-            <Card className="border-small border-default-200 bg-content1 shadow-small">
+            <Card>
               <CardHeader className="px-5 pb-3 pt-5">
                 <div className="space-y-1">
                   <h2 className="text-lg font-semibold tracking-[-0.02em] text-foreground">
@@ -405,7 +403,7 @@ function CreditBillingPage() {
           </div>
 
           {!hasLedgerActivity ? (
-            <Card className="border-small border-default-200 bg-content1 shadow-small">
+            <Card>
               <CardBody className="flex flex-col gap-4 px-6 py-8 lg:flex-row lg:items-center lg:justify-between">
                 <div className="flex items-start gap-4">
                   <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-large bg-warning/10 text-warning">
@@ -489,7 +487,7 @@ function CreditBillingPage() {
             ].map((metric) => (
               <Card
                 key={metric.title}
-                className="border-small border-default-200 bg-content1 shadow-small"
+               
               >
                 <CardBody className="space-y-5 p-4">
                   <div
@@ -516,7 +514,7 @@ function CreditBillingPage() {
             ))}
           </div>
 
-          <Card className="border-small border-default-200 bg-content1 shadow-small">
+          <Card>
             <CardHeader className="px-5 pb-3 pt-5">
               <div className="space-y-1">
                 <h2 className="text-lg font-semibold tracking-[-0.02em] text-foreground">
@@ -594,7 +592,7 @@ function CreditBillingPage() {
             </CardBody>
           </Card>
 
-          <Card className="border-small border-default-200 bg-content1 shadow-small">
+          <Card>
             <CardHeader className="flex flex-col items-start gap-4 px-5 pb-3 pt-5">
               <div className="space-y-1">
                 <h2 className="text-lg font-semibold tracking-[-0.02em] text-foreground">

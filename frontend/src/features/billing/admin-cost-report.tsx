@@ -2,9 +2,6 @@ import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import {
   Button,
-  Card,
-  CardBody,
-  CardHeader,
   Chip,
   Input,
   Pagination,
@@ -41,6 +38,7 @@ import {
   DockedPageIntro,
   PageContent,
 } from '@/components/layout/page-archetypes'
+import { Card, CardBody, CardHeader } from '@/components/ui/card'
 import { useChartTheme } from '@/lib/chart-theme'
 import { formatMicrousd } from '@/lib/cost-format'
 import { formatDateTime, formatNumber, resolveLocale } from '@/lib/i18n-format'
@@ -284,7 +282,7 @@ export function AdminCostReportPage({ capabilities }: AdminCostReportPageProps) 
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         {metricCards.map((metric) => (
-          <Card key={metric.title} className="border-small border-default-200 bg-content1 shadow-small">
+          <Card key={metric.title}>
             <CardBody className="space-y-4 p-4">
               <div className={metric.toneClassName + ' flex h-10 w-10 items-center justify-center rounded-large'}>
                 <BarChart3 className="h-4 w-4" />
@@ -306,7 +304,7 @@ export function AdminCostReportPage({ capabilities }: AdminCostReportPageProps) 
       </div>
 
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1.3fr)_minmax(0,0.95fr)]">
-        <Card className="border-small border-default-200 bg-content1 shadow-small">
+        <Card>
           <CardHeader className="px-5 pb-3 pt-5">
             <div className="space-y-1">
               <h2 className="text-lg font-semibold tracking-[-0.02em] text-foreground">
@@ -342,7 +340,7 @@ export function AdminCostReportPage({ capabilities }: AdminCostReportPageProps) 
           </CardBody>
         </Card>
 
-        <Card className="border-small border-default-200 bg-content1 shadow-small">
+        <Card>
           <CardHeader className="px-5 pb-3 pt-5">
             <div className="space-y-1">
               <h2 className="text-lg font-semibold tracking-[-0.02em] text-foreground">
@@ -413,7 +411,7 @@ export function AdminCostReportPage({ capabilities }: AdminCostReportPageProps) 
         </Card>
       </div>
 
-      <Card className="border-small border-default-200 bg-content1 shadow-small">
+      <Card>
         <CardHeader className="flex flex-col items-start gap-4 px-5 pb-3 pt-5">
           <div className="space-y-1">
             <h2 className="text-lg font-semibold tracking-[-0.02em] text-foreground">

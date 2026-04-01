@@ -1,9 +1,6 @@
 import { useMemo, useState } from "react";
 import {
   Button,
-  Card,
-  CardBody,
-  CardHeader,
   Checkbox,
   Chip,
   Form,
@@ -37,6 +34,7 @@ import {
   DockedPageIntro,
   PageContent,
 } from "@/components/layout/page-archetypes";
+import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { getPlanLabel } from "@/features/accounts/utils";
 import { notify } from "@/lib/notification";
 import { cn } from "@/lib/utils";
@@ -312,7 +310,7 @@ export default function OAuthImport() {
 
         <div className="grid gap-5 xl:grid-cols-[15rem_minmax(0,1fr)] xl:items-start">
           <motion.aside variants={item} className="space-y-5">
-            <Card className="border-small border-default-200 bg-content1 shadow-small">
+            <Card>
               <CardHeader className="px-5 pb-3 pt-5">
                 <div className="space-y-1">
                   <p className="text-xs font-semibold uppercase tracking-[0.18em] text-default-500">
@@ -474,7 +472,7 @@ export default function OAuthImport() {
           <div className="space-y-5">
             <motion.div variants={item}>
               {currentStep === "setup" ? (
-                <Card className="border-small border-default-200 bg-content1 shadow-small">
+                <Card>
                   <CardHeader className="px-5 pb-3 pt-5">
                     <div className="space-y-2">
                       <div className="inline-flex items-center gap-2 rounded-full border-small border-default-200 bg-content2 px-3 py-1 text-xs font-semibold uppercase tracking-[0.16em] text-default-600">
@@ -555,7 +553,7 @@ export default function OAuthImport() {
               ) : null}
 
               {currentStep === "authorize" ? (
-                <Card className="border-small border-default-200 bg-content1 shadow-small">
+                <Card>
                   <CardHeader className="px-5 pb-3 pt-5">
                     <div className="space-y-2">
                       <div className="flex flex-wrap items-center gap-2">
@@ -636,7 +634,7 @@ export default function OAuthImport() {
               ) : null}
 
               {currentStep === "monitor" ? (
-                <Card className="border-small border-default-200 bg-content1 shadow-small">
+                <Card>
                   <CardHeader className="px-5 pb-3 pt-5">
                     <div className="space-y-2">
                       <div className="flex flex-wrap items-center gap-2">
@@ -689,7 +687,7 @@ export default function OAuthImport() {
               ) : null}
 
               {currentStep === "result" ? (
-                <Card className="border-small border-default-200 bg-content1 shadow-small">
+                <Card>
                   <CardHeader className="px-5 pb-3 pt-5">
                     <div className="space-y-2">
                       <div className="flex flex-wrap items-center gap-2">
@@ -850,7 +848,7 @@ export default function OAuthImport() {
 
             {showManualFallback ? (
               <motion.div variants={item}>
-                <Card className="border-small border-default-200 bg-content1 shadow-small">
+                <Card>
                   <CardBody className="space-y-5 p-5">
                     <div className="space-y-2">
                       <div className="flex flex-wrap items-center gap-2">

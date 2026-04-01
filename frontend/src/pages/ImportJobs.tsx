@@ -7,9 +7,6 @@ import {
 } from "@tanstack/react-query";
 import {
   Button,
-  Card,
-  CardBody,
-  CardHeader,
   Chip,
   Divider,
   Input,
@@ -52,6 +49,7 @@ import {
   DockedPageIntro,
   PageContent,
 } from "@/components/layout/page-archetypes";
+import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import {
   loadRecentJobIds,
   MAX_RECENT_IMPORT_JOB_IDS,
@@ -564,7 +562,7 @@ export default function ImportJobs() {
 
       <div className="grid gap-6 xl:grid-cols-[minmax(0,22rem)_minmax(0,1fr)]">
         <div className="space-y-6">
-          <Card className="border-small border-default-200 bg-content1 shadow-small">
+          <Card>
             <CardHeader className="px-5 pb-3 pt-5">
               <div className="space-y-1">
                 <h2 className="text-lg font-semibold tracking-[-0.02em] text-foreground">
@@ -633,7 +631,7 @@ export default function ImportJobs() {
             </CardBody>
           </Card>
 
-          <Card className="overflow-hidden border-small border-default-200 bg-content1 shadow-small">
+          <Card className="overflow-hidden">
             <CardHeader className="flex items-start justify-between gap-3 px-5 pb-3 pt-5">
               <div className="space-y-1">
                 <h2 className="text-lg font-semibold tracking-[-0.02em] text-foreground">
@@ -739,7 +737,7 @@ export default function ImportJobs() {
         </div>
 
         <div className="space-y-6">
-          <Card className="border-small border-default-200 bg-content1 shadow-small">
+          <Card>
             <CardHeader className="flex flex-col items-start justify-between gap-4 px-5 pb-3 pt-5 lg:flex-row">
               <div className="space-y-1">
                 <h2 className="text-lg font-semibold tracking-[-0.02em] text-foreground">
@@ -949,7 +947,7 @@ export default function ImportJobs() {
             </CardBody>
           </Card>
 
-          <Card className="border-small border-default-200 bg-content1 shadow-small">
+          <Card>
             <CardHeader className="flex flex-col items-start gap-4 px-5 pb-3 pt-5 lg:flex-row lg:justify-between">
               <div className="space-y-1">
                 <h2 className="text-lg font-semibold tracking-[-0.02em] text-foreground">

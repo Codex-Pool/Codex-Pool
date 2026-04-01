@@ -1,9 +1,6 @@
 import { Icon } from '@iconify/react'
 import {
   Button,
-  Card,
-  CardBody,
-  CardHeader,
   Chip,
   Dropdown,
   DropdownItem,
@@ -52,6 +49,7 @@ import {
   DockedPageIntro,
   PageContent,
 } from '@/components/layout/page-archetypes'
+import { Card, CardBody, CardHeader } from '@/components/ui/card'
 import { CHART_SERIES_COLORS, useChartTheme } from '@/lib/chart-theme'
 import {
   buildDashboardKpis,
@@ -438,7 +436,7 @@ export default function Dashboard() {
         </DashboardMetricGrid>
 
         {/* ── 账号池总览 — Donut (HeroUI Pro Circles 3 style) ── */}
-        <Card className="border-small border-default-200 bg-content1 shadow-small">
+        <Card>
           <CardHeader className="flex items-start justify-between gap-4 px-5 pb-0 pt-5">
             <div className="space-y-1">
               <h2 className="text-lg font-semibold tracking-[-0.02em] text-foreground">
@@ -536,7 +534,7 @@ export default function Dashboard() {
 
       {/* ── 监控区域 ── */}
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1.3fr)_minmax(0,0.9fr)]">
-        <Card className="border-small border-default-200 bg-content1 shadow-small">
+        <Card>
           <CardHeader className="px-5 pb-2 pt-5">
             <div className="space-y-1">
               <h2 className="text-lg font-semibold tracking-[-0.02em] text-foreground">
@@ -645,7 +643,7 @@ export default function Dashboard() {
       <div className="space-y-6">
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1.25fr)_minmax(0,0.75fr)]">
         {/* ── 全天流量趋势 — Graph 1 style ── */}
-        <Card className="border-small border-default-200 bg-content1 shadow-small">
+        <Card>
           <CardHeader className="flex flex-col gap-4 px-5 pb-2 pt-5">
             <div className="flex items-start justify-between gap-3">
               <h2 className="text-lg font-semibold tracking-[-0.02em] text-foreground">
@@ -695,7 +693,7 @@ export default function Dashboard() {
         </Card>
 
         {/* ── Token 使用趋势 — Graph 2 style with inline KPI legend ── */}
-        <Card className="border-small border-default-200 bg-content1 shadow-small">
+        <Card>
           <CardHeader className="flex flex-col gap-4 px-5 pb-2 pt-5">
             <h2 className="text-lg font-semibold tracking-[-0.02em] text-foreground">
               {t('dashboard.tokenTrend.title')}
@@ -750,7 +748,7 @@ export default function Dashboard() {
       </div>
 
       <div className="grid gap-6 lg:grid-cols-2">
-        <Card className="border-small border-default-200 bg-content1 shadow-small">
+        <Card>
           <CardHeader className="px-5 pb-3 pt-5">
             <div className="space-y-1">
               <h2 className="text-lg font-semibold tracking-[-0.02em] text-foreground">
@@ -788,7 +786,7 @@ export default function Dashboard() {
           </CardBody>
         </Card>
 
-        <Card className="border-small border-default-200 bg-content1 shadow-small">
+        <Card>
           <CardHeader className="px-5 pb-3 pt-5">
             <div className="space-y-1">
               <h2 className="text-lg font-semibold tracking-[-0.02em] text-foreground">

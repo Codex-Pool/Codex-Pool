@@ -15,6 +15,7 @@ import {
   resolvePageArchetype,
   type PageArchetype,
 } from '@/lib/page-archetypes'
+import { resolvePanelShellClassName } from '@/lib/panel-shell'
 import { cn } from '@/lib/utils'
 import { usePageHeader, usePageHeaderDocking } from '@/components/layout/page-header-context'
 
@@ -196,9 +197,7 @@ export function PagePanel({
   return (
     <Component
       className={cn(
-        tone === 'primary'
-          ? 'border-small border-default-200 bg-content1 shadow-small'
-          : 'border-small border-default-200 bg-content2 shadow-none',
+        resolvePanelShellClassName(tone === 'primary' ? 'primary' : 'secondary'),
         'relative overflow-hidden rounded-large px-[var(--app-panel-padding)] py-[var(--app-panel-padding)] sm:px-[var(--app-panel-padding-sm)] sm:py-[var(--app-panel-padding-sm)] lg:px-[var(--app-panel-padding-lg)] lg:py-[var(--app-panel-padding-lg)]',
         className,
       )}
