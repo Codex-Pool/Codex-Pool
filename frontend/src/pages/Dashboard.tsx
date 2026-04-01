@@ -17,6 +17,7 @@ import {
   AlertTriangle,
   Archive,
   Gauge,
+  Inbox,
   RefreshCcw,
   ShieldCheck,
   Timer,
@@ -330,41 +331,42 @@ export default function Dashboard() {
     [poolOverviewMetrics, totalManagedPool],
   )
 
-  const healthSignalMetrics = useMemo(
-    () => [
+  const healthSignalMetrics = useMemo(() => {
+    const signals = [
       {
         title: t('dashboard.healthSignals.healthy'),
         value: accountPoolSummary?.healthy ?? 0,
-        description: t('dashboard.healthSignals.healthyDesc'),
-        icon: <ShieldCheck aria-hidden="true" className="h-4 w-4 text-success" />,
+        icon: <ShieldCheck aria-hidden="true" className="h-3.5 w-3.5" />,
+        color: 'success' as const,
       },
       {
         title: t('dashboard.healthSignals.quota'),
         value: accountPoolSummary?.quota ?? 0,
-        description: t('dashboard.healthSignals.quotaDesc'),
-        icon: <Timer aria-hidden="true" className="h-4 w-4 text-warning" />,
+        icon: <Timer aria-hidden="true" className="h-3.5 w-3.5" />,
+        color: 'warning' as const,
       },
       {
         title: t('dashboard.healthSignals.fatal'),
         value: accountPoolSummary?.fatal ?? 0,
-        description: t('dashboard.healthSignals.fatalDesc'),
-        icon: <TriangleAlert aria-hidden="true" className="h-4 w-4 text-danger" />,
+        icon: <TriangleAlert aria-hidden="true" className="h-3.5 w-3.5" />,
+        color: 'danger' as const,
       },
       {
         title: t('dashboard.healthSignals.transient'),
         value: accountPoolSummary?.transient ?? 0,
-        description: t('dashboard.healthSignals.transientDesc'),
-        icon: <RefreshCcw aria-hidden="true" className="h-4 w-4 text-secondary" />,
+        icon: <RefreshCcw aria-hidden="true" className="h-3.5 w-3.5" />,
+        color: 'secondary' as const,
       },
       {
         title: t('dashboard.healthSignals.admin'),
         value: accountPoolSummary?.admin ?? 0,
-        description: t('dashboard.healthSignals.adminDesc'),
-        icon: <Archive aria-hidden="true" className="h-4 w-4 text-primary" />,
+        icon: <Archive aria-hidden="true" className="h-3.5 w-3.5" />,
+        color: 'primary' as const,
       },
-    ],
-    [accountPoolSummary, t],
-  )
+    ]
+    const total = signals.reduce((s, m) => s + m.value, 0)
+    return signals.map((s) => ({ ...s, ratio: total > 0 ? Math.round((s.value / total) * 100) : 0 }))
+  }, [accountPoolSummary, t])
 
   const isLoading = isLoadingSystem || isLoadingSummary || isLoadingTrends || isLoadingLeaderboard
 
@@ -535,7 +537,7 @@ export default function Dashboard() {
       {/* ── 监控区域 ── */}
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1.3fr)_minmax(0,0.9fr)]">
         <Card className="border-small border-default-200 bg-content1 shadow-small">
-          <CardHeader className="px-5 pb-3 pt-5">
+          <CardHeader className="px-5 pb-2 pt-5">
             <div className="space-y-1">
               <h2 className="text-lg font-semibold tracking-[-0.02em] text-foreground">
                 {t('dashboard.healthSignals.title')}
@@ -545,95 +547,95 @@ export default function Dashboard() {
               </p>
             </div>
           </CardHeader>
-          <CardBody className="grid gap-3 px-5 pb-5 pt-1 md:grid-cols-2 xl:grid-cols-5">
+          <CardBody className="flex flex-col gap-2 px-5 pb-5 pt-1">
             {healthSignalMetrics.map((metric) => (
-              <div
-                key={metric.title}
-                className="rounded-large border border-default-200 bg-content2/55 px-4 py-4"
-              >
-                <div className="flex items-start justify-between gap-3">
-                  <div className="flex h-10 w-10 items-center justify-center rounded-large bg-content1">
-                    {metric.icon}
-                  </div>
-                  <Chip size="sm" variant="flat">
-                    {formatNumber(metric.value)}
-                  </Chip>
-                </div>
-                <div className="mt-4 text-xs font-semibold uppercase tracking-[0.14em] text-default-500">
-                  {metric.title}
-                </div>
-                <p className="mt-2 text-sm leading-6 text-default-600">
-                  {metric.description}
-                </p>
+              <div key={metric.title} className="flex items-center gap-3">
+                <span className={cn('flex h-6 w-6 shrink-0 items-center justify-center rounded-md', {
+                  'bg-success/10 text-success': metric.color === 'success',
+                  'bg-warning/10 text-warning': metric.color === 'warning',
+                  'bg-danger/10 text-danger': metric.color === 'danger',
+                  'bg-secondary/10 text-secondary': metric.color === 'secondary',
+                  'bg-primary/10 text-primary': metric.color === 'primary',
+                })}>
+                  {metric.icon}
+                </span>
+                <span className="w-12 shrink-0 text-xs font-medium text-default-600">{metric.title}</span>
+                <span className="w-10 shrink-0 text-right tabular-nums text-sm font-semibold text-foreground">
+                  {formatNumber(metric.value)}
+                </span>
+                <Progress
+                  aria-label={metric.title}
+                  color={metric.color}
+                  size="sm"
+                  radius="full"
+                  value={metric.ratio}
+                  className="flex-1"
+                />
+                <span className="w-10 shrink-0 text-right tabular-nums text-xs text-default-500">
+                  {metric.ratio}%
+                </span>
               </div>
             ))}
           </CardBody>
         </Card>
 
-        <Card className="border-small border-warning/20 bg-warning/[0.04] shadow-small dark:bg-warning/[0.07]">
-          <CardHeader className="flex items-start justify-between gap-4 px-5 pb-3 pt-5">
-            <div className="space-y-1">
-              <h2 className="text-lg font-semibold tracking-[-0.02em] text-foreground">
-                {t('dashboard.alerts.title')}
-              </h2>
-              <p className="text-sm leading-6 text-default-600">
-                {alerts.length > 0
-                  ? t('dashboard.overview.attentionNeeded')
-                  : t('dashboard.overview.stable')}
-              </p>
-            </div>
+        <Card className={cn(
+          'border-small shadow-small',
+          alerts.length > 0
+            ? 'border-danger/20 bg-danger/[0.04] dark:bg-danger/[0.07]'
+            : 'border-default-200 bg-content1',
+        )}>
+          <CardHeader className="flex items-start justify-between gap-4 px-5 pb-2 pt-5">
+            <h2 className="text-lg font-semibold tracking-[-0.02em] text-foreground">
+              {t('dashboard.alerts.title')}
+            </h2>
             <Chip
-              color={alerts.length > 0 ? 'warning' : 'success'}
+              color={alerts.length > 0 ? 'danger' : 'success'}
               size="sm"
               variant="flat"
             >
               {alerts.length}
             </Chip>
           </CardHeader>
-          <CardBody className="gap-3 px-5 pb-5 pt-1">
+          <CardBody className="gap-2.5 px-5 pb-5 pt-1">
             {alerts.length > 0 ? (
-              alerts.map((alert, index) => (
-                <div key={alert.id}>
-                  <div className="flex items-start gap-3 rounded-large bg-content1/85 px-3 py-3">
-                    <div className={cn(
-                      'mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-large',
-                      alert.severity === 'warning' ? 'bg-warning/10 text-warning' : 'bg-danger/10 text-danger',
-                    )}
-                    >
-                      <AlertTriangle aria-hidden="true" className="h-4 w-4" />
-                    </div>
-                    <div className="min-w-0 flex-1 space-y-2">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <Chip
-                          color={alert.severity === 'warning' ? 'warning' : 'danger'}
-                          size="sm"
-                          variant="flat"
-                        >
-                          {t(`dashboard.alerts.severity.${alert.severity}`, {
-                            defaultValue: alert.severity,
-                          })}
-                        </Chip>
-                        <Chip
-                          color={alert.status === 'open' ? 'warning' : 'success'}
-                          size="sm"
-                          variant="flat"
-                        >
-                          {t(`dashboard.alerts.status.${alert.status}`, {
-                            defaultValue: alert.status,
-                          })}
-                        </Chip>
-                      </div>
-                      <div className="text-sm leading-6 text-foreground">{alert.message}</div>
-                    </div>
+              alerts.map((alert) => (
+                <div key={alert.id} className="flex items-center gap-3 rounded-large bg-content1/85 px-3 py-2.5">
+                  <div className={cn(
+                    'flex h-7 w-7 shrink-0 items-center justify-center rounded-md',
+                    alert.severity === 'warning' ? 'bg-warning/10 text-warning' : 'bg-danger/10 text-danger',
+                  )}>
+                    <AlertTriangle aria-hidden="true" className="h-3.5 w-3.5" />
                   </div>
-                  {index < alerts.length - 1 ? <div className="h-2" /> : null}
+                  <div className="min-w-0 flex-1">
+                    <div className="text-sm leading-5 text-foreground">{alert.message}</div>
+                  </div>
+                  <div className="flex shrink-0 items-center gap-1.5">
+                    <Chip
+                      color={alert.severity === 'warning' ? 'warning' : 'danger'}
+                      size="sm"
+                      variant="flat"
+                    >
+                      {t(`dashboard.alerts.severity.${alert.severity}`, { defaultValue: alert.severity })}
+                    </Chip>
+                    <Chip
+                      color={alert.status === 'open' ? 'warning' : 'success'}
+                      size="sm"
+                      variant="flat"
+                    >
+                      {t(`dashboard.alerts.status.${alert.status}`, { defaultValue: alert.status })}
+                    </Chip>
+                  </div>
                 </div>
               ))
             ) : (
-              <div className="rounded-large border border-dashed border-default-200 bg-content1/85 px-4 py-6 text-sm text-default-600">
-                {t('dashboard.alerts.emptyDescription', {
-                  defaultValue: 'No active infrastructure or usage pipeline alerts are visible in the current window.',
-                })}
+              <div className="flex items-center gap-3 rounded-large bg-success/5 px-3 py-2.5">
+                <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-success/10 text-success">
+                  <ShieldCheck aria-hidden="true" className="h-3.5 w-3.5" />
+                </span>
+                <span className="text-sm text-success-700 dark:text-success-400">
+                  {t('dashboard.overview.stable')}
+                </span>
               </div>
             )}
           </CardBody>
@@ -799,43 +801,47 @@ export default function Dashboard() {
               </p>
             </div>
           </CardHeader>
-          <CardBody className="flex flex-col gap-3 px-5 pb-5 pt-1">
+          <CardBody className="flex flex-col px-5 pb-5 pt-1">
             {topApiKeys.length === 0 ? (
-              <div className="flex h-[280px] items-center justify-center text-sm text-default-600">
-                {t('dashboard.topApiKeys.empty')}
+              <div className="flex flex-col items-center justify-center gap-2 py-10 text-center">
+                <Inbox className="h-8 w-8 text-default-300" />
+                <p className="text-sm text-default-500">
+                  {t('dashboard.topApiKeys.empty')}
+                </p>
+                <p className="text-xs text-default-400">
+                  {t('dashboard.topApiKeys.emptyHint', { defaultValue: 'API key usage will appear here once requests are made.' })}
+                </p>
               </div>
             ) : (
-              topApiKeys.map((key, index) => {
-                const progressValue = topApiKeysMax > 0 ? (key.requests / topApiKeysMax) * 100 : 0
-
-                return (
-                  <div key={key.apiKeyId} className="rounded-large border border-default-200 bg-content2/55 px-4 py-4">
-                    <div className="flex items-center gap-3">
-                      <span className="flex h-8 w-8 items-center justify-center rounded-full bg-default-100 text-xs font-semibold text-default-600">
+              <div className="divide-y divide-default-100">
+                {topApiKeys.map((key, index) => {
+                  const progressValue = topApiKeysMax > 0 ? (key.requests / topApiKeysMax) * 100 : 0
+                  return (
+                    <div key={key.apiKeyId} className="flex items-center gap-3 py-2.5">
+                      <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-default-100 text-[10px] font-bold text-default-500">
                         {index + 1}
                       </span>
                       <div className="min-w-0 flex-1">
-                        <div className="truncate text-sm font-medium text-foreground">
+                        <div className="truncate text-sm font-medium leading-tight text-foreground">
                           {key.apiKeyId}
                         </div>
-                        <div className="text-xs text-default-500">{key.tenantId}</div>
+                        <div className="text-[11px] text-default-400">{key.tenantId}</div>
                       </div>
-                      <Chip color="primary" size="sm" variant="flat">
-                        {formatNumber(key.requests)}
-                      </Chip>
-                    </div>
-                    <div className="mt-3">
                       <Progress
                         aria-label={key.apiKeyId}
                         color="primary"
                         radius="full"
                         size="sm"
                         value={progressValue}
+                        className="w-20 shrink-0"
                       />
+                      <span className="w-14 shrink-0 text-right tabular-nums text-xs font-semibold text-foreground">
+                        {formatNumber(key.requests)}
+                      </span>
                     </div>
-                  </div>
-                )
-              })
+                  )
+                })}
+              </div>
             )}
           </CardBody>
         </Card>
