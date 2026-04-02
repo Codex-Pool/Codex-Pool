@@ -170,9 +170,9 @@ fn build_translated_responses_request(
     if let Some(stream) = request_value.get("stream").and_then(Value::as_bool) {
         object.insert("stream".to_string(), Value::Bool(stream));
     }
-    if let Some(temperature) = request_value.get("temperature").cloned() {
-        object.insert("temperature".to_string(), temperature);
-    }
+    // Claude Code sends temperature for Anthropic requests, but the GPT-5
+    // Responses backends behind this compatibility path may reject it.
+    // Keeping the Anthropic default is more compatible than forwarding it.
     if let Some(reasoning) = translate_anthropic_reasoning(
         request_value.get("thinking"),
         request_value.get("output_config"),
@@ -786,7 +786,8 @@ fn normalize_reasoning_effort(value: &str) -> Option<&'static str> {
     match value.trim().to_ascii_lowercase().as_str() {
         "low" => Some("low"),
         "medium" => Some("medium"),
-        "high" | "max" => Some("high"),
+        "high" => Some("high"),
+        "max" => Some("xhigh"),
         _ => None,
     }
 }
@@ -1062,20 +1063,74 @@ fn translate_anthropic_tool_definition(tool: &Value) -> Value {
     if let Some(description) = tool.get("description").cloned() {
         mapped.insert("description".to_string(), description);
     }
-    if let Some(parameters) = tool.get("input_schema").cloned() {
-        mapped.insert("parameters".to_string(), parameters);
-    }
-    for key in [
-        "strict",
-        "defer_loading",
-        "eager_input_streaming",
-        "cache_control",
-    ] {
-        if let Some(value) = tool.get(key).cloned() {
-            mapped.insert(key.to_string(), value);
-        }
-    }
+    let parameters = tool
+        .get("input_schema")
+        .map(sanitize_openai_tool_schema)
+        .unwrap_or_else(default_openai_tool_schema);
+    mapped.insert("parameters".to_string(), parameters);
+    // Keep only the OpenAI-compatible function tool surface here.
+    // Claude Code-specific fields like defer_loading/eager_input_streaming
+    // are local hints and can cause downstream schema rejections.
     Value::Object(mapped)
+}
+
+fn default_openai_tool_schema() -> Value {
+    serde_json::json!({
+        "type": "object",
+        "properties": {}
+    })
+}
+
+fn sanitize_openai_tool_schema(schema: &Value) -> Value {
+    match schema {
+        Value::Object(map) => {
+            let mut sanitized = serde_json::Map::new();
+            for (key, value) in map {
+                let next_value = match key.as_str() {
+                    "properties" => value
+                        .as_object()
+                        .map(|properties| {
+                            Value::Object(
+                                properties
+                                    .iter()
+                                    .map(|(name, schema)| {
+                                        (name.clone(), sanitize_openai_tool_schema(schema))
+                                    })
+                                    .collect(),
+                            )
+                        })
+                        .unwrap_or_else(|| Value::Object(serde_json::Map::new())),
+                    "items" | "additionalProperties" | "not" => sanitize_openai_tool_schema(value),
+                    "allOf" | "anyOf" | "oneOf" | "prefixItems" => value
+                        .as_array()
+                        .map(|entries| {
+                            Value::Array(
+                                entries
+                                    .iter()
+                                    .map(sanitize_openai_tool_schema)
+                                    .collect(),
+                            )
+                        })
+                        .unwrap_or_else(|| value.clone()),
+                    _ => value.clone(),
+                };
+                sanitized.insert(key.clone(), next_value);
+            }
+
+            if sanitized.get("type").and_then(Value::as_str) == Some("object")
+                && !matches!(sanitized.get("properties"), Some(Value::Object(_)))
+            {
+                sanitized.insert(
+                    "properties".to_string(),
+                    Value::Object(serde_json::Map::new()),
+                );
+            }
+
+            Value::Object(sanitized)
+        }
+        Value::Array(items) => Value::Array(items.iter().map(sanitize_openai_tool_schema).collect()),
+        other => other.clone(),
+    }
 }
 
 fn translate_anthropic_tool_choice(choice: &Value) -> Value {

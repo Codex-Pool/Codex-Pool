@@ -157,6 +157,15 @@ fn set_claude_code_sonnet_target(state: &AppState, target_model: Option<&str>) {
     });
 }
 
+fn set_claude_code_opus_target(state: &AppState, target_model: Option<&str>) {
+    state.replace_claude_code_routing_settings(ClaudeCodeRoutingSettings {
+        enabled: true,
+        opus_target_model: target_model.map(ToString::to_string),
+        updated_at: chrono::Utc::now(),
+        ..ClaudeCodeRoutingSettings::default()
+    });
+}
+
 async fn spawn_live_test_app(accounts: Vec<UpstreamAccount>) -> String {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
@@ -4994,6 +5003,7 @@ async fn anthropic_messages_strip_claude_code_only_fields_for_responses_requests
                     json!({
                         "model": "claude-sonnet-4-6",
                         "max_tokens": 32,
+                        "temperature": 0.7,
                         "metadata": {"user_id": "cli-user", "session_id": "cc-session"},
                         "thinking": {"type": "enabled", "budget_tokens": 4000},
                         "output_config": {"effort": "high"},
@@ -5016,11 +5026,103 @@ async fn anthropic_messages_strip_claude_code_only_fields_for_responses_requests
     assert_eq!(forwarded["model"], "gpt-5.4");
     assert_eq!(forwarded["store"], false);
     assert_eq!(forwarded["reasoning"]["effort"], "medium");
+    assert!(forwarded.get("temperature").is_none());
     assert!(forwarded.get("metadata").is_none());
     assert!(forwarded.get("thinking").is_none());
     assert!(forwarded.get("context_management").is_none());
     assert!(forwarded.get("output_config").is_none());
     assert!(forwarded.get("speed").is_none());
+}
+
+#[tokio::test]
+async fn anthropic_messages_sanitize_tool_schemas_for_responses_requests() {
+    let upstream = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v1/responses"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "id": "resp_anthropic_tool_schema_sanitized",
+            "status": "completed",
+            "usage": {"input_tokens": 7, "output_tokens": 3},
+            "output": [{
+                "type": "message",
+                "role": "assistant",
+                "content": [{"type": "output_text", "text": "OK"}]
+            }]
+        })))
+        .mount(&upstream)
+        .await;
+
+    let (app, state) =
+        embedded_test_app(vec![test_account(upstream.uri(), "upstream-token")]).await;
+    set_claude_code_sonnet_target(&state, Some("gpt-5.4"));
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/messages")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    json!({
+                        "model": "claude-sonnet-4-6",
+                        "max_tokens": 32,
+                        "messages": [{"role": "user", "content": "Reply with exactly OK."}],
+                        "tools": [
+                            {
+                                "name": "mcp__pencil__get_style_guide_tags",
+                                "description": "List style guide tags.",
+                                "defer_loading": true,
+                                "eager_input_streaming": true,
+                                "cache_control": {"type": "ephemeral"},
+                                "input_schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "filters": {
+                                            "type": "object"
+                                        }
+                                    }
+                                }
+                            },
+                            {
+                                "name": "mcp__pencil__ping",
+                                "description": "Ping the MCP server."
+                            }
+                        ]
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let upstream_requests = upstream.received_requests().await.unwrap();
+    assert_eq!(upstream_requests.len(), 1);
+    let forwarded: Value = serde_json::from_slice(&upstream_requests[0].body).unwrap();
+    assert_eq!(
+        forwarded["tools"][0]["parameters"],
+        json!({
+            "type": "object",
+            "properties": {
+                "filters": {
+                    "type": "object",
+                    "properties": {}
+                }
+            }
+        })
+    );
+    assert_eq!(
+        forwarded["tools"][1]["parameters"],
+        json!({
+            "type": "object",
+            "properties": {}
+        })
+    );
+    assert!(forwarded["tools"][0].get("defer_loading").is_none());
+    assert!(forwarded["tools"][0].get("eager_input_streaming").is_none());
+    assert!(forwarded["tools"][0].get("cache_control").is_none());
 }
 
 #[tokio::test]
@@ -5089,6 +5191,58 @@ async fn anthropic_messages_reasoning_omits_disabled_and_maps_adaptive_effort() 
     assert_eq!(adaptive["reasoning"]["effort"], "low");
     assert!(adaptive.get("thinking").is_none());
     assert!(adaptive.get("output_config").is_none());
+}
+
+#[tokio::test]
+async fn anthropic_messages_reasoning_maps_max_effort_to_xhigh() {
+    let upstream = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v1/responses"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "id": "resp_anthropic_reasoning_max",
+            "status": "completed",
+            "usage": {"input_tokens": 7, "output_tokens": 3},
+            "output": [{
+                "type": "message",
+                "role": "assistant",
+                "content": [{"type": "output_text", "text": "OK"}]
+            }]
+        })))
+        .mount(&upstream)
+        .await;
+
+    let (app, state) =
+        embedded_test_app(vec![test_account(upstream.uri(), "upstream-token")]).await;
+    set_claude_code_opus_target(&state, Some("gpt-5.4"));
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/messages")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    json!({
+                        "model": "claude-opus-4-1",
+                        "max_tokens": 32,
+                        "output_config": {"effort": "max"},
+                        "messages": [{"role": "user", "content": "Reply with exactly OK."}]
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let upstream_requests = upstream.received_requests().await.unwrap();
+    assert_eq!(upstream_requests.len(), 1);
+
+    let forwarded: Value = serde_json::from_slice(&upstream_requests[0].body).unwrap();
+    assert_eq!(forwarded["model"], "gpt-5.4");
+    assert_eq!(forwarded["reasoning"]["effort"], "xhigh");
 }
 
 #[tokio::test]
