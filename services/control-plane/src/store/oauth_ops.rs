@@ -2275,7 +2275,7 @@ impl InMemoryStore {
         }
         let active_count = self.oauth_active_account_count_inner();
         let target = active_pool_target_from_env();
-        let active_min = active_pool_min_from_env().min(target);
+        let _active_min = active_pool_min_from_env().min(target);
         let runtime_cap = runtime_pool_cap_from_env();
         let runtime_count = self.runtime_pool_account_count_inner();
         if runtime_count >= runtime_cap {
@@ -2290,14 +2290,6 @@ impl InMemoryStore {
         }
         if active_count >= target {
             return Ok(0);
-        }
-        if active_count < active_min {
-            tracing::warn!(
-                active_count,
-                active_min,
-                target,
-                "sqlite active oauth pool dropped below configured minimum"
-            );
         }
 
         let needed = target.saturating_sub(active_count);

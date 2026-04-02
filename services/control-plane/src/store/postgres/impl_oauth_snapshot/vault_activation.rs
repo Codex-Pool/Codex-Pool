@@ -315,17 +315,9 @@ impl PostgresStore {
 
         let active_count = usize::try_from(active_count.max(0)).unwrap_or_default();
         let target = active_pool_target_from_env();
-        let active_min = active_pool_min_from_env().min(target);
+        let _active_min = active_pool_min_from_env().min(target);
         if active_count >= target {
             return Ok(0);
-        }
-        if active_count < active_min {
-            tracing::warn!(
-                active_count,
-                active_min,
-                target,
-                "active oauth pool dropped below configured minimum"
-            );
         }
 
         let batch_size = oauth_vault_activate_batch_size_from_env();
