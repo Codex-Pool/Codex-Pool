@@ -795,12 +795,6 @@ async fn run_model_probe_cycle(
     } else {
         return Err(anyhow::anyhow!("tenant auth service is not available"));
     };
-    if official_catalog.is_empty() {
-        return Err(anyhow::anyhow!(
-            "official models catalog is empty; sync OpenAI catalog first"
-        ));
-    }
-
     let snapshot = state
         .store
         .snapshot()
@@ -948,6 +942,10 @@ fn spawn_model_probe_loop(state: AppState) {
 mod models_probe_tests {
     use super::*;
     use crate::contracts::{HourlyTenantUsageTotalPoint, HourlyUsageTotalPoint};
+    use axum::{routing::get, Json, Router};
+    use sqlx_core::pool::PoolOptions;
+    use sqlx_sqlite::Sqlite;
+    use tokio::net::TcpListener;
 
     fn test_account(label: &str) -> UpstreamAccount {
         UpstreamAccount {
@@ -1501,6 +1499,115 @@ mod models_probe_tests {
         }
     }
 
+    async fn empty_sqlite_usage_repo() -> std::sync::Arc<crate::usage::sqlite_repo::SqliteUsageRepo>
+    {
+        let path = std::env::temp_dir().join(format!(
+            "codex-pool-model-probe-empty-{}.sqlite3",
+            Uuid::new_v4()
+        ));
+        let database_url = crate::store::normalize_sqlite_database_url(&path.display().to_string());
+        let pool = PoolOptions::<Sqlite>::new()
+            .max_connections(1)
+            .connect(&database_url)
+            .await
+            .expect("connect empty sqlite usage repo");
+        std::sync::Arc::new(
+            crate::usage::sqlite_repo::SqliteUsageRepo::new(pool)
+                .await
+                .expect("create empty sqlite usage repo"),
+        )
+    }
+
+    async fn test_app_state_with_store_and_sqlite_repo(
+        store: std::sync::Arc<dyn crate::store::ControlPlaneStore>,
+        sqlite_usage_repo: std::sync::Arc<crate::usage::sqlite_repo::SqliteUsageRepo>,
+    ) -> AppState {
+        let _guard = crate::test_support::ENV_LOCK.lock().await;
+        let old_username = crate::test_support::set_env("ADMIN_USERNAME", Some("admin"));
+        let old_password = crate::test_support::set_env("ADMIN_PASSWORD", Some("admin123456"));
+        let old_secret =
+            crate::test_support::set_env("ADMIN_JWT_SECRET", Some("control-plane-test-jwt-secret"));
+        let admin_auth =
+            crate::admin_auth::AdminAuthService::from_env().expect("admin auth env must be set");
+        let outbound_proxy_runtime =
+            std::sync::Arc::new(crate::outbound_proxy_runtime::OutboundProxyRuntime::new());
+        outbound_proxy_runtime.attach_store(store.clone());
+        crate::test_support::set_env("ADMIN_USERNAME", old_username.as_deref());
+        crate::test_support::set_env("ADMIN_PASSWORD", old_password.as_deref());
+        crate::test_support::set_env("ADMIN_JWT_SECRET", old_secret.as_deref());
+
+        AppState {
+            store: store.clone(),
+            usage_repo: None,
+            usage_ingest_repo: None,
+            system_event_repo: None,
+            tenant_auth_service: None,
+            sqlite_usage_repo: Some(sqlite_usage_repo),
+            auth_validate_cache_ttl_sec: DEFAULT_AUTH_VALIDATE_CACHE_TTL_SEC,
+            system_capabilities: system_capabilities_from_env(),
+            admin_auth,
+            internal_auth_token: std::sync::Arc::<str>::from("test-internal-auth-token"),
+            import_job_manager: crate::import_jobs::OAuthImportJobManager::new(
+                store,
+                std::sync::Arc::new(crate::import_jobs::InMemoryOAuthImportJobStore::default()),
+                None,
+                1,
+                1,
+            ),
+            started_at: Utc::now(),
+            runtime_config: std::sync::Arc::new(std::sync::RwLock::new(
+                build_runtime_config_from_env(DEFAULT_AUTH_VALIDATE_CACHE_TTL_SEC),
+            )),
+            admin_logs: std::sync::Arc::new(std::sync::RwLock::new(
+                std::collections::VecDeque::new(),
+            )),
+            model_catalog_last_error: std::sync::Arc::new(std::sync::RwLock::new(None)),
+            model_probe_cache: std::sync::Arc::new(std::sync::RwLock::new(
+                ModelProbeCache::default(),
+            )),
+            oauth_login_sessions: std::sync::Arc::new(std::sync::RwLock::new(
+                std::collections::HashMap::new(),
+            )),
+            codex_oauth_callback_listen_mode: CodexOAuthCallbackListenMode::Off,
+            codex_oauth_callback_listen_addr: None,
+            codex_oauth_callback_listener: std::sync::Arc::new(tokio::sync::Mutex::new(None)),
+            outbound_proxy_runtime: outbound_proxy_runtime.clone(),
+            upstream_error_learning_runtime: std::sync::Arc::new(
+                crate::upstream_error_learning::UpstreamErrorLearningRuntime::from_env_with_outbound_proxy_runtime(
+                    "http://127.0.0.1:8091",
+                    outbound_proxy_runtime,
+                ),
+            ),
+            model_probe_interval_sec: MODEL_PROBE_DEFAULT_INTERVAL_SEC,
+        }
+    }
+
+    async fn spawn_models_endpoint_server() -> String {
+        let app = Router::new().route(
+            "/backend-api/codex/models",
+            get(|| async move {
+                Json(serde_json::json!({
+                    "object": "list",
+                    "data": [
+                        {
+                            "id": "gpt-5.4",
+                            "owned_by": "codex-oauth"
+                        }
+                    ]
+                }))
+            }),
+        );
+
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind temporary models endpoint");
+        let addr = listener.local_addr().expect("local addr");
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.expect("serve models endpoint");
+        });
+        format!("http://{}", addr)
+    }
+
     #[tokio::test]
     async fn build_admin_models_response_overlays_recent_successful_request_models() {
         let state = test_app_state_with_usage_rows(vec![crate::usage::RequestLogRow {
@@ -1546,6 +1653,45 @@ mod models_probe_tests {
         );
         assert_eq!(row.availability_http_status, Some(200));
         assert_eq!(row.availability_error, None);
+    }
+
+    #[tokio::test]
+    async fn run_model_probe_cycle_uses_upstream_models_when_official_catalog_is_empty() {
+        let base_url = spawn_models_endpoint_server().await;
+        let sqlite_usage_repo = empty_sqlite_usage_repo().await;
+        let store = std::sync::Arc::new(crate::store::InMemoryStore::default());
+        crate::store::ControlPlaneStore::create_upstream_account(
+            store.as_ref(),
+            crate::contracts::CreateUpstreamAccountRequest {
+                label: "probe-source".to_string(),
+                mode: codex_pool_core::model::UpstreamMode::CodexOauth,
+                base_url,
+                bearer_token: "test-token".to_string(),
+                chatgpt_account_id: Some("acct-probe-source".to_string()),
+                auth_provider: None,
+                enabled: Some(true),
+                priority: Some(100),
+            },
+        )
+        .await
+        .expect("create upstream account");
+        let store: std::sync::Arc<dyn crate::store::ControlPlaneStore> = store;
+        let state = test_app_state_with_store_and_sqlite_repo(store, sqlite_usage_repo).await;
+
+        let result = run_model_probe_cycle(&state, Vec::new(), true, "test").await;
+
+        assert!(
+            result.is_ok(),
+            "model probe should use upstream /models even before official catalog sync: {result:?}"
+        );
+        let cache = state
+            .model_probe_cache
+            .read()
+            .expect("model_probe_cache lock poisoned");
+        let entry = cache.entries.get("gpt-5.4").expect("probe cache entry");
+        assert_eq!(entry.status, AdminModelAvailabilityStatus::Available);
+        assert_eq!(entry.http_status, Some(200));
+        assert_eq!(entry.owned_by.as_deref(), Some("codex-oauth"));
     }
 
     #[test]
