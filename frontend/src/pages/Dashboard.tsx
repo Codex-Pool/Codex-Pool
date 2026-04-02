@@ -208,6 +208,7 @@ export default function Dashboard() {
         format: formatNumber,
         description: t('dashboard.antigravity.last24Hours', { defaultValue: 'Last 24 hours' }),
         sparklineData: requestSparkline,
+        sparklineTone: 'primary' as const,
         trendType: 'up' as const,
         changeType: 'positive' as const,
       },
@@ -218,6 +219,7 @@ export default function Dashboard() {
         format: formatNumber,
         description: t('dashboard.kpi.totalTokensDesc'),
         sparklineData: tokenSparkline,
+        sparklineTone: 'warning' as const,
         trendType: 'up' as const,
         changeType: 'neutral' as const,
       },
@@ -228,6 +230,7 @@ export default function Dashboard() {
         format: (n: number) => n.toString(),
         description: t('dashboard.kpi.rpmDesc'),
         sparklineData: requestSparkline,
+        sparklineTone: 'success' as const,
         trendType: 'up' as const,
         changeType: 'positive' as const,
       },
@@ -416,6 +419,7 @@ export default function Dashboard() {
               value={<SpringKpiValue rawValue={metric.rawValue} format={metric.format} />}
               description={metric.description}
               sparklineData={'sparklineData' in metric ? metric.sparklineData : undefined}
+              sparklineTone={'sparklineTone' in metric ? metric.sparklineTone : undefined}
               trendType={'trendType' in metric ? metric.trendType : undefined}
               changeType={'changeType' in metric ? metric.changeType : undefined}
             />

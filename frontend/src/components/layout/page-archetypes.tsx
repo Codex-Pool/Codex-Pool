@@ -492,23 +492,43 @@ export function DashboardMetricGrid({
 
 /* ── Sparkline mini-chart for KPI cards ─────────────────── */
 
+type KpiSparklineTone = 'primary' | 'secondary' | 'success' | 'warning' | 'danger'
+
+function resolveKpiSparklineStrokeColor(tone: KpiSparklineTone): string {
+  switch (tone) {
+    case 'primary':
+      return 'hsl(var(--heroui-primary))'
+    case 'secondary':
+      return 'hsl(var(--heroui-secondary))'
+    case 'success':
+      return 'hsl(var(--heroui-success))'
+    case 'danger':
+      return 'hsl(var(--heroui-danger))'
+    case 'warning':
+    default:
+      return 'hsl(var(--heroui-warning))'
+  }
+}
+
 function KpiSparkline({
   data,
   trendType = 'neutral',
+  tone,
 }: {
   data: number[]
   trendType?: 'up' | 'neutral' | 'down'
+  tone?: KpiSparklineTone
 }) {
   const chartData = useMemo(() => data.map((v, i) => ({ i, v })), [data])
 
-  const strokeColor =
-    trendType === 'up'
-      ? 'hsl(var(--heroui-success))'
+  const resolvedTone = tone
+    ?? (trendType === 'up'
+      ? 'success'
       : trendType === 'down'
-        ? 'hsl(var(--heroui-danger))'
-        : 'hsl(var(--heroui-warning))'
-
-  const fillId = `kpi-spark-${trendType}`
+        ? 'danger'
+        : 'warning')
+  const strokeColor = resolveKpiSparklineStrokeColor(resolvedTone)
+  const fillId = `kpi-spark-${resolvedTone}`
 
   if (chartData.length < 2) return null
 
@@ -586,6 +606,7 @@ interface DashboardMetricCardProps extends Omit<HTMLAttributes<HTMLDivElement>, 
   loading?: boolean
   variant?: 'primary' | 'secondary'
   sparklineData?: number[]
+  sparklineTone?: KpiSparklineTone
   trendChange?: string
   trendType?: 'up' | 'neutral' | 'down'
   changeType?: 'positive' | 'neutral' | 'negative'
@@ -602,6 +623,7 @@ export function DashboardMetricCard({
   loading = false,
   variant = 'primary',
   sparklineData,
+  sparklineTone,
   trendChange,
   trendType = 'neutral',
   changeType = 'neutral',
@@ -640,7 +662,11 @@ export function DashboardMetricCard({
           </p>
         </div>
         {isPrimary && hasSparkline ? (
-          <KpiSparkline data={sparklineData} trendType={trendType} />
+          <KpiSparkline
+            data={sparklineData}
+            trendType={trendType}
+            tone={sparklineTone}
+          />
         ) : icon ? (
           <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-medium border-small border-default-200 bg-default-50 text-default-400">
             {icon}
