@@ -418,6 +418,7 @@ impl PostgresStore {
                 opus_target_model,
                 sonnet_target_model,
                 haiku_target_model,
+                effort_routing_json::text AS effort_routing_json_text,
                 updated_at
             FROM claude_code_routing_settings
             WHERE singleton = $1
@@ -443,6 +444,9 @@ impl PostgresStore {
             haiku_target_model: normalize_optional_model(
                 row.try_get::<Option<String>, _>("haiku_target_model")?,
             ),
+            effort_routing: parse_claude_code_effort_routing(
+                row.try_get::<Option<String>, _>("effort_routing_json_text")?,
+            ),
             updated_at: row.try_get("updated_at")?,
         })
     }
@@ -451,6 +455,11 @@ impl PostgresStore {
         &self,
         req: UpdateClaudeCodeRoutingSettingsRequest,
     ) -> Result<ClaudeCodeRoutingSettings> {
+        let current_settings = if req.effort_routing.is_none() {
+            Some(self.load_claude_code_routing_settings_inner().await?)
+        } else {
+            None
+        };
         let mut tx = self
             .pool
             .begin()
@@ -460,6 +469,16 @@ impl PostgresStore {
         let opus_target_model = normalize_optional_model(req.opus_target_model);
         let sonnet_target_model = normalize_optional_model(req.sonnet_target_model);
         let haiku_target_model = normalize_optional_model(req.haiku_target_model);
+        let effort_routing = normalize_claude_code_effort_routing(
+            req.effort_routing
+                .unwrap_or_else(|| {
+                    current_settings
+                        .map(|settings| settings.effort_routing)
+                        .unwrap_or_default()
+                }),
+        );
+        let effort_routing_json = serde_json::to_string(&effort_routing)
+            .context("failed to encode claude code effort routing settings")?;
 
         sqlx::query(
             r#"
@@ -469,15 +488,17 @@ impl PostgresStore {
                 opus_target_model,
                 sonnet_target_model,
                 haiku_target_model,
+                effort_routing_json,
                 updated_at
             )
-            VALUES ($1, $2, $3, $4, $5, $6)
+            VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7)
             ON CONFLICT (singleton) DO UPDATE
             SET
                 enabled = EXCLUDED.enabled,
                 opus_target_model = EXCLUDED.opus_target_model,
                 sonnet_target_model = EXCLUDED.sonnet_target_model,
                 haiku_target_model = EXCLUDED.haiku_target_model,
+                effort_routing_json = EXCLUDED.effort_routing_json,
                 updated_at = EXCLUDED.updated_at
             "#,
         )
@@ -486,6 +507,7 @@ impl PostgresStore {
         .bind(opus_target_model.clone())
         .bind(sonnet_target_model.clone())
         .bind(haiku_target_model.clone())
+        .bind(effort_routing_json)
         .bind(updated_at)
         .execute(tx.as_mut())
         .await
@@ -507,6 +529,7 @@ impl PostgresStore {
             opus_target_model,
             sonnet_target_model,
             haiku_target_model,
+            effort_routing,
             updated_at,
         })
     }
@@ -1040,9 +1063,10 @@ fn default_model_routing_settings(updated_at: DateTime<Utc>) -> ModelRoutingSett
 fn default_claude_code_routing_settings(updated_at: DateTime<Utc>) -> ClaudeCodeRoutingSettings {
     ClaudeCodeRoutingSettings {
         enabled: false,
-        opus_target_model: None,
-        sonnet_target_model: None,
-        haiku_target_model: None,
+        opus_target_model: Some("gpt-5.4".to_string()),
+        sonnet_target_model: Some("gpt-5.4-mini".to_string()),
+        haiku_target_model: Some("gpt-5.4-mini".to_string()),
+        effort_routing: ClaudeCodeEffortRoutingSettings::default(),
         updated_at,
     }
 }
@@ -1078,6 +1102,46 @@ fn normalize_optional_model(value: Option<String>) -> Option<String> {
     value.and_then(|value| {
         let trimmed = value.trim();
         (!trimmed.is_empty()).then(|| trimmed.to_string())
+    })
+}
+
+fn parse_claude_code_effort_routing(raw: Option<String>) -> ClaudeCodeEffortRoutingSettings {
+    raw.and_then(|value| serde_json::from_str::<ClaudeCodeEffortRoutingSettings>(&value).ok())
+        .map(normalize_claude_code_effort_routing)
+        .unwrap_or_default()
+}
+
+fn normalize_claude_code_effort_routing(
+    value: ClaudeCodeEffortRoutingSettings,
+) -> ClaudeCodeEffortRoutingSettings {
+    ClaudeCodeEffortRoutingSettings {
+        fallback_mode: value.fallback_mode,
+        opus: normalize_claude_code_family_effort_routing(value.opus),
+        sonnet: normalize_claude_code_family_effort_routing(value.sonnet),
+        haiku: normalize_claude_code_family_effort_routing(value.haiku),
+    }
+}
+
+fn normalize_claude_code_family_effort_routing(
+    value: codex_pool_core::model::ClaudeCodeFamilyEffortRouting,
+) -> codex_pool_core::model::ClaudeCodeFamilyEffortRouting {
+    let mut source_to_target = std::collections::BTreeMap::new();
+    for (source, target) in value.source_to_target {
+        let Some(source) = normalize_optional_effort_label(Some(source)) else {
+            continue;
+        };
+        source_to_target.insert(source, normalize_optional_effort_label(target));
+    }
+    codex_pool_core::model::ClaudeCodeFamilyEffortRouting {
+        source_to_target,
+        default_target_effort: normalize_optional_effort_label(value.default_target_effort),
+    }
+}
+
+fn normalize_optional_effort_label(value: Option<String>) -> Option<String> {
+    value.and_then(|value| {
+        let trimmed = value.trim().to_ascii_lowercase();
+        (!trimmed.is_empty()).then_some(trimmed)
     })
 }
 

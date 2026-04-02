@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -219,12 +221,58 @@ pub struct ModelRoutingSettings {
     pub updated_at: DateTime<Utc>,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ClaudeCodeEffortFallbackMode {
+    ClampDown,
+    Omit,
+}
+
+impl Default for ClaudeCodeEffortFallbackMode {
+    fn default() -> Self {
+        Self::ClampDown
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ClaudeCodeFamilyEffortRouting {
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub source_to_target: BTreeMap<String, Option<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_target_effort: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ClaudeCodeEffortRoutingSettings {
+    #[serde(default)]
+    pub fallback_mode: ClaudeCodeEffortFallbackMode,
+    #[serde(default = "default_claude_code_opus_effort_routing")]
+    pub opus: ClaudeCodeFamilyEffortRouting,
+    #[serde(default = "default_claude_code_sonnet_effort_routing")]
+    pub sonnet: ClaudeCodeFamilyEffortRouting,
+    #[serde(default = "default_claude_code_haiku_effort_routing")]
+    pub haiku: ClaudeCodeFamilyEffortRouting,
+}
+
+impl Default for ClaudeCodeEffortRoutingSettings {
+    fn default() -> Self {
+        Self {
+            fallback_mode: ClaudeCodeEffortFallbackMode::ClampDown,
+            opus: default_claude_code_opus_effort_routing(),
+            sonnet: default_claude_code_sonnet_effort_routing(),
+            haiku: default_claude_code_haiku_effort_routing(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ClaudeCodeRoutingSettings {
     pub enabled: bool,
     pub opus_target_model: Option<String>,
     pub sonnet_target_model: Option<String>,
     pub haiku_target_model: Option<String>,
+    #[serde(default)]
+    pub effort_routing: ClaudeCodeEffortRoutingSettings,
     pub updated_at: DateTime<Utc>,
 }
 
@@ -232,11 +280,56 @@ impl Default for ClaudeCodeRoutingSettings {
     fn default() -> Self {
         Self {
             enabled: false,
-            opus_target_model: None,
-            sonnet_target_model: None,
-            haiku_target_model: None,
+            opus_target_model: Some("gpt-5.4".to_string()),
+            sonnet_target_model: Some("gpt-5.4-mini".to_string()),
+            haiku_target_model: Some("gpt-5.4-mini".to_string()),
+            effort_routing: ClaudeCodeEffortRoutingSettings::default(),
             updated_at: Utc::now(),
         }
+    }
+}
+
+fn default_claude_code_effort_map(
+    entries: &[(&str, Option<&str>)],
+) -> BTreeMap<String, Option<String>> {
+    entries
+        .iter()
+        .map(|(source, target)| {
+            (
+                (*source).to_string(),
+                target.map(std::string::ToString::to_string),
+            )
+        })
+        .collect()
+}
+
+fn default_claude_code_opus_effort_routing() -> ClaudeCodeFamilyEffortRouting {
+    ClaudeCodeFamilyEffortRouting {
+        source_to_target: default_claude_code_effort_map(&[
+            ("low", Some("low")),
+            ("medium", Some("medium")),
+            ("high", Some("high")),
+            ("max", Some("xhigh")),
+        ]),
+        default_target_effort: Some("xhigh".to_string()),
+    }
+}
+
+fn default_claude_code_sonnet_effort_routing() -> ClaudeCodeFamilyEffortRouting {
+    ClaudeCodeFamilyEffortRouting {
+        source_to_target: default_claude_code_effort_map(&[
+            ("low", Some("low")),
+            ("medium", Some("medium")),
+            ("high", Some("high")),
+        ]),
+        default_target_effort: Some("high".to_string()),
+    }
+}
+
+fn default_claude_code_haiku_effort_routing() -> ClaudeCodeFamilyEffortRouting {
+    ClaudeCodeFamilyEffortRouting {
+        source_to_target: BTreeMap::new(),
+        default_target_effort: None,
     }
 }
 

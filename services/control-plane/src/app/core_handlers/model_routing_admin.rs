@@ -251,6 +251,7 @@ async fn update_admin_claude_code_routing_settings(
                 "opus_target_model": response.opus_target_model,
                 "sonnet_target_model": response.sonnet_target_model,
                 "haiku_target_model": response.haiku_target_model,
+                "effort_routing": response.effort_routing,
             }),
             result_status: "ok".to_string(),
         },

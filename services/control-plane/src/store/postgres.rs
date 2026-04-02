@@ -7,13 +7,13 @@ use codex_pool_core::api::{
 };
 use codex_pool_core::model::{
     AccountRoutingTraits, AiErrorLearningSettings, ApiKey, BuiltinErrorTemplateKind,
-    BuiltinErrorTemplateOverrideRecord, ClaudeCodeRoutingSettings, CompiledModelRoutingPolicy,
-    CompiledRoutingPlan, CompiledRoutingProfile, LocalizedErrorTemplates, ModelRoutingPolicy,
-    ModelRoutingSettings, ModelRoutingTriggerMode, OutboundProxyNode, OutboundProxyPoolSettings,
-    ProxyFailMode, RoutingPlanVersion, RoutingPolicy, RoutingProfile, RoutingProfileSelector,
-    RoutingStrategy, Tenant, UpstreamAccount, UpstreamAuthProvider, UpstreamErrorAction,
-    UpstreamErrorRetryScope, UpstreamErrorTemplateRecord, UpstreamErrorTemplateStatus,
-    UpstreamMode,
+    BuiltinErrorTemplateOverrideRecord, ClaudeCodeEffortRoutingSettings,
+    ClaudeCodeRoutingSettings, CompiledModelRoutingPolicy, CompiledRoutingPlan,
+    CompiledRoutingProfile, LocalizedErrorTemplates, ModelRoutingPolicy, ModelRoutingSettings,
+    ModelRoutingTriggerMode, OutboundProxyNode, OutboundProxyPoolSettings, ProxyFailMode,
+    RoutingPlanVersion, RoutingPolicy, RoutingProfile, RoutingProfileSelector, RoutingStrategy,
+    Tenant, UpstreamAccount, UpstreamAuthProvider, UpstreamErrorAction,
+    UpstreamErrorRetryScope, UpstreamErrorTemplateRecord, UpstreamErrorTemplateStatus, UpstreamMode,
 };
 use futures_util::StreamExt;
 use sha2::{Digest, Sha256};

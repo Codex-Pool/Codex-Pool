@@ -38,6 +38,9 @@ import {
 import { modelsApi, type ModelSchema } from "@/api/models";
 import {
   modelRoutingApi,
+  type ClaudeCodeEffortFallbackMode,
+  type ClaudeCodeEffortRoutingSettings,
+  type ClaudeCodeFamilyEffortRouting,
   type ClaudeCodeRoutingSettings,
   type ModelRoutingSettings,
   type ModelRoutingTriggerMode,
@@ -120,7 +123,10 @@ type ClaudeCodeRoutingFormState = {
   opusTargetModel: string | null;
   sonnetTargetModel: string | null;
   haikuTargetModel: string | null;
+  effortRouting: ClaudeCodeEffortRoutingSettings;
 };
+
+type ClaudeCodeEffortFamilyKey = "opus" | "sonnet" | "haiku";
 
 type ErrorLearningSettingsFormState = {
   enabled: boolean;
@@ -187,6 +193,53 @@ const ERROR_TEMPLATE_RETRY_SCOPES: UpstreamErrorRetryScope[] = [
   "same_account",
   "cross_account",
 ];
+
+const CLAUDE_CODE_TARGET_EFFORTS = ["low", "medium", "high", "xhigh"] as const;
+const CLAUDE_CODE_EFFORT_OPTIONS = [null, ...CLAUDE_CODE_TARGET_EFFORTS] as const;
+const CLAUDE_CODE_KNOWN_SOURCE_EFFORTS = {
+  opus: ["low", "medium", "high", "max"],
+  sonnet: ["low", "medium", "high"],
+  haiku: [],
+} as const;
+
+function createRecommendedClaudeCodeEffortRouting(): ClaudeCodeEffortRoutingSettings {
+  return {
+    fallback_mode: "clamp_down",
+    opus: {
+      source_to_target: {
+        low: "low",
+        medium: "medium",
+        high: "high",
+        max: "xhigh",
+      },
+      default_target_effort: "xhigh",
+    },
+    sonnet: {
+      source_to_target: {
+        low: "low",
+        medium: "medium",
+        high: "high",
+      },
+      default_target_effort: "high",
+    },
+    haiku: {
+      source_to_target: {},
+      default_target_effort: null,
+    },
+  };
+}
+
+function createRecommendedClaudeCodeRoutingDraft(
+  enabled: boolean,
+): ClaudeCodeRoutingFormState {
+  return {
+    enabled,
+    opusTargetModel: "gpt-5.4",
+    sonnetTargetModel: "gpt-5.4-mini",
+    haikuTargetModel: "gpt-5.4-mini",
+    effortRouting: createRecommendedClaudeCodeEffortRouting(),
+  };
+}
 
 function parseCsvInput(raw: string): string[] {
   return raw
@@ -304,6 +357,12 @@ function createClaudeCodeRoutingDraft(
     opusTargetModel: settings.opus_target_model,
     sonnetTargetModel: settings.sonnet_target_model,
     haikuTargetModel: settings.haiku_target_model,
+    effortRouting: {
+      fallback_mode: settings.effort_routing.fallback_mode,
+      opus: cloneClaudeCodeFamilyEffortRouting(settings.effort_routing.opus),
+      sonnet: cloneClaudeCodeFamilyEffortRouting(settings.effort_routing.sonnet),
+      haiku: cloneClaudeCodeFamilyEffortRouting(settings.effort_routing.haiku),
+    },
   };
 }
 
@@ -315,8 +374,67 @@ function claudeCodeDraftEquals(
     draft.enabled === settings.enabled &&
     draft.opusTargetModel === settings.opus_target_model &&
     draft.sonnetTargetModel === settings.sonnet_target_model &&
-    draft.haikuTargetModel === settings.haiku_target_model
+    draft.haikuTargetModel === settings.haiku_target_model &&
+    claudeCodeEffortRoutingEquals(draft.effortRouting, settings.effort_routing)
   );
+}
+
+function cloneClaudeCodeFamilyEffortRouting(
+  routing: ClaudeCodeFamilyEffortRouting,
+): ClaudeCodeFamilyEffortRouting {
+  return {
+    source_to_target: Object.fromEntries(
+      Object.entries(routing.source_to_target ?? {}).sort(([left], [right]) =>
+        left.localeCompare(right),
+      ),
+    ),
+    default_target_effort: routing.default_target_effort ?? null,
+  };
+}
+
+function normalizeClaudeCodeFamilyEffortRouting(
+  routing: ClaudeCodeFamilyEffortRouting,
+): ClaudeCodeFamilyEffortRouting {
+  return {
+    source_to_target: Object.fromEntries(
+      Object.entries(routing.source_to_target ?? {})
+        .map(([source, target]) => [
+          source.trim().toLowerCase(),
+          typeof target === "string" && target.trim().length > 0
+            ? target.trim().toLowerCase()
+            : null,
+        ] as [string, string | null])
+        .filter(
+          (entry): entry is [string, string | null] => entry[0].length > 0,
+        )
+        .sort(([left], [right]) => left.localeCompare(right)),
+    ),
+    default_target_effort:
+      typeof routing.default_target_effort === "string" &&
+      routing.default_target_effort.trim().length > 0
+        ? routing.default_target_effort.trim().toLowerCase()
+        : null,
+  };
+}
+
+function normalizeClaudeCodeEffortRouting(
+  routing: ClaudeCodeEffortRoutingSettings,
+): ClaudeCodeEffortRoutingSettings {
+  return {
+    fallback_mode: routing.fallback_mode === "omit" ? "omit" : "clamp_down",
+    opus: normalizeClaudeCodeFamilyEffortRouting(routing.opus),
+    sonnet: normalizeClaudeCodeFamilyEffortRouting(routing.sonnet),
+    haiku: normalizeClaudeCodeFamilyEffortRouting(routing.haiku),
+  };
+}
+
+function claudeCodeEffortRoutingEquals(
+  left: ClaudeCodeEffortRoutingSettings,
+  right: ClaudeCodeEffortRoutingSettings,
+) {
+  const normalizedLeft = normalizeClaudeCodeEffortRouting(left);
+  const normalizedRight = normalizeClaudeCodeEffortRouting(right);
+  return JSON.stringify(normalizedLeft) === JSON.stringify(normalizedRight);
 }
 
 function createErrorLearningSettingsDraft(
@@ -678,17 +796,46 @@ export default function ModelRouting() {
     () => [
       {
         key: "opusTargetModel" as const,
+        effortKey: "opus" as const,
         label: t("modelRoutingPage.claudeCode.families.opus"),
+        sourceEfforts: [...CLAUDE_CODE_KNOWN_SOURCE_EFFORTS.opus],
       },
       {
         key: "sonnetTargetModel" as const,
+        effortKey: "sonnet" as const,
         label: t("modelRoutingPage.claudeCode.families.sonnet"),
+        sourceEfforts: [...CLAUDE_CODE_KNOWN_SOURCE_EFFORTS.sonnet],
       },
       {
         key: "haikuTargetModel" as const,
+        effortKey: "haiku" as const,
         label: t("modelRoutingPage.claudeCode.families.haiku"),
+        sourceEfforts: [...CLAUDE_CODE_KNOWN_SOURCE_EFFORTS.haiku],
       },
     ],
+    [t],
+  );
+  const claudeCodeFallbackModeOptions = useMemo(
+    () => [
+      {
+        value: "clamp_down" as ClaudeCodeEffortFallbackMode,
+        label: t("modelRoutingPage.claudeCode.fallbackModes.clampDown"),
+      },
+      {
+        value: "omit" as ClaudeCodeEffortFallbackMode,
+        label: t("modelRoutingPage.claudeCode.fallbackModes.omit"),
+      },
+    ],
+    [t],
+  );
+  const claudeCodeTargetEffortOptions = useMemo(
+    () =>
+      CLAUDE_CODE_EFFORT_OPTIONS.map((value) => ({
+        value,
+        label: value
+          ? t(`modelRoutingPage.claudeCode.effortLabels.${value}`)
+          : t("modelRoutingPage.claudeCode.effortLabels.omit"),
+      })),
     [t],
   );
   const claudeCodeHasChanges = useMemo(
@@ -728,6 +875,58 @@ export default function ModelRouting() {
       setClaudeCodeDraftOverride(updater(base));
     },
     [claudeCodeDraft, claudeCodeSettings],
+  );
+
+  const updateClaudeCodeFallbackMode = useCallback(
+    (fallbackMode: ClaudeCodeEffortFallbackMode) => {
+      updateClaudeCodeDraft((prev) => ({
+        ...prev,
+        effortRouting: {
+          ...prev.effortRouting,
+          fallback_mode: fallbackMode,
+        },
+      }));
+    },
+    [updateClaudeCodeDraft],
+  );
+
+  const updateClaudeCodeFamilyDefaultEffort = useCallback(
+    (family: ClaudeCodeEffortFamilyKey, nextEffort: string | null) => {
+      updateClaudeCodeDraft((prev) => ({
+        ...prev,
+        effortRouting: {
+          ...prev.effortRouting,
+          [family]: {
+            ...prev.effortRouting[family],
+            default_target_effort: nextEffort,
+          },
+        },
+      }));
+    },
+    [updateClaudeCodeDraft],
+  );
+
+  const updateClaudeCodeFamilyMappedEffort = useCallback(
+    (
+      family: ClaudeCodeEffortFamilyKey,
+      sourceEffort: string,
+      nextEffort: string | null,
+    ) => {
+      updateClaudeCodeDraft((prev) => ({
+        ...prev,
+        effortRouting: {
+          ...prev.effortRouting,
+          [family]: {
+            ...prev.effortRouting[family],
+            source_to_target: {
+              ...prev.effortRouting[family].source_to_target,
+              [sourceEffort]: nextEffort,
+            },
+          },
+        },
+      }));
+    },
+    [updateClaudeCodeDraft],
   );
 
   const updateErrorLearningDraft = useCallback(
@@ -786,6 +985,9 @@ export default function ModelRouting() {
         opus_target_model: claudeCodeDraft.opusTargetModel,
         sonnet_target_model: claudeCodeDraft.sonnetTargetModel,
         haiku_target_model: claudeCodeDraft.haikuTargetModel,
+        effort_routing: normalizeClaudeCodeEffortRouting(
+          claudeCodeDraft.effortRouting,
+        ),
       });
     },
     onSuccess: () => {
@@ -1376,14 +1578,52 @@ export default function ModelRouting() {
                 </div>
               </SurfaceCard>
 
+              <SurfaceCard contentClassName="space-y-3 p-4">
+                <div>
+                  <div className="font-medium">
+                    {t("modelRoutingPage.claudeCode.fallbackMode")}
+                  </div>
+                  <div className="text-sm text-muted-foreground">
+                    {t("modelRoutingPage.claudeCode.fallbackModeHint")}
+                  </div>
+                </div>
+                <Select
+                  value={
+                    claudeCodeDraft?.effortRouting.fallback_mode ?? "clamp_down"
+                  }
+                  onValueChange={(next) =>
+                    updateClaudeCodeFallbackMode(
+                      next as ClaudeCodeEffortFallbackMode,
+                    )
+                  }
+                >
+                  <SelectTrigger>
+                    <SelectValue
+                      placeholder={t(
+                        "modelRoutingPage.claudeCode.fallbackMode",
+                      )}
+                    />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {claudeCodeFallbackModeOptions.map((option) => (
+                      <SelectItem key={option.value} value={option.value}>
+                        {option.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </SurfaceCard>
+
               <div className="grid gap-4 xl:grid-cols-3">
                 {claudeCodeFamilies.map((family) => {
                   const selectedModel = claudeCodeDraft?.[family.key] ?? null;
+                  const familyRouting =
+                    claudeCodeDraft?.effortRouting[family.effortKey];
 
                   return (
                     <SurfaceCard
                       key={family.key}
-                      contentClassName="space-y-3 p-4"
+                      contentClassName="space-y-4 p-4"
                     >
                       <div className="flex flex-wrap items-center justify-between gap-2">
                         <div className="font-medium">{family.label}</div>
@@ -1409,12 +1649,131 @@ export default function ModelRouting() {
                         }
                         labels={claudeCodeModelSelectorLabels}
                       />
+
+                      <div className="space-y-3 rounded-xl border border-border/60 bg-muted/20 p-3">
+                        <div>
+                          <div className="text-sm font-medium">
+                            {t("modelRoutingPage.claudeCode.effortRoutingTitle")}
+                          </div>
+                          <div className="text-xs text-muted-foreground">
+                            {t("modelRoutingPage.claudeCode.effortRoutingHint")}
+                          </div>
+                        </div>
+
+                        <div className="grid gap-2">
+                          <div className="grid gap-2 md:grid-cols-[minmax(0,1fr),minmax(0,1fr)] md:items-center">
+                            <div className="text-sm">
+                              {t(
+                                "modelRoutingPage.claudeCode.unknownEffortLabel",
+                              )}
+                            </div>
+                            <Select
+                              value={
+                                familyRouting?.default_target_effort ??
+                                "__omit__"
+                              }
+                              onValueChange={(next) =>
+                                updateClaudeCodeFamilyDefaultEffort(
+                                  family.effortKey,
+                                  next === "__omit__" ? null : next,
+                                )
+                              }
+                            >
+                              <SelectTrigger>
+                                <SelectValue
+                                  placeholder={t(
+                                    "modelRoutingPage.claudeCode.effortLabels.omit",
+                                  )}
+                                />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {claudeCodeTargetEffortOptions.map((option) => (
+                                  <SelectItem
+                                    key={option.value ?? "__omit__"}
+                                    value={option.value ?? "__omit__"}
+                                  >
+                                    {option.label}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+
+                          {family.sourceEfforts.length === 0 ? (
+                            <div className="text-xs text-muted-foreground">
+                              {t(
+                                "modelRoutingPage.claudeCode.noFixedEffortsHint",
+                              )}
+                            </div>
+                          ) : (
+                            family.sourceEfforts.map((sourceEffort) => (
+                              <div
+                                key={`${family.key}-${sourceEffort}`}
+                                className="grid gap-2 md:grid-cols-[minmax(0,1fr),minmax(0,1fr)] md:items-center"
+                              >
+                                <div className="text-sm">
+                                  {t(
+                                    `modelRoutingPage.claudeCode.effortLabels.${sourceEffort}`,
+                                  )}
+                                </div>
+                                <Select
+                                  value={
+                                    familyRouting?.source_to_target?.[
+                                      sourceEffort
+                                    ] ?? "__omit__"
+                                  }
+                                  onValueChange={(next) =>
+                                    updateClaudeCodeFamilyMappedEffort(
+                                      family.effortKey,
+                                      sourceEffort,
+                                      next === "__omit__" ? null : next,
+                                    )
+                                  }
+                                >
+                                  <SelectTrigger>
+                                    <SelectValue
+                                      placeholder={t(
+                                        "modelRoutingPage.claudeCode.effortLabels.omit",
+                                      )}
+                                    />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    {claudeCodeTargetEffortOptions.map(
+                                      (option) => (
+                                        <SelectItem
+                                          key={option.value ?? "__omit__"}
+                                          value={option.value ?? "__omit__"}
+                                        >
+                                          {option.label}
+                                        </SelectItem>
+                                      ),
+                                    )}
+                                  </SelectContent>
+                                </Select>
+                              </div>
+                            ))
+                          )}
+                        </div>
+                      </div>
                     </SurfaceCard>
                   );
                 })}
               </div>
 
               <div className="flex justify-end gap-2">
+                <Button
+                  variant="flat"
+                  onClick={() =>
+                    setClaudeCodeDraftOverride(
+                      createRecommendedClaudeCodeRoutingDraft(
+                        claudeCodeDraft?.enabled ?? claudeCodeSettings?.enabled ?? false,
+                      ),
+                    )
+                  }
+                  disabled={saveClaudeCodeMutation.isPending}
+                >
+                  {t("modelRoutingPage.actions.useClaudeCodeDefaults")}
+                </Button>
                 <Button
                   variant="flat"
                   onClick={() => setClaudeCodeDraftOverride(null)}

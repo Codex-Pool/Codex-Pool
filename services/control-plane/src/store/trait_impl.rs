@@ -418,11 +418,13 @@ impl ControlPlaneStore for InMemoryStore {
         &self,
         req: UpdateClaudeCodeRoutingSettingsRequest,
     ) -> Result<ClaudeCodeRoutingSettings> {
+        let existing = self.claude_code_routing_settings.read().unwrap().clone();
         let settings = ClaudeCodeRoutingSettings {
             enabled: req.enabled,
             opus_target_model: normalize_optional_model(req.opus_target_model),
             sonnet_target_model: normalize_optional_model(req.sonnet_target_model),
             haiku_target_model: normalize_optional_model(req.haiku_target_model),
+            effort_routing: req.effort_routing.unwrap_or(existing.effort_routing),
             updated_at: Utc::now(),
         };
         *self.claude_code_routing_settings.write().unwrap() = settings.clone();

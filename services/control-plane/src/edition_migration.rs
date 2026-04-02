@@ -233,9 +233,10 @@ pub(crate) fn default_model_routing_settings() -> ModelRoutingSettings {
 pub(crate) fn default_claude_code_routing_settings() -> ClaudeCodeRoutingSettings {
     ClaudeCodeRoutingSettings {
         enabled: false,
-        opus_target_model: None,
-        sonnet_target_model: None,
-        haiku_target_model: None,
+        opus_target_model: Some("gpt-5.4".to_string()),
+        sonnet_target_model: Some("gpt-5.4-mini".to_string()),
+        haiku_target_model: Some("gpt-5.4-mini".to_string()),
+        effort_routing: Default::default(),
         updated_at: Utc::now(),
     }
 }

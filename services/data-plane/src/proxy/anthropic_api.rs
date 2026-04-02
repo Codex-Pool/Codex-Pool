@@ -44,19 +44,26 @@ pub async fn anthropic_messages_handler(
             );
         }
     };
-    let target_model = match resolve_claude_code_target_model(state.as_ref(), &requested_model) {
-        Ok(model) => model,
+    let claude_code_settings = state.claude_code_routing_settings();
+    let resolved_target =
+        match resolve_claude_code_target_model(&claude_code_settings, &requested_model) {
+            Ok(model) => model,
+            Err(response) => return response,
+        };
+    let target_model = resolved_target.target_model.clone();
+    let translated_request = match translate_anthropic_messages_request(
+        &request_value,
+        resolved_target.family,
+        target_model.as_str(),
+        &claude_code_settings.effort_routing,
+    ) {
+        Ok(value) => value,
         Err(response) => return response,
     };
     let expects_stream = request_value
         .get("stream")
         .and_then(Value::as_bool)
         .unwrap_or(false);
-    let translated_request =
-        match translate_anthropic_messages_request(&request_value, target_model.as_str()) {
-            Ok(value) => value,
-            Err(response) => return response,
-        };
 
     parts.method = axum::http::Method::POST;
     parts.uri = axum::http::Uri::from_static("/v1/responses");
@@ -128,15 +135,21 @@ pub async fn anthropic_count_tokens_handler(
             );
         }
     };
-    let target_model = match resolve_claude_code_target_model(state.as_ref(), &requested_model) {
-        Ok(model) => model,
-        Err(response) => return response,
-    };
-    let translated_request =
-        match translate_anthropic_messages_request(&request_value, target_model.as_str()) {
-            Ok(value) => value,
+    let claude_code_settings = state.claude_code_routing_settings();
+    let resolved_target =
+        match resolve_claude_code_target_model(&claude_code_settings, &requested_model) {
+            Ok(model) => model,
             Err(response) => return response,
         };
+    let translated_request = match translate_anthropic_messages_request(
+        &request_value,
+        resolved_target.family,
+        resolved_target.target_model.as_str(),
+        &claude_code_settings.effort_routing,
+    ) {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
     let input_tokens = translated_request.estimated_input_tokens.max(0);
 
     let mut payload = serde_json::json!({

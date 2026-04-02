@@ -88,6 +88,7 @@ fn set_claude_code_targets(
         sonnet_target_model: sonnet_target.map(ToString::to_string),
         haiku_target_model: haiku_target.map(ToString::to_string),
         updated_at: chrono::Utc::now(),
+        ..ClaudeCodeRoutingSettings::default()
     });
 }
 

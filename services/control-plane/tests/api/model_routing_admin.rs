@@ -240,9 +240,15 @@ async fn admin_claude_code_routing_settings_endpoints_work() {
         .unwrap();
     let initial_json: Value = serde_json::from_slice(&initial_body).unwrap();
     assert_eq!(initial_json["enabled"], false);
-    assert_eq!(initial_json["opus_target_model"], Value::Null);
-    assert_eq!(initial_json["sonnet_target_model"], Value::Null);
-    assert_eq!(initial_json["haiku_target_model"], Value::Null);
+    assert_eq!(initial_json["opus_target_model"], "gpt-5.4");
+    assert_eq!(initial_json["sonnet_target_model"], "gpt-5.4-mini");
+    assert_eq!(initial_json["haiku_target_model"], "gpt-5.4-mini");
+    assert_eq!(initial_json["effort_routing"]["fallback_mode"], "clamp_down");
+    assert_eq!(initial_json["effort_routing"]["opus"]["source_to_target"]["max"], "xhigh");
+    assert_eq!(
+        initial_json["effort_routing"]["haiku"]["default_target_effort"],
+        Value::Null
+    );
     assert!(initial_json["updated_at"].as_str().is_some());
 
     let update_response = app
@@ -258,7 +264,33 @@ async fn admin_claude_code_routing_settings_endpoints_work() {
                         "enabled": true,
                         "opus_target_model": "gpt-5.2-codex",
                         "sonnet_target_model": "gpt-4.1",
-                        "haiku_target_model": "gpt-4.1-mini"
+                        "haiku_target_model": "gpt-4.1-mini",
+                        "effort_routing": {
+                            "fallback_mode": "omit",
+                            "opus": {
+                                "source_to_target": {
+                                    "low": "low",
+                                    "medium": "medium",
+                                    "high": "high",
+                                    "max": "xhigh"
+                                },
+                                "default_target_effort": "xhigh"
+                            },
+                            "sonnet": {
+                                "source_to_target": {
+                                    "low": "low",
+                                    "medium": "medium",
+                                    "high": "medium"
+                                },
+                                "default_target_effort": "medium"
+                            },
+                            "haiku": {
+                                "source_to_target": {
+                                    "high": null
+                                },
+                                "default_target_effort": null
+                            }
+                        }
                     })
                     .to_string(),
                 ))
@@ -275,6 +307,15 @@ async fn admin_claude_code_routing_settings_endpoints_work() {
     assert_eq!(update_json["opus_target_model"], "gpt-5.2-codex");
     assert_eq!(update_json["sonnet_target_model"], "gpt-4.1");
     assert_eq!(update_json["haiku_target_model"], "gpt-4.1-mini");
+    assert_eq!(update_json["effort_routing"]["fallback_mode"], "omit");
+    assert_eq!(
+        update_json["effort_routing"]["sonnet"]["source_to_target"]["high"],
+        "medium"
+    );
+    assert_eq!(
+        update_json["effort_routing"]["haiku"]["source_to_target"]["high"],
+        Value::Null
+    );
     assert!(update_json["updated_at"].as_str().is_some());
 
     let persisted_response = app
@@ -297,6 +338,15 @@ async fn admin_claude_code_routing_settings_endpoints_work() {
     assert_eq!(persisted_json["opus_target_model"], "gpt-5.2-codex");
     assert_eq!(persisted_json["sonnet_target_model"], "gpt-4.1");
     assert_eq!(persisted_json["haiku_target_model"], "gpt-4.1-mini");
+    assert_eq!(persisted_json["effort_routing"]["fallback_mode"], "omit");
+    assert_eq!(
+        persisted_json["effort_routing"]["opus"]["source_to_target"]["max"],
+        "xhigh"
+    );
+    assert_eq!(
+        persisted_json["effort_routing"]["sonnet"]["default_target_effort"],
+        "medium"
+    );
     assert!(persisted_json["updated_at"].as_str().is_some());
 }
 

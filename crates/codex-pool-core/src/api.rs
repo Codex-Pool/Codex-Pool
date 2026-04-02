@@ -1,4 +1,6 @@
-use crate::model::{ClaudeCodeRoutingSettings, UpstreamErrorTemplateRecord};
+use crate::model::{
+    ClaudeCodeEffortRoutingSettings, ClaudeCodeRoutingSettings, UpstreamErrorTemplateRecord,
+};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
@@ -56,4 +58,6 @@ pub struct UpdateClaudeCodeRoutingSettingsRequest {
     pub opus_target_model: Option<String>,
     pub sonnet_target_model: Option<String>,
     pub haiku_target_model: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effort_routing: Option<ClaudeCodeEffortRoutingSettings>,
 }

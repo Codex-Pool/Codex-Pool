@@ -9,6 +9,7 @@ export type ModelRoutingTriggerMode =
   | "hybrid"
   | "scheduled_only"
   | "event_only";
+export type ClaudeCodeEffortFallbackMode = "clamp_down" | "omit";
 
 export interface RoutingProfileSelector {
   plan_types: string[];
@@ -79,7 +80,20 @@ export interface ClaudeCodeRoutingSettings {
   opus_target_model: string | null;
   sonnet_target_model: string | null;
   haiku_target_model: string | null;
+  effort_routing: ClaudeCodeEffortRoutingSettings;
   updated_at: string;
+}
+
+export interface ClaudeCodeFamilyEffortRouting {
+  source_to_target: Record<string, string | null>;
+  default_target_effort: string | null;
+}
+
+export interface ClaudeCodeEffortRoutingSettings {
+  fallback_mode: ClaudeCodeEffortFallbackMode;
+  opus: ClaudeCodeFamilyEffortRouting;
+  sonnet: ClaudeCodeFamilyEffortRouting;
+  haiku: ClaudeCodeFamilyEffortRouting;
 }
 
 export interface RoutingPlanVersion {
@@ -142,6 +156,7 @@ export interface UpdateClaudeCodeRoutingSettingsRequest {
   opus_target_model: string | null;
   sonnet_target_model: string | null;
   haiku_target_model: string | null;
+  effort_routing?: ClaudeCodeEffortRoutingSettings;
 }
 
 function normalizeStringArray(value: unknown): string[] {
@@ -152,6 +167,44 @@ function normalizeStringArray(value: unknown): string[] {
 
 function normalizeNullableString(value: unknown): string | null {
   return typeof value === "string" ? value : null;
+}
+
+function normalizeNullableEffort(value: unknown): string | null {
+  return typeof value === "string" && value.trim().length > 0
+    ? value.trim().toLowerCase()
+    : null;
+}
+
+function normalizeClaudeCodeFamilyEffortRouting(
+  value?: Partial<ClaudeCodeFamilyEffortRouting> | null,
+): ClaudeCodeFamilyEffortRouting {
+  const sourceToTarget = Object.fromEntries(
+    Object.entries(value?.source_to_target ?? {})
+      .map(([source, target]) => [
+        source.trim().toLowerCase(),
+        normalizeNullableEffort(target),
+      ] as [string, string | null])
+      .filter(
+        (entry): entry is [string, string | null] => entry[0].length > 0,
+      )
+      .sort(([left], [right]) => left.localeCompare(right)),
+  );
+
+  return {
+    source_to_target: sourceToTarget,
+    default_target_effort: normalizeNullableEffort(value?.default_target_effort),
+  };
+}
+
+function normalizeClaudeCodeEffortRouting(
+  value?: Partial<ClaudeCodeEffortRoutingSettings> | null,
+): ClaudeCodeEffortRoutingSettings {
+  return {
+    fallback_mode: value?.fallback_mode === "omit" ? "omit" : "clamp_down",
+    opus: normalizeClaudeCodeFamilyEffortRouting(value?.opus),
+    sonnet: normalizeClaudeCodeFamilyEffortRouting(value?.sonnet),
+    haiku: normalizeClaudeCodeFamilyEffortRouting(value?.haiku),
+  };
 }
 
 function normalizeProfileSelector(
@@ -235,6 +288,7 @@ function normalizeClaudeCodeSettings(
     opus_target_model: normalizeNullableString(settings.opus_target_model),
     sonnet_target_model: normalizeNullableString(settings.sonnet_target_model),
     haiku_target_model: normalizeNullableString(settings.haiku_target_model),
+    effort_routing: normalizeClaudeCodeEffortRouting(settings.effort_routing),
   };
 }
 

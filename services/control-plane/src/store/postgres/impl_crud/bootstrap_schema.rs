@@ -1836,6 +1836,7 @@ impl PostgresStore {
                 opus_target_model TEXT NULL,
                 sonnet_target_model TEXT NULL,
                 haiku_target_model TEXT NULL,
+                effort_routing_json JSONB NOT NULL DEFAULT '{}'::jsonb,
                 updated_at TIMESTAMPTZ NOT NULL
             )
             "#,
@@ -1843,6 +1844,34 @@ impl PostgresStore {
         .execute(tx.as_mut())
         .await
         .context("failed to create claude_code_routing_settings table")?;
+
+        let default_claude_code_effort_routing_json = serde_json::to_string(
+            &ClaudeCodeEffortRoutingSettings::default(),
+        )
+        .context("failed to encode default claude code effort routing settings")?;
+
+        sqlx::query(
+            r#"
+            ALTER TABLE claude_code_routing_settings
+            ADD COLUMN IF NOT EXISTS effort_routing_json JSONB NOT NULL DEFAULT '{}'::jsonb
+            "#,
+        )
+        .execute(tx.as_mut())
+        .await
+        .context("failed to add claude code effort routing json column")?;
+
+        sqlx::query(
+            r#"
+            UPDATE claude_code_routing_settings
+            SET effort_routing_json = $1::jsonb
+            WHERE effort_routing_json IS NULL
+               OR effort_routing_json = '{}'::jsonb
+            "#,
+        )
+        .bind(&default_claude_code_effort_routing_json)
+        .execute(tx.as_mut())
+        .await
+        .context("failed to backfill claude code effort routing settings")?;
 
         sqlx::query(
             r#"
@@ -1852,13 +1881,15 @@ impl PostgresStore {
                 opus_target_model,
                 sonnet_target_model,
                 haiku_target_model,
+                effort_routing_json,
                 updated_at
             )
-            VALUES ($1, false, NULL, NULL, NULL, now())
+            VALUES ($1, false, 'gpt-5.4', 'gpt-5.4-mini', 'gpt-5.4-mini', $2::jsonb, now())
             ON CONFLICT (singleton) DO NOTHING
             "#,
         )
         .bind(SNAPSHOT_SINGLETON_ROW)
+        .bind(&default_claude_code_effort_routing_json)
         .execute(tx.as_mut())
         .await
         .context("failed to initialize claude_code_routing_settings row")?;

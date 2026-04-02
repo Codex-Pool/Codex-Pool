@@ -1,3 +1,7 @@
+use codex_pool_core::model::{
+    ClaudeCodeEffortFallbackMode, ClaudeCodeEffortRoutingSettings, ClaudeCodeRoutingSettings,
+};
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ClaudeCodeFamily {
     Opus,
@@ -5,10 +9,16 @@ enum ClaudeCodeFamily {
     Haiku,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ResolvedClaudeCodeTarget {
+    family: ClaudeCodeFamily,
+    target_model: String,
+}
+
 fn resolve_claude_code_target_model(
-    state: &AppState,
+    settings: &ClaudeCodeRoutingSettings,
     requested_model: &str,
-) -> Result<String, Response> {
+) -> Result<ResolvedClaudeCodeTarget, Response> {
     let family = normalize_claude_code_family(requested_model).ok_or_else(|| {
         anthropic_json_error(
             StatusCode::BAD_REQUEST,
@@ -16,7 +26,6 @@ fn resolve_claude_code_target_model(
             "unsupported Claude family; expected an Opus, Sonnet, or Haiku model",
         )
     })?;
-    let settings = state.claude_code_routing_settings();
     if !settings.enabled {
         return Err(anthropic_json_error(
             StatusCode::BAD_REQUEST,
@@ -26,9 +35,9 @@ fn resolve_claude_code_target_model(
     }
 
     let target_model = match family {
-        ClaudeCodeFamily::Opus => settings.opus_target_model,
-        ClaudeCodeFamily::Sonnet => settings.sonnet_target_model,
-        ClaudeCodeFamily::Haiku => settings.haiku_target_model,
+        ClaudeCodeFamily::Opus => settings.opus_target_model.clone(),
+        ClaudeCodeFamily::Sonnet => settings.sonnet_target_model.clone(),
+        ClaudeCodeFamily::Haiku => settings.haiku_target_model.clone(),
     }
     .filter(|value| !value.trim().is_empty())
     .ok_or_else(|| {
@@ -39,7 +48,10 @@ fn resolve_claude_code_target_model(
         )
     })?;
 
-    Ok(target_model)
+    Ok(ResolvedClaudeCodeTarget {
+        family,
+        target_model,
+    })
 }
 
 fn normalize_claude_code_family(model: &str) -> Option<ClaudeCodeFamily> {
@@ -61,7 +73,9 @@ fn normalize_claude_code_family(model: &str) -> Option<ClaudeCodeFamily> {
 
 fn translate_anthropic_messages_request(
     request_value: &Value,
+    family: ClaudeCodeFamily,
     target_model: &str,
+    effort_routing: &ClaudeCodeEffortRoutingSettings,
 ) -> Result<TranslatedAnthropicRequest, Response> {
     let messages = request_value
         .get("messages")
@@ -76,8 +90,13 @@ fn translate_anthropic_messages_request(
 
     let (effective_messages, context_management) =
         apply_anthropic_context_management(request_value, messages)?;
-    let object =
-        build_translated_responses_request(request_value, target_model, effective_messages.as_slice())?;
+    let object = build_translated_responses_request(
+        request_value,
+        family,
+        target_model,
+        effort_routing,
+        effective_messages.as_slice(),
+    )?;
     let estimated_input_tokens =
         estimate_anthropic_request_input_tokens(request_value, effective_messages.as_slice()).max(0);
 
@@ -128,7 +147,9 @@ const CLEARED_TOOL_INPUT_JSON: &str = "{}";
 
 fn build_translated_responses_request(
     request_value: &Value,
+    family: ClaudeCodeFamily,
     target_model: &str,
+    effort_routing: &ClaudeCodeEffortRoutingSettings,
     messages: &[Value],
 ) -> Result<serde_json::Map<String, Value>, Response> {
 
@@ -174,6 +195,9 @@ fn build_translated_responses_request(
     // Responses backends behind this compatibility path may reject it.
     // Keeping the Anthropic default is more compatible than forwarding it.
     if let Some(reasoning) = translate_anthropic_reasoning(
+        family,
+        target_model,
+        effort_routing,
         request_value.get("thinking"),
         request_value.get("output_config"),
     ) {
@@ -765,49 +789,139 @@ fn is_thinking_block(block: &Value) -> bool {
 }
 
 fn translate_anthropic_reasoning(
+    family: ClaudeCodeFamily,
+    target_model: &str,
+    effort_routing: &ClaudeCodeEffortRoutingSettings,
     thinking: Option<&Value>,
     output_config: Option<&Value>,
 ) -> Option<Value> {
     let explicit_effort = output_config
         .and_then(|value| value.get("effort"))
         .and_then(Value::as_str)
-        .and_then(normalize_reasoning_effort);
-    let effort = match anthropic_thinking_mode(thinking) {
+        .and_then(normalize_source_effort);
+    let source_effort = match anthropic_thinking_mode(thinking) {
         Some("disabled") => None,
-        Some("adaptive") => explicit_effort.or(Some("medium")),
+        Some("adaptive") => explicit_effort.or_else(|| Some("medium".to_string())),
         Some("enabled") => infer_reasoning_effort_from_thinking(thinking).or(explicit_effort),
         _ => explicit_effort.or_else(|| infer_reasoning_effort_from_thinking(thinking)),
     }?;
+    let configured_effort = resolve_configured_target_effort(
+        family,
+        source_effort.as_str(),
+        effort_routing,
+    )?;
+    let effective_effort = negotiate_target_reasoning_effort(
+        target_model,
+        configured_effort.as_str(),
+        effort_routing.fallback_mode,
+    )?;
 
-    Some(serde_json::json!({ "effort": effort }))
+    Some(serde_json::json!({ "effort": effective_effort }))
 }
 
-fn normalize_reasoning_effort(value: &str) -> Option<&'static str> {
-    match value.trim().to_ascii_lowercase().as_str() {
-        "low" => Some("low"),
-        "medium" => Some("medium"),
-        "high" => Some("high"),
-        "max" => Some("xhigh"),
-        _ => None,
-    }
+fn normalize_source_effort(value: &str) -> Option<String> {
+    let normalized = value.trim().to_ascii_lowercase();
+    (!normalized.is_empty()).then_some(normalized)
 }
 
-fn infer_reasoning_effort_from_thinking(thinking: Option<&Value>) -> Option<&'static str> {
+fn infer_reasoning_effort_from_thinking(thinking: Option<&Value>) -> Option<String> {
     let thinking = thinking?.as_object()?;
     match thinking.get("type").and_then(Value::as_str) {
-        Some("adaptive") => Some("medium"),
+        Some("adaptive") => Some("medium".to_string()),
         Some("enabled") => {
             let budget = thinking
                 .get("budget_tokens")
                 .and_then(Value::as_i64)
                 .unwrap_or_default()
                 .max(0);
-            Some(match budget {
-                0..=2048 => "low",
-                2049..=8192 => "medium",
-                _ => "high",
-            })
+            Some(
+                match budget {
+                    0..=2048 => "low",
+                    2049..=8192 => "medium",
+                    _ => "high",
+                }
+                .to_string(),
+            )
         }
+        _ => None,
+    }
+}
+
+fn resolve_configured_target_effort(
+    family: ClaudeCodeFamily,
+    source_effort: &str,
+    effort_routing: &ClaudeCodeEffortRoutingSettings,
+) -> Option<String> {
+    let family_routing = match family {
+        ClaudeCodeFamily::Opus => &effort_routing.opus,
+        ClaudeCodeFamily::Sonnet => &effort_routing.sonnet,
+        ClaudeCodeFamily::Haiku => &effort_routing.haiku,
+    };
+
+    match family_routing.source_to_target.get(source_effort) {
+        Some(mapped) => mapped.clone(),
+        None => family_routing.default_target_effort.clone(),
+    }
+}
+
+fn negotiate_target_reasoning_effort(
+    target_model: &str,
+    requested_effort: &str,
+    fallback_mode: ClaudeCodeEffortFallbackMode,
+) -> Option<String> {
+    let normalized_effort = normalize_source_effort(requested_effort)?;
+    let Some(supported) = supported_target_reasoning_efforts(target_model) else {
+        return Some(normalized_effort);
+    };
+    if supported.contains(&normalized_effort.as_str()) {
+        return Some(normalized_effort);
+    }
+
+    match fallback_mode {
+        ClaudeCodeEffortFallbackMode::ClampDown => clamp_down_reasoning_effort(
+            normalized_effort.as_str(),
+            supported,
+        )
+        .map(str::to_string),
+        ClaudeCodeEffortFallbackMode::Omit => None,
+    }
+}
+
+fn supported_target_reasoning_efforts(target_model: &str) -> Option<&'static [&'static str]> {
+    let normalized = target_model.trim().to_ascii_lowercase();
+    if normalized.is_empty() {
+        return None;
+    }
+    if normalized.starts_with("gpt-5") {
+        if normalized.contains("-mini") || normalized.contains("-nano") {
+            return Some(&["low", "medium", "high"]);
+        }
+        return Some(&["low", "medium", "high", "xhigh"]);
+    }
+    None
+}
+
+fn clamp_down_reasoning_effort<'a>(
+    requested_effort: &str,
+    supported: &'a [&'a str],
+) -> Option<&'a str> {
+    let requested_rank = reasoning_effort_rank(requested_effort)?;
+    supported
+        .iter()
+        .copied()
+        .filter_map(|effort| Some((effort, reasoning_effort_rank(effort)?)))
+        .filter(|(_, rank)| *rank <= requested_rank)
+        .max_by_key(|(_, rank)| *rank)
+        .map(|(effort, _)| effort)
+}
+
+fn reasoning_effort_rank(value: &str) -> Option<u8> {
+    match value {
+        "low" => Some(0),
+        "medium" => Some(1),
+        "high" => Some(2),
+        "xhigh" => Some(3),
+        "max" => Some(3),
         _ => None,
     }
 }

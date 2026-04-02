@@ -166,6 +166,15 @@ fn set_claude_code_opus_target(state: &AppState, target_model: Option<&str>) {
     });
 }
 
+fn set_claude_code_haiku_target(state: &AppState, target_model: Option<&str>) {
+    state.replace_claude_code_routing_settings(ClaudeCodeRoutingSettings {
+        enabled: true,
+        haiku_target_model: target_model.map(ToString::to_string),
+        updated_at: chrono::Utc::now(),
+        ..ClaudeCodeRoutingSettings::default()
+    });
+}
+
 async fn spawn_live_test_app(accounts: Vec<UpstreamAccount>) -> String {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
@@ -5246,6 +5255,160 @@ async fn anthropic_messages_reasoning_maps_max_effort_to_xhigh() {
 }
 
 #[tokio::test]
+async fn anthropic_messages_reasoning_clamps_opus_max_to_high_for_mini_targets() {
+    let upstream = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v1/responses"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "id": "resp_anthropic_reasoning_clamped",
+            "status": "completed",
+            "usage": {"input_tokens": 7, "output_tokens": 3},
+            "output": [{
+                "type": "message",
+                "role": "assistant",
+                "content": [{"type": "output_text", "text": "OK"}]
+            }]
+        })))
+        .mount(&upstream)
+        .await;
+
+    let (app, state) =
+        embedded_test_app(vec![test_account(upstream.uri(), "upstream-token")]).await;
+    set_claude_code_opus_target(&state, Some("gpt-5.4-mini"));
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/messages")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    json!({
+                        "model": "claude-opus-4-1",
+                        "max_tokens": 32,
+                        "output_config": {"effort": "max"},
+                        "messages": [{"role": "user", "content": "Reply with exactly OK."}]
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let upstream_requests = upstream.received_requests().await.unwrap();
+    assert_eq!(upstream_requests.len(), 1);
+
+    let forwarded: Value = serde_json::from_slice(&upstream_requests[0].body).unwrap();
+    assert_eq!(forwarded["model"], "gpt-5.4-mini");
+    assert_eq!(forwarded["reasoning"]["effort"], "high");
+}
+
+#[tokio::test]
+async fn anthropic_messages_reasoning_uses_family_default_for_unknown_future_efforts() {
+    let upstream = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v1/responses"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "id": "resp_anthropic_reasoning_unknown_future",
+            "status": "completed",
+            "usage": {"input_tokens": 7, "output_tokens": 3},
+            "output": [{
+                "type": "message",
+                "role": "assistant",
+                "content": [{"type": "output_text", "text": "OK"}]
+            }]
+        })))
+        .mount(&upstream)
+        .await;
+
+    let (app, state) =
+        embedded_test_app(vec![test_account(upstream.uri(), "upstream-token")]).await;
+    set_claude_code_opus_target(&state, Some("gpt-5.4-mini"));
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/messages")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    json!({
+                        "model": "claude-opus-4-1",
+                        "max_tokens": 32,
+                        "output_config": {"effort": "ultra"},
+                        "messages": [{"role": "user", "content": "Reply with exactly OK."}]
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let upstream_requests = upstream.received_requests().await.unwrap();
+    assert_eq!(upstream_requests.len(), 1);
+
+    let forwarded: Value = serde_json::from_slice(&upstream_requests[0].body).unwrap();
+    assert_eq!(forwarded["reasoning"]["effort"], "high");
+}
+
+#[tokio::test]
+async fn anthropic_messages_reasoning_omits_haiku_reasoning_by_default() {
+    let upstream = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v1/responses"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "id": "resp_anthropic_reasoning_haiku_omit",
+            "status": "completed",
+            "usage": {"input_tokens": 7, "output_tokens": 3},
+            "output": [{
+                "type": "message",
+                "role": "assistant",
+                "content": [{"type": "output_text", "text": "OK"}]
+            }]
+        })))
+        .mount(&upstream)
+        .await;
+
+    let (app, state) =
+        embedded_test_app(vec![test_account(upstream.uri(), "upstream-token")]).await;
+    set_claude_code_haiku_target(&state, Some("gpt-5.4-mini"));
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/messages")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    json!({
+                        "model": "claude-haiku-4-5",
+                        "max_tokens": 32,
+                        "output_config": {"effort": "high"},
+                        "messages": [{"role": "user", "content": "Reply with exactly OK."}]
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let upstream_requests = upstream.received_requests().await.unwrap();
+    assert_eq!(upstream_requests.len(), 1);
+
+    let forwarded: Value = serde_json::from_slice(&upstream_requests[0].body).unwrap();
+    assert!(forwarded.get("reasoning").is_none());
+}
+
+#[tokio::test]
 async fn anthropic_messages_context_management_reports_clear_thinking_edits() {
     let upstream = MockServer::start().await;
     Mock::given(method("POST"))
@@ -5989,6 +6152,7 @@ async fn anthropic_messages_return_explicit_family_mapping_errors() {
 
     state.replace_claude_code_routing_settings(ClaudeCodeRoutingSettings {
         enabled: true,
+        sonnet_target_model: None,
         updated_at: chrono::Utc::now(),
         ..ClaudeCodeRoutingSettings::default()
     });

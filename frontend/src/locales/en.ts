@@ -3067,6 +3067,7 @@ export default {
       deletePolicy: "Delete policy",
       saveSettings: "Save settings",
       saveClaudeCode: "Save Claude Code routing",
+      useClaudeCodeDefaults: "Use recommended defaults",
       resetClaudeCode: "Reset Claude Code changes",
       saveProfile: "Save profile",
       savePolicy: "Save policy",
@@ -3093,7 +3094,7 @@ export default {
     claudeCode: {
       title: "Claude Code",
       description:
-        "Map each Claude Code family onto exactly one internal target model. Leave a family empty if you want it to stay unmapped.",
+        "Map each Claude Code family onto exactly one internal target model, then control how Claude effort levels are translated onto the target model's reasoning settings.",
       enabled: "Enable Claude Code routing",
       enabledHint:
         "When disabled, Claude Code family mappings stay saved but are not applied at runtime.",
@@ -3102,6 +3103,27 @@ export default {
       unmapped: "Unmapped",
       familyHint:
         "Select exactly one internal target model for {{family}}. Leave it empty to keep requests for this family unmapped.",
+      fallbackMode: "Unsupported effort fallback",
+      fallbackModeHint:
+        "Choose what to do when the mapped target effort is not supported by the selected internal model.",
+      effortRoutingTitle: "Effort routing",
+      effortRoutingHint:
+        "Override how Claude effort levels map onto the selected target model. Unknown future effort levels use the family fallback below.",
+      unknownEffortLabel: "Unknown or future source effort",
+      noFixedEffortsHint:
+        "This family currently has no fixed Claude effort levels. Use the fallback above if future clients start sending one.",
+      fallbackModes: {
+        clampDown: "Clamp down to the closest supported effort",
+        omit: "Omit reasoning when unsupported",
+      },
+      effortLabels: {
+        omit: "Omit reasoning",
+        low: "Low",
+        medium: "Medium",
+        high: "High",
+        xhigh: "XHigh",
+        max: "Max",
+      },
       families: {
         opus: "Opus",
         sonnet: "Sonnet",

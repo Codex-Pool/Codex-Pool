@@ -2936,6 +2936,7 @@ export default {
       deletePolicy: "删除策略",
       saveSettings: "保存设置",
       saveClaudeCode: "保存 Claude Code 路由",
+      useClaudeCodeDefaults: "套用推荐默认值",
       resetClaudeCode: "重置 Claude Code 修改",
       saveProfile: "保存画像",
       savePolicy: "保存策略",
@@ -2959,7 +2960,7 @@ export default {
     claudeCode: {
       title: "Claude Code",
       description:
-        "将每个 Claude Code 家族映射到唯一的内部目标模型。若希望某个家族保持未映射，可留空。",
+        "将每个 Claude Code 家族映射到唯一的内部目标模型，并控制 Claude 的思考等级如何转换到目标模型的 reasoning 设置。",
       enabled: "启用 Claude Code 路由",
       enabledHint: "关闭后会保留 Claude Code 家族映射配置，但运行时不会应用。",
       updatedAt: "更新时间 {{value}}",
@@ -2967,6 +2968,27 @@ export default {
       unmapped: "未映射",
       familyHint:
         "为 {{family}} 选择唯一的内部目标模型。留空则保持该家族请求未映射。",
+      fallbackMode: "不支持的思考等级兜底策略",
+      fallbackModeHint:
+        "选择当映射后的目标思考等级不被所选内部模型支持时，系统应该如何处理。",
+      effortRoutingTitle: "思考等级映射",
+      effortRoutingHint:
+        "手动覆盖 Claude 思考等级到目标模型的映射。未来新增的未知等级会走下面的家族兜底配置。",
+      unknownEffortLabel: "未知或未来新增的源等级",
+      noFixedEffortsHint:
+        "这个家族当前没有固定的 Claude 思考等级。如果未来客户端开始发送新的等级，可以用上面的兜底来接住。",
+      fallbackModes: {
+        clampDown: "向下收敛到最近可支持的等级",
+        omit: "不支持时省略 reasoning",
+      },
+      effortLabels: {
+        omit: "省略 reasoning",
+        low: "低",
+        medium: "中",
+        high: "高",
+        xhigh: "超高",
+        max: "最大",
+      },
       families: {
         opus: "Opus",
         sonnet: "Sonnet",
