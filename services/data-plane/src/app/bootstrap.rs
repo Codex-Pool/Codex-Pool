@@ -15,8 +15,8 @@ use axum::Router;
 use bytes::Bytes;
 use codex_pool_core::api::{ErrorEnvelope, ProductEdition, UsageSummary};
 use codex_pool_core::model::{
-    AiErrorLearningSettings, BuiltinErrorTemplateRecord, RoutingStrategy,
-    UpstreamErrorTemplateRecord, UpstreamMode,
+    AiErrorLearningSettings, BuiltinErrorTemplateRecord, ClaudeCodeRoutingSettings,
+    RoutingStrategy, UpstreamErrorTemplateRecord, UpstreamMode,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -25,7 +25,9 @@ use uuid::Uuid;
 
 use self::snapshot::SnapshotPoller;
 use crate::auth::validator::{AuthCacheLookupResult, AuthCacheStatsSnapshot, AuthValidatorClient};
-use crate::auth::{require_api_key, require_internal_service_token, ApiPrincipal};
+use crate::auth::{
+    require_anthropic_api_key, require_api_key, require_internal_service_token, ApiPrincipal,
+};
 use crate::config::DataPlaneConfig;
 use crate::event::http_sink::ControlPlaneHttpEventSink;
 #[cfg(feature = "redis-backend")]
@@ -33,9 +35,10 @@ use crate::event::redis_sink::RedisStreamEventSink;
 use crate::event::{EventSink, NoopEventSink, SplitEventSink};
 use crate::outbound_proxy_runtime::OutboundProxyRuntime;
 use crate::proxy::{
-    account_responses_test_handler, proxy_handler, proxy_websocket_handler, responses_cancel_handler,
-    responses_input_items_handler, responses_input_tokens_handler, responses_retrieve_handler,
-    BackgroundResponsesRuntime,
+    account_responses_test_handler, anthropic_count_tokens_handler,
+    anthropic_messages_handler, proxy_handler, proxy_websocket_handler,
+    responses_cancel_handler, responses_input_items_handler, responses_input_tokens_handler,
+    responses_retrieve_handler, BackgroundResponsesRuntime,
 };
 use crate::router::RoundRobinRouter;
 #[cfg(feature = "redis-backend")]
@@ -143,6 +146,7 @@ pub struct AppState {
     pub snapshot_events_apply_total: AtomicU64,
     pub snapshot_events_cursor_gone_total: AtomicU64,
     pub route_update_notify: Arc<Notify>,
+    pub claude_code_routing_settings: RwLock<ClaudeCodeRoutingSettings>,
     pub ai_error_learning_settings: RwLock<AiErrorLearningSettings>,
     pub approved_upstream_error_templates: RwLock<HashMap<String, UpstreamErrorTemplateRecord>>,
     pub builtin_error_templates: RwLock<HashMap<String, BuiltinErrorTemplateRecord>>,
@@ -196,6 +200,21 @@ impl AppState {
             _ = self.route_update_notify.notified() => {}
             _ = tokio::time::sleep(timeout) => {}
         }
+    }
+
+    pub fn claude_code_routing_settings(&self) -> ClaudeCodeRoutingSettings {
+        self.claude_code_routing_settings
+            .read()
+            .expect("claude code routing settings lock")
+            .clone()
+    }
+
+    pub fn replace_claude_code_routing_settings(&self, settings: ClaudeCodeRoutingSettings) {
+        *self
+            .claude_code_routing_settings
+            .write()
+            .expect("claude code routing settings lock") = settings;
+        self.notify_route_updated();
     }
 }
 
@@ -612,6 +631,7 @@ async fn build_app_with_options(
         snapshot_events_apply_total: AtomicU64::new(0),
         snapshot_events_cursor_gone_total: AtomicU64::new(0),
         route_update_notify: Arc::new(Notify::new()),
+        claude_code_routing_settings: RwLock::new(ClaudeCodeRoutingSettings::default()),
         ai_error_learning_settings: RwLock::new(AiErrorLearningSettings::default()),
         approved_upstream_error_templates: RwLock::new(HashMap::new()),
         builtin_error_templates: RwLock::new(HashMap::new()),
@@ -700,8 +720,20 @@ async fn build_app_with_options(
             require_api_key,
         ));
 
+    let anthropic_routes = Router::new()
+        .route("/v1/messages", post(anthropic_messages_handler))
+        .route(
+            "/v1/messages/count_tokens",
+            post(anthropic_count_tokens_handler),
+        )
+        .route_layer(middleware::from_fn_with_state(
+            state.clone(),
+            require_anthropic_api_key,
+        ));
+
     let mut app = Router::new()
         .route("/api/codex/usage", get(usage_handler))
+        .merge(anthropic_routes)
         .merge(protected_routes);
 
     if include_internal_metrics_route {

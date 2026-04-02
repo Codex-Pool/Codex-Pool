@@ -49,6 +49,7 @@ impl AppState {
             accounts,
             account_traits,
             compiled_routing_plan,
+            claude_code_routing_settings,
             ai_error_learning_settings,
             approved_upstream_error_templates,
             builtin_error_templates,
@@ -60,6 +61,10 @@ impl AppState {
         self.router.replace_accounts(accounts);
         self.router.replace_account_traits(account_traits);
         self.router.replace_compiled_routing_plan(compiled_routing_plan);
+        *self
+            .claude_code_routing_settings
+            .write()
+            .expect("claude code routing settings lock") = claude_code_routing_settings;
         *self
             .ai_error_learning_settings
             .write()
@@ -109,6 +114,13 @@ impl AppState {
                     .ai_error_learning_settings
                     .write()
                     .expect("ai error learning settings lock") = settings;
+                routing_changed = true;
+            }
+            if let Some(settings) = event.claude_code_routing_settings {
+                *self
+                    .claude_code_routing_settings
+                    .write()
+                    .expect("claude code routing settings lock") = settings;
                 routing_changed = true;
             }
             if let Some(templates) = event.approved_upstream_error_templates {

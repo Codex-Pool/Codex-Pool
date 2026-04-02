@@ -2,8 +2,14 @@ use std::sync::Arc;
 
 use axum::body::Body;
 use axum::Router;
-use codex_pool_core::model::{RoutingStrategy, UpstreamAccount, UpstreamMode};
-use data_plane::app::build_app_with_event_sink as dp_build_app_with_event_sink;
+use codex_pool_core::model::{
+    ClaudeCodeRoutingSettings, RoutingStrategy, UpstreamAccount, UpstreamMode,
+};
+use data_plane::app::{
+    build_app_with_event_sink as dp_build_app_with_event_sink,
+    build_embedded_app_with_event_sink_without_status_routes as dp_build_embedded_app_with_event_sink_without_status_routes,
+    AppState,
+};
 use data_plane::config::DataPlaneConfig;
 use data_plane::event::NoopEventSink;
 use http::Request;
@@ -23,6 +29,14 @@ async fn build_app_with_event_sink(
 ) -> anyhow::Result<Router> {
     let _env_guard = support::lock_env().await;
     dp_build_app_with_event_sink(config, event_sink).await
+}
+
+async fn build_embedded_app_with_event_sink(
+    config: DataPlaneConfig,
+    event_sink: Arc<NoopEventSink>,
+) -> anyhow::Result<(Router, Arc<AppState>)> {
+    let _env_guard = support::lock_env().await;
+    dp_build_embedded_app_with_event_sink_without_status_routes(config, event_sink).await
 }
 
 const OPENAI_BETA: &str = "responses_websockets=2026-02-04";
@@ -79,6 +93,43 @@ async fn test_app(accounts: Vec<UpstreamAccount>) -> Router {
     };
 
     build_app_with_event_sink(cfg, Arc::new(NoopEventSink))
+        .await
+        .expect("app should build")
+}
+
+async fn embedded_test_app(accounts: Vec<UpstreamAccount>) -> (Router, Arc<AppState>) {
+    let cfg = DataPlaneConfig {
+        listen_addr: "127.0.0.1:0".parse().unwrap(),
+        routing_strategy: RoutingStrategy::RoundRobin,
+        upstream_accounts: accounts,
+        account_ejection_ttl_sec: 30,
+        enable_request_failover: true,
+        same_account_quick_retry_max: 1,
+        request_failover_wait_ms: 2_000,
+        retry_poll_interval_ms: 100,
+        sticky_prefer_non_conflicting: true,
+        shared_routing_cache_enabled: true,
+        enable_metered_stream_billing: true,
+        billing_authorize_required_for_stream: true,
+        stream_billing_reserve_microcredits: 2_000_000,
+        billing_dynamic_preauth_enabled: true,
+        billing_preauth_expected_output_tokens: 256,
+        billing_preauth_safety_factor: 1.3,
+        billing_preauth_min_microcredits: 1_000,
+        billing_preauth_max_microcredits: 1_000_000_000_000,
+        billing_preauth_unit_price_microcredits: 10_000,
+        stream_billing_drain_timeout_ms: 5_000,
+        billing_capture_retry_max: 3,
+        billing_capture_retry_backoff_ms: 200,
+        redis_url: None,
+        auth_validate_url: None,
+        auth_validate_cache_ttl_sec: 30,
+        auth_validate_negative_cache_ttl_sec: 5,
+        auth_fail_open: false,
+        enable_internal_debug_routes: false,
+    };
+
+    build_embedded_app_with_event_sink(cfg, Arc::new(NoopEventSink))
         .await
         .expect("app should build")
 }
@@ -174,4 +225,88 @@ async fn sse_passthrough_keeps_event_stream_intact() {
 
     let body = response.into_body().collect().await.unwrap().to_bytes();
     assert_eq!(body.as_ref(), sse_payload.as_bytes());
+}
+
+#[tokio::test]
+async fn anthropic_routes_contract_minimal_set() {
+    let upstream = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .and(path("/v1/responses"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "id": "resp_anthropic_contract",
+            "status": "completed",
+            "usage": {"input_tokens": 5, "output_tokens": 2},
+            "output": [{
+                "type": "message",
+                "role": "assistant",
+                "content": [{"type": "output_text", "text": "OK"}]
+            }]
+        })))
+        .mount(&upstream)
+        .await;
+
+    let (app, state) =
+        embedded_test_app(vec![test_account(upstream.uri(), "upstream-token")]).await;
+    state.replace_claude_code_routing_settings(ClaudeCodeRoutingSettings {
+        enabled: true,
+        sonnet_target_model: Some("gpt-5.4".to_string()),
+        updated_at: chrono::Utc::now(),
+        ..ClaudeCodeRoutingSettings::default()
+    });
+
+    let messages = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/messages")
+                .header("authorization", "Bearer tenant-token")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    json!({
+                        "model": "claude-3-7-sonnet-20250219",
+                        "max_tokens": 16,
+                        "messages": [{"role": "user", "content": "hello"}]
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(messages.status(), StatusCode::OK);
+    let messages_payload: Value =
+        serde_json::from_slice(&messages.into_body().collect().await.unwrap().to_bytes()).unwrap();
+    assert_eq!(messages_payload["type"], "message");
+    assert_eq!(messages_payload["model"], "claude-3-7-sonnet-20250219");
+
+    let count_tokens = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/messages/count_tokens")
+                .header("authorization", "Bearer tenant-token")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    json!({
+                        "model": "claude-3-7-sonnet-20250219",
+                        "messages": [{"role": "user", "content": "hello"}]
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(count_tokens.status(), StatusCode::OK);
+    let count_tokens_payload: Value =
+        serde_json::from_slice(&count_tokens.into_body().collect().await.unwrap().to_bytes())
+            .unwrap();
+    assert!(
+        count_tokens_payload["input_tokens"]
+            .as_i64()
+            .unwrap_or_default()
+            > 0
+    );
 }

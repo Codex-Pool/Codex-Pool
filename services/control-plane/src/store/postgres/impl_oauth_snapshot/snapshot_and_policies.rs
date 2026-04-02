@@ -46,7 +46,8 @@ impl PostgresStore {
         .await
         .context("failed to create oauth rate-limit refresh job")?;
 
-        self.load_oauth_rate_limit_refresh_job_summary_inner(job_id).await
+        self.load_oauth_rate_limit_refresh_job_summary_inner(job_id)
+            .await
     }
 
     async fn mark_rate_limit_refresh_job_running_inner(&self, job_id: Uuid) -> Result<bool> {
@@ -275,7 +276,9 @@ impl PostgresStore {
 
     async fn run_rate_limit_refresh_job_inner(&self, job_id: Uuid) -> Result<()> {
         let run_result: Result<()> = async {
-            let should_run = self.mark_rate_limit_refresh_job_running_inner(job_id).await?;
+            let should_run = self
+                .mark_rate_limit_refresh_job_running_inner(job_id)
+                .await?;
             if !should_run {
                 return Ok(());
             }
@@ -718,6 +721,7 @@ impl PostgresStore {
         let ai_error_learning_settings = self.load_upstream_error_learning_settings_inner().await?;
         let outbound_proxy_pool_settings = self.load_outbound_proxy_pool_settings_inner().await?;
         let outbound_proxy_nodes = self.list_outbound_proxy_nodes_inner().await?;
+        let claude_code_routing_settings = self.load_claude_code_routing_settings_inner().await?;
         let approved_upstream_error_templates =
             self.load_approved_upstream_error_templates_inner().await?;
         let builtin_error_templates = self.list_builtin_error_templates().await?;
@@ -736,6 +740,7 @@ impl PostgresStore {
             builtin_error_templates,
             outbound_proxy_pool_settings,
             outbound_proxy_nodes,
+            claude_code_routing_settings,
             issued_at: Utc::now(),
         })
     }

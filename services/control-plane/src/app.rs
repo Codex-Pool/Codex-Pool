@@ -16,8 +16,9 @@ use axum::Json;
 use axum::{response::IntoResponse, Router};
 use chrono::{DateTime, Utc};
 use codex_pool_core::api::{
-    ErrorEnvelope, ProductEdition, ResolveUpstreamErrorTemplateRequest,
-    ResolveUpstreamErrorTemplateResponse, SystemCapabilitiesResponse, ValidateApiKeyRequest,
+    ClaudeCodeRoutingSettingsResponse, ErrorEnvelope, ProductEdition,
+    ResolveUpstreamErrorTemplateRequest, ResolveUpstreamErrorTemplateResponse,
+    SystemCapabilitiesResponse, UpdateClaudeCodeRoutingSettingsRequest, ValidateApiKeyRequest,
     ValidateApiKeyResponse,
 };
 use codex_pool_core::model::{
@@ -2382,6 +2383,11 @@ pub fn build_app_with_store_and_services(
         .route(
             "/api/v1/admin/model-routing/settings",
             get(get_admin_model_routing_settings).put(update_admin_model_routing_settings),
+        )
+        .route(
+            "/api/v1/admin/model-routing/claude-code",
+            get(get_admin_claude_code_routing_settings)
+                .put(update_admin_claude_code_routing_settings),
         )
         .route(
             "/api/v1/admin/model-routing/error-learning/settings",

@@ -22,6 +22,24 @@ test('ModelRouting stays on the antigravity page and dialog archetypes', async (
   assert.match(source, /DockedPageIntro/, 'ModelRouting should use DockedPageIntro as the page entry')
   assert.match(source, /PagePanel/, 'ModelRouting should keep PagePanel surfaces')
   assert.match(source, /SectionHeader/, 'ModelRouting should keep SectionHeader structure')
+  assert.match(
+    source,
+    /modelRoutingPage\.claudeCode\.title/,
+    'ModelRouting should include the dedicated Claude Code panel copy',
+  )
+  assert.match(
+    source,
+    /modelRoutingApi\.getClaudeCodeSettings\(\)/,
+    'ModelRouting should load Claude Code routing settings from the admin API',
+  )
+  assert.match(
+    source,
+    /modelRoutingApi\.updateClaudeCodeSettings\(/,
+    'ModelRouting should save Claude Code routing settings through the admin API',
+  )
+  assert.match(source, /modelRoutingPage\.claudeCode\.families\.opus/, 'ModelRouting should render the Opus mapping slot')
+  assert.match(source, /modelRoutingPage\.claudeCode\.families\.sonnet/, 'ModelRouting should render the Sonnet mapping slot')
+  assert.match(source, /modelRoutingPage\.claudeCode\.families\.haiku/, 'ModelRouting should render the Haiku mapping slot')
   assert.doesNotMatch(source, /components\/ui\/card/, 'ModelRouting should not depend on legacy Card wrapper surfaces')
   assert.doesNotMatch(source, /bg-content2\/16/, 'ModelRouting dialog panels should not use ad-hoc surface overrides')
 })

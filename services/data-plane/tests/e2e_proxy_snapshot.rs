@@ -78,6 +78,7 @@ impl SnapshotSource {
                     builtin_error_templates: None,
                     outbound_proxy_pool_settings: None,
                     outbound_proxy_nodes: None,
+                    claude_code_routing_settings: None,
                     created_at: chrono::Utc::now(),
                 });
             }
@@ -95,6 +96,7 @@ impl SnapshotSource {
                 builtin_error_templates: None,
                 outbound_proxy_pool_settings: None,
                 outbound_proxy_nodes: None,
+                claude_code_routing_settings: None,
                 created_at: chrono::Utc::now(),
             });
         }
@@ -124,6 +126,7 @@ impl SnapshotSource {
             builtin_error_templates: Vec::new(),
             outbound_proxy_pool_settings: Default::default(),
             outbound_proxy_nodes: Vec::new(),
+            claude_code_routing_settings: Default::default(),
             issued_at: chrono::Utc::now(),
         }
     }

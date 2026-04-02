@@ -8,9 +8,10 @@ use codex_pool_core::api::{
     DataPlaneSnapshotEventsResponse,
 };
 use codex_pool_core::model::{
-    AccountRoutingTraits, AiErrorLearningSettings, CompiledModelRoutingPolicy, CompiledRoutingPlan,
-    CompiledRoutingProfile, LocalizedErrorTemplates, OutboundProxyNode, OutboundProxyPoolSettings,
-    ProxyFailMode, RoutingStrategy, UpstreamAccount, UpstreamErrorAction, UpstreamErrorRetryScope,
+    AccountRoutingTraits, AiErrorLearningSettings, ClaudeCodeRoutingSettings,
+    CompiledModelRoutingPolicy, CompiledRoutingPlan, CompiledRoutingProfile,
+    LocalizedErrorTemplates, OutboundProxyNode, OutboundProxyPoolSettings, ProxyFailMode,
+    RoutingStrategy, UpstreamAccount, UpstreamErrorAction, UpstreamErrorRetryScope,
     UpstreamErrorTemplateRecord, UpstreamErrorTemplateStatus, UpstreamMode,
 };
 use data_plane::app::AppState;
@@ -61,6 +62,7 @@ fn snapshot_with_revision(revision: u64, accounts: Vec<UpstreamAccount>) -> Data
         builtin_error_templates: Vec::new(),
         outbound_proxy_pool_settings: Default::default(),
         outbound_proxy_nodes: Vec::new(),
+        claude_code_routing_settings: ClaudeCodeRoutingSettings::default(),
         issued_at: chrono::Utc::now(),
     }
 }
@@ -100,6 +102,7 @@ fn upsert_event(account: UpstreamAccount, id: u64) -> DataPlaneSnapshotEvent {
         builtin_error_templates: None,
         outbound_proxy_pool_settings: None,
         outbound_proxy_nodes: None,
+        claude_code_routing_settings: None,
         created_at: chrono::Utc::now(),
     }
 }
@@ -116,6 +119,7 @@ fn delete_event(account_id: Uuid, id: u64) -> DataPlaneSnapshotEvent {
         builtin_error_templates: None,
         outbound_proxy_pool_settings: None,
         outbound_proxy_nodes: None,
+        claude_code_routing_settings: None,
         created_at: chrono::Utc::now(),
     }
 }
@@ -149,6 +153,7 @@ fn routing_plan_refresh_event(model: &str, account_id: Uuid, id: u64) -> DataPla
         builtin_error_templates: None,
         outbound_proxy_pool_settings: None,
         outbound_proxy_nodes: None,
+        claude_code_routing_settings: None,
         created_at: chrono::Utc::now(),
     }
 }
@@ -169,6 +174,7 @@ fn ai_error_learning_refresh_event(
         builtin_error_templates: Some(Vec::new()),
         outbound_proxy_pool_settings: None,
         outbound_proxy_nodes: None,
+        claude_code_routing_settings: None,
         created_at: chrono::Utc::now(),
     }
 }
@@ -216,6 +222,7 @@ fn test_state() -> AppState {
         snapshot_events_apply_total: AtomicU64::new(0),
         snapshot_events_cursor_gone_total: AtomicU64::new(0),
         route_update_notify: Arc::new(tokio::sync::Notify::new()),
+        claude_code_routing_settings: std::sync::RwLock::new(ClaudeCodeRoutingSettings::default()),
         ai_error_learning_settings: std::sync::RwLock::new(AiErrorLearningSettings::default()),
         approved_upstream_error_templates: std::sync::RwLock::new(std::collections::HashMap::new()),
         builtin_error_templates: std::sync::RwLock::new(std::collections::HashMap::new()),
@@ -308,6 +315,7 @@ async fn applies_outbound_proxy_settings_from_snapshot() {
             updated_at: chrono::Utc::now(),
         },
         outbound_proxy_nodes: vec![node.clone()],
+        claude_code_routing_settings: ClaudeCodeRoutingSettings::default(),
         issued_at: chrono::Utc::now(),
     });
 

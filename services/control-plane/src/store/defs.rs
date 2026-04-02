@@ -5,14 +5,16 @@ use std::sync::{Arc, RwLock};
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use chrono::{DateTime, Duration, Utc};
-use codex_pool_core::api::{DataPlaneSnapshot, DataPlaneSnapshotEventsResponse};
+use codex_pool_core::api::{
+    DataPlaneSnapshot, DataPlaneSnapshotEventsResponse, UpdateClaudeCodeRoutingSettingsRequest,
+};
 use codex_pool_core::model::{
     default_builtin_error_templates, AccountRoutingTraits, AiErrorLearningSettings, ApiKey,
     BuiltinErrorTemplateKind, BuiltinErrorTemplateOverrideRecord, BuiltinErrorTemplateRecord,
-    CompiledModelRoutingPolicy, CompiledRoutingPlan, CompiledRoutingProfile,
-    LocalizedErrorTemplates, ModelRoutingPolicy, ModelRoutingSettings, ModelRoutingTriggerMode,
-    OutboundProxyNode, OutboundProxyPoolSettings, RoutingPlanVersion, RoutingPolicy,
-    RoutingProfile, RoutingStrategy, Tenant, UpstreamAccount, UpstreamAuthProvider,
+    ClaudeCodeRoutingSettings, CompiledModelRoutingPolicy, CompiledRoutingPlan,
+    CompiledRoutingProfile, LocalizedErrorTemplates, ModelRoutingPolicy, ModelRoutingSettings,
+    ModelRoutingTriggerMode, OutboundProxyNode, OutboundProxyPoolSettings, RoutingPlanVersion,
+    RoutingPolicy, RoutingProfile, RoutingStrategy, Tenant, UpstreamAccount, UpstreamAuthProvider,
     UpstreamErrorTemplateRecord, UpstreamErrorTemplateStatus, UpstreamMode,
 };
 use futures_util::StreamExt;
@@ -22,21 +24,21 @@ use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 use crate::contracts::{
-    AccountHealthFreshness, AccountPoolOperatorState, AccountPoolReasonClass,
-    AccountPoolRecord, AccountPoolRecordScope, AccountPoolSummaryResponse,
-    AccountProbeOutcome, CreateApiKeyRequest, CreateApiKeyResponse,
-    CreateOutboundProxyNodeRequest, CreateTenantRequest, CreateUpstreamAccountRequest,
-    ImportOAuthRefreshTokenRequest, OAuthAccountPoolState, OAuthAccountStatusResponse,
-    OAuthFamilyActionResponse, OAuthHealthSignalsSummaryResponse, OAuthInventoryFailureStage,
-    OAuthInventoryRecord, OAuthInventorySummaryResponse, OAuthLiveResultSource,
-    OAuthLiveResultStatus, OAuthRuntimePoolSummaryResponse, OAuthRateLimitRefreshErrorSummary,
+    AccountHealthFreshness, AccountPoolOperatorState, AccountPoolReasonClass, AccountPoolRecord,
+    AccountPoolRecordScope, AccountPoolSummaryResponse, AccountProbeOutcome, CreateApiKeyRequest,
+    CreateApiKeyResponse, CreateOutboundProxyNodeRequest, CreateTenantRequest,
+    CreateUpstreamAccountRequest, ImportOAuthRefreshTokenRequest, OAuthAccountPoolState,
+    OAuthAccountStatusResponse, OAuthFamilyActionResponse, OAuthHealthSignalsSummaryResponse,
+    OAuthInventoryFailureStage, OAuthInventoryRecord, OAuthInventorySummaryResponse,
+    OAuthLiveResultSource, OAuthLiveResultStatus, OAuthRateLimitRefreshErrorSummary,
     OAuthRateLimitRefreshJobStatus, OAuthRateLimitRefreshJobSummary, OAuthRateLimitSnapshot,
-    OAuthRefreshStatus, OAuthVaultRecordStatus, RefreshCredentialState, SessionCredentialKind,
-    UpdateAiErrorLearningSettingsRequest, UpdateModelRoutingSettingsRequest,
-    UpdateOutboundProxyNodeRequest, UpdateOutboundProxyPoolSettingsRequest,
-    UpsertModelRoutingPolicyRequest, UpsertRetryPolicyRequest, UpsertRoutingPolicyRequest,
-    UpsertRoutingProfileRequest, UpsertStreamRetryPolicyRequest,
-    ValidateOAuthRefreshTokenRequest, ValidateOAuthRefreshTokenResponse,
+    OAuthRefreshStatus, OAuthRuntimePoolSummaryResponse, OAuthVaultRecordStatus,
+    RefreshCredentialState, SessionCredentialKind, UpdateAiErrorLearningSettingsRequest,
+    UpdateModelRoutingSettingsRequest, UpdateOutboundProxyNodeRequest,
+    UpdateOutboundProxyPoolSettingsRequest, UpsertModelRoutingPolicyRequest,
+    UpsertRetryPolicyRequest, UpsertRoutingPolicyRequest, UpsertRoutingProfileRequest,
+    UpsertStreamRetryPolicyRequest, ValidateOAuthRefreshTokenRequest,
+    ValidateOAuthRefreshTokenResponse,
 };
 use crate::crypto::CredentialCipher;
 use crate::oauth::{OAuthTokenClient, OAuthTokenInfo, OpenAiOAuthClient};
@@ -65,8 +67,7 @@ const OAUTH_VAULT_ACTIVATE_BATCH_SIZE_ENV: &str = "CONTROL_PLANE_VAULT_ACTIVATE_
 const DEFAULT_OAUTH_VAULT_ACTIVATE_BATCH_SIZE: usize = 200;
 const MIN_OAUTH_VAULT_ACTIVATE_BATCH_SIZE: usize = 1;
 const MAX_OAUTH_VAULT_ACTIVATE_BATCH_SIZE: usize = 2_000;
-const OAUTH_VAULT_ACTIVATE_CONCURRENCY_ENV: &str =
-    "CONTROL_PLANE_VAULT_ACTIVATE_CONCURRENCY";
+const OAUTH_VAULT_ACTIVATE_CONCURRENCY_ENV: &str = "CONTROL_PLANE_VAULT_ACTIVATE_CONCURRENCY";
 const DEFAULT_OAUTH_VAULT_ACTIVATE_CONCURRENCY: usize = 8;
 const MIN_OAUTH_VAULT_ACTIVATE_CONCURRENCY: usize = 1;
 const OAUTH_VAULT_TERMINAL_AUTH_RETRY_LIMIT: u32 = 3;
@@ -141,8 +142,14 @@ fn merge_localized_error_templates(
 ) -> LocalizedErrorTemplates {
     LocalizedErrorTemplates {
         en: override_templates.en.clone().or_else(|| base.en.clone()),
-        zh_cn: override_templates.zh_cn.clone().or_else(|| base.zh_cn.clone()),
-        zh_tw: override_templates.zh_tw.clone().or_else(|| base.zh_tw.clone()),
+        zh_cn: override_templates
+            .zh_cn
+            .clone()
+            .or_else(|| base.zh_cn.clone()),
+        zh_tw: override_templates
+            .zh_tw
+            .clone()
+            .or_else(|| base.zh_tw.clone()),
         ja: override_templates.ja.clone().or_else(|| base.ja.clone()),
         ru: override_templates.ru.clone().or_else(|| base.ru.clone()),
     }
@@ -348,7 +355,10 @@ fn trim_base_url(raw: &str) -> String {
 
 fn normalize_upstream_account_base_url(mode: &UpstreamMode, raw: &str) -> String {
     let trimmed = trim_base_url(raw);
-    if !matches!(mode, UpstreamMode::ChatGptSession | UpstreamMode::CodexOauth) {
+    if !matches!(
+        mode,
+        UpstreamMode::ChatGptSession | UpstreamMode::CodexOauth
+    ) {
         return trimmed;
     }
 
@@ -438,7 +448,10 @@ fn is_rate_limited_signal(error_code: &str, error_message: &str) -> bool {
 
 fn is_transient_upstream_error_signal(error_code: &str, error_message: &str) -> bool {
     let code = normalize_health_error_code(error_code);
-    if matches!(code.as_str(), "upstream_unavailable" | "overloaded" | "timeout") {
+    if matches!(
+        code.as_str(),
+        "upstream_unavailable" | "overloaded" | "timeout"
+    ) {
         return true;
     }
 
@@ -541,7 +554,10 @@ fn admission_probe_retry_after(
     {
         return Some(
             checked_at
-                + Duration::seconds(rate_limit_failure_backoff_seconds(error_code, error_message)),
+                + Duration::seconds(rate_limit_failure_backoff_seconds(
+                    error_code,
+                    error_message,
+                )),
         );
     }
     if is_transient_upstream_error_signal(error_code, error_message) {
@@ -596,9 +612,10 @@ fn should_refresh_rate_limit_cache_on_seen_ok(
     now: DateTime<Utc>,
     ctx: SeenOkRateLimitRefreshContext<'_>,
 ) -> bool {
-    if !ctx.token_expires_at.is_some_and(|expires_at| {
-        expires_at > now + Duration::seconds(OAUTH_MIN_VALID_SEC)
-    }) {
+    if !ctx
+        .token_expires_at
+        .is_some_and(|expires_at| expires_at > now + Duration::seconds(OAUTH_MIN_VALID_SEC))
+    {
         return false;
     }
     if ctx.refresh_reused_detected {
@@ -652,17 +669,14 @@ fn should_use_access_token_fallback_for_runtime(
     last_refresh_error_code: Option<&str>,
     now: DateTime<Utc>,
 ) -> bool {
-    has_usable_access_token_fallback(
-        has_access_token_fallback,
-        fallback_token_expires_at,
-        now,
-    ) && refresh_credential_is_terminal_invalid(
-        last_refresh_status,
-        refresh_reused_detected,
-        last_refresh_error_code,
-    ) && !token_expires_at.is_some_and(|expires_at| {
-        expires_at > now + Duration::seconds(OAUTH_MIN_VALID_SEC)
-    })
+    has_usable_access_token_fallback(has_access_token_fallback, fallback_token_expires_at, now)
+        && refresh_credential_is_terminal_invalid(
+            last_refresh_status,
+            refresh_reused_detected,
+            last_refresh_error_code,
+        )
+        && !token_expires_at
+            .is_some_and(|expires_at| expires_at > now + Duration::seconds(OAUTH_MIN_VALID_SEC))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -681,11 +695,8 @@ fn oauth_effective_enabled(
     rate_limits_last_error: Option<&str>,
     now: DateTime<Utc>,
 ) -> bool {
-    let fallback_usable = has_usable_access_token_fallback(
-        has_access_token_fallback,
-        fallback_token_expires_at,
-        now,
-    );
+    let fallback_usable =
+        has_usable_access_token_fallback(has_access_token_fallback, fallback_token_expires_at, now);
     let base_enabled = match (auth_provider, credential_kind) {
         (UpstreamAuthProvider::OAuthRefreshToken, _) => {
             enabled
@@ -867,13 +878,17 @@ pub trait ControlPlaneStore: Send + Sync {
         Err(anyhow!("api key update is not implemented"))
     }
     async fn outbound_proxy_pool_settings(&self) -> Result<OutboundProxyPoolSettings> {
-        Err(anyhow!("outbound proxy pool settings repository is not implemented"))
+        Err(anyhow!(
+            "outbound proxy pool settings repository is not implemented"
+        ))
     }
     async fn update_outbound_proxy_pool_settings(
         &self,
         _req: UpdateOutboundProxyPoolSettingsRequest,
     ) -> Result<OutboundProxyPoolSettings> {
-        Err(anyhow!("outbound proxy pool settings repository is not implemented"))
+        Err(anyhow!(
+            "outbound proxy pool settings repository is not implemented"
+        ))
     }
     async fn list_outbound_proxy_nodes(&self) -> Result<Vec<OutboundProxyNode>> {
         Err(anyhow!("outbound proxy node repository is not implemented"))
@@ -938,10 +953,7 @@ pub trait ControlPlaneStore: Send + Sync {
     ) -> Result<OAuthUpsertResult> {
         Err(anyhow!("oauth account upsert is not implemented"))
     }
-    async fn queue_oauth_refresh_token(
-        &self,
-        req: ImportOAuthRefreshTokenRequest,
-    ) -> Result<bool> {
+    async fn queue_oauth_refresh_token(&self, req: ImportOAuthRefreshTokenRequest) -> Result<bool> {
         let upserted = self.upsert_oauth_refresh_token(req).await?;
         Ok(upserted.created)
     }
@@ -1068,8 +1080,7 @@ pub trait ControlPlaneStore: Send + Sync {
             }
 
             if matches!(status.pool_state, OAuthAccountPoolState::PendingPurge) {
-                summary.pending_purge_signals =
-                    summary.pending_purge_signals.saturating_add(1);
+                summary.pending_purge_signals = summary.pending_purge_signals.saturating_add(1);
             }
             if matches!(status.pool_state, OAuthAccountPoolState::Quarantine) {
                 summary.quarantine_signals = summary.quarantine_signals.saturating_add(1);
@@ -1204,25 +1215,48 @@ pub trait ControlPlaneStore: Send + Sync {
         Err(anyhow!("routing profile repository is not implemented"))
     }
     async fn list_model_routing_policies(&self) -> Result<Vec<ModelRoutingPolicy>> {
-        Err(anyhow!("model routing policy repository is not implemented"))
+        Err(anyhow!(
+            "model routing policy repository is not implemented"
+        ))
     }
     async fn upsert_model_routing_policy(
         &self,
         _req: UpsertModelRoutingPolicyRequest,
     ) -> Result<ModelRoutingPolicy> {
-        Err(anyhow!("model routing policy repository is not implemented"))
+        Err(anyhow!(
+            "model routing policy repository is not implemented"
+        ))
     }
     async fn delete_model_routing_policy(&self, _policy_id: Uuid) -> Result<()> {
-        Err(anyhow!("model routing policy repository is not implemented"))
+        Err(anyhow!(
+            "model routing policy repository is not implemented"
+        ))
     }
     async fn model_routing_settings(&self) -> Result<ModelRoutingSettings> {
-        Err(anyhow!("model routing settings repository is not implemented"))
+        Err(anyhow!(
+            "model routing settings repository is not implemented"
+        ))
     }
     async fn update_model_routing_settings(
         &self,
         _req: UpdateModelRoutingSettingsRequest,
     ) -> Result<ModelRoutingSettings> {
-        Err(anyhow!("model routing settings repository is not implemented"))
+        Err(anyhow!(
+            "model routing settings repository is not implemented"
+        ))
+    }
+    async fn claude_code_routing_settings(&self) -> Result<ClaudeCodeRoutingSettings> {
+        Err(anyhow!(
+            "claude code routing settings repository is not implemented"
+        ))
+    }
+    async fn update_claude_code_routing_settings(
+        &self,
+        _req: UpdateClaudeCodeRoutingSettingsRequest,
+    ) -> Result<ClaudeCodeRoutingSettings> {
+        Err(anyhow!(
+            "claude code routing settings repository is not implemented"
+        ))
     }
     async fn upstream_error_learning_settings(&self) -> Result<AiErrorLearningSettings> {
         Err(anyhow!(
@@ -1329,7 +1363,9 @@ pub trait ControlPlaneStore: Send + Sync {
             .find(|template| template.kind == kind && template.code == code))
     }
     async fn list_routing_plan_versions(&self) -> Result<Vec<RoutingPlanVersion>> {
-        Err(anyhow!("routing plan version repository is not implemented"))
+        Err(anyhow!(
+            "routing plan version repository is not implemented"
+        ))
     }
     async fn record_account_model_support(
         &self,
@@ -1530,7 +1566,8 @@ pub trait OAuthRuntimeStore: Send + Sync {
         seen_ok_at: DateTime<Utc>,
         min_write_interval_sec: i64,
     ) -> Result<bool>;
-    async fn maybe_refresh_oauth_rate_limit_cache_on_seen_ok(&self, account_id: Uuid) -> Result<()>;
+    async fn maybe_refresh_oauth_rate_limit_cache_on_seen_ok(&self, account_id: Uuid)
+        -> Result<()>;
     async fn update_oauth_rate_limit_cache_from_observation(
         &self,
         account_id: Uuid,
@@ -1587,11 +1624,19 @@ where
         seen_ok_at: DateTime<Utc>,
         min_write_interval_sec: i64,
     ) -> Result<bool> {
-        ControlPlaneStore::mark_account_seen_ok(self, account_id, seen_ok_at, min_write_interval_sec)
-            .await
+        ControlPlaneStore::mark_account_seen_ok(
+            self,
+            account_id,
+            seen_ok_at,
+            min_write_interval_sec,
+        )
+        .await
     }
 
-    async fn maybe_refresh_oauth_rate_limit_cache_on_seen_ok(&self, account_id: Uuid) -> Result<()> {
+    async fn maybe_refresh_oauth_rate_limit_cache_on_seen_ok(
+        &self,
+        account_id: Uuid,
+    ) -> Result<()> {
         ControlPlaneStore::maybe_refresh_oauth_rate_limit_cache_on_seen_ok(self, account_id).await
     }
 
@@ -1708,10 +1753,7 @@ fn account_pool_reason_class_from_code(
         ) => AccountPoolReasonClass::Fatal,
         Some("rate_limited" | "quota_exhausted" | "no_quota") => AccountPoolReasonClass::Quota,
         Some(
-            "upstream_unavailable"
-            | "transport_error"
-            | "overloaded"
-            | "upstream_network_error",
+            "upstream_unavailable" | "transport_error" | "overloaded" | "upstream_network_error",
         ) => AccountPoolReasonClass::Transient,
         Some(code) if code.starts_with("operator_") || code == "disabled_by_admin" => {
             AccountPoolReasonClass::Admin
@@ -1758,9 +1800,8 @@ fn account_health_freshness_from_signals(
     let last_success_at = [
         last_seen_ok_at,
         last_probe_at.filter(|_| matches!(last_probe_outcome, Some(AccountProbeOutcome::Ok))),
-        last_live_result_at.filter(|_| {
-            matches!(last_live_result_status, Some(OAuthLiveResultStatus::Ok))
-        }),
+        last_live_result_at
+            .filter(|_| matches!(last_live_result_status, Some(OAuthLiveResultStatus::Ok))),
     ]
     .into_iter()
     .flatten()
@@ -1777,9 +1818,8 @@ fn account_health_freshness_from_signals(
                 )
             )
         }),
-        last_live_result_at.filter(|_| {
-            matches!(last_live_result_status, Some(OAuthLiveResultStatus::Failed))
-        }),
+        last_live_result_at
+            .filter(|_| matches!(last_live_result_status, Some(OAuthLiveResultStatus::Failed))),
     ]
     .into_iter()
     .flatten()
@@ -1807,77 +1847,76 @@ fn build_runtime_account_pool_record(
     account: &UpstreamAccount,
     status: &OAuthAccountStatusResponse,
 ) -> AccountPoolRecord {
-    let (operator_state, next_action_at, fallback_code, fallback_reason_class) = match status.pool_state
-    {
-        OAuthAccountPoolState::PendingPurge => (
-            AccountPoolOperatorState::PendingDelete,
-            status.pending_purge_at,
-            status
-                .pending_purge_reason
-                .clone()
-                .or_else(|| status.last_live_error_code.clone())
-                .or_else(|| status.last_refresh_error_code.clone()),
-            AccountPoolReasonClass::Fatal,
-        ),
-        OAuthAccountPoolState::Quarantine => (
-            AccountPoolOperatorState::Cooling,
-            status.quarantine_until,
-            status
-                .quarantine_reason
-                .clone()
-                .or_else(|| status.last_live_error_code.clone())
-                .or_else(|| status.rate_limits_last_error_code.clone())
-                .or_else(|| status.last_refresh_error_code.clone()),
-            AccountPoolReasonClass::Transient,
-        ),
-        OAuthAccountPoolState::Active if status.effective_enabled => (
-            AccountPoolOperatorState::Routable,
-            None,
-            None,
-            AccountPoolReasonClass::Healthy,
-        ),
-        OAuthAccountPoolState::Active => {
-            let fallback_code = if !account.enabled {
-                Some("disabled_by_admin".to_string())
-            } else {
+    let (operator_state, next_action_at, fallback_code, fallback_reason_class) =
+        match status.pool_state {
+            OAuthAccountPoolState::PendingPurge => (
+                AccountPoolOperatorState::PendingDelete,
+                status.pending_purge_at,
                 status
-                    .last_live_error_code
+                    .pending_purge_reason
                     .clone()
-                    .or_else(|| status.rate_limits_last_error_code.clone())
-                    .or_else(|| status.last_refresh_error_code.clone())
-                    .or_else(|| match status.refresh_credential_state {
-                        Some(RefreshCredentialState::TerminalInvalid) => {
-                            Some("terminal_invalid".to_string())
-                        }
-                        Some(RefreshCredentialState::TransientFailed) => {
-                            Some("refresh_failed".to_string())
-                        }
-                        Some(RefreshCredentialState::Healthy) | None => None,
-                    })
-            };
-            let fallback_reason_class = if !account.enabled {
-                AccountPoolReasonClass::Admin
-            } else if status.rate_limits_last_error_code.as_deref()
-                == Some("rate_limited")
-                || status.rate_limits_last_error_code.as_deref() == Some("quota_exhausted")
-            {
-                AccountPoolReasonClass::Quota
-            } else if matches!(
-                status.refresh_credential_state,
-                Some(RefreshCredentialState::TerminalInvalid)
-            ) {
-                AccountPoolReasonClass::Fatal
-            } else {
-                AccountPoolReasonClass::Transient
-            };
-            (
+                    .or_else(|| status.last_live_error_code.clone())
+                    .or_else(|| status.last_refresh_error_code.clone()),
+                AccountPoolReasonClass::Fatal,
+            ),
+            OAuthAccountPoolState::Quarantine => (
                 AccountPoolOperatorState::Cooling,
-                status.quarantine_until.or(status.rate_limits_expires_at),
-                fallback_code,
-                fallback_reason_class,
-            )
-        }
-    };
+                status.quarantine_until,
+                status
+                    .quarantine_reason
+                    .clone()
+                    .or_else(|| status.last_live_error_code.clone())
+                    .or_else(|| status.rate_limits_last_error_code.clone())
+                    .or_else(|| status.last_refresh_error_code.clone()),
+                AccountPoolReasonClass::Transient,
+            ),
+            OAuthAccountPoolState::Active if status.effective_enabled => (
+                AccountPoolOperatorState::Routable,
+                None,
+                None,
+                AccountPoolReasonClass::Healthy,
+            ),
+            OAuthAccountPoolState::Active => {
+                let fallback_code = if !account.enabled {
+                    Some("disabled_by_admin".to_string())
+                } else {
+                    status
+                        .last_live_error_code
+                        .clone()
+                        .or_else(|| status.rate_limits_last_error_code.clone())
+                        .or_else(|| status.last_refresh_error_code.clone())
+                        .or_else(|| match status.refresh_credential_state {
+                            Some(RefreshCredentialState::TerminalInvalid) => {
+                                Some("terminal_invalid".to_string())
+                            }
+                            Some(RefreshCredentialState::TransientFailed) => {
+                                Some("refresh_failed".to_string())
+                            }
+                            Some(RefreshCredentialState::Healthy) | None => None,
+                        })
+                };
+                let fallback_reason_class = if !account.enabled {
+                    AccountPoolReasonClass::Admin
+                } else if status.rate_limits_last_error_code.as_deref() == Some("rate_limited")
+                    || status.rate_limits_last_error_code.as_deref() == Some("quota_exhausted")
+                {
+                    AccountPoolReasonClass::Quota
+                } else if matches!(
+                    status.refresh_credential_state,
+                    Some(RefreshCredentialState::TerminalInvalid)
+                ) {
+                    AccountPoolReasonClass::Fatal
+                } else {
+                    AccountPoolReasonClass::Transient
+                };
+                (
+                    AccountPoolOperatorState::Cooling,
+                    status.quarantine_until.or(status.rate_limits_expires_at),
+                    fallback_code,
+                    fallback_reason_class,
+                )
+            }
+        };
 
     let reason_class =
         account_pool_reason_class_from_code(fallback_code.as_deref(), fallback_reason_class);
@@ -2351,11 +2390,13 @@ pub struct InMemoryStore {
     routing_profiles: Arc<RwLock<HashMap<Uuid, RoutingProfile>>>,
     model_routing_policies: Arc<RwLock<HashMap<Uuid, ModelRoutingPolicy>>>,
     model_routing_settings: Arc<RwLock<ModelRoutingSettings>>,
+    claude_code_routing_settings: Arc<RwLock<ClaudeCodeRoutingSettings>>,
     upstream_error_learning_settings: Arc<RwLock<AiErrorLearningSettings>>,
     upstream_error_templates: Arc<RwLock<HashMap<Uuid, UpstreamErrorTemplateRecord>>>,
     upstream_error_template_index: Arc<RwLock<HashMap<String, Uuid>>>,
-    builtin_error_template_overrides:
-        Arc<RwLock<HashMap<(BuiltinErrorTemplateKind, String), BuiltinErrorTemplateOverrideRecord>>>,
+    builtin_error_template_overrides: Arc<
+        RwLock<HashMap<(BuiltinErrorTemplateKind, String), BuiltinErrorTemplateOverrideRecord>>,
+    >,
     routing_plan_versions: Arc<RwLock<Vec<RoutingPlanVersion>>>,
     system_event_runtime: Arc<RwLock<Option<Arc<crate::system_events::SystemEventLogRuntime>>>>,
     revision: Arc<AtomicU64>,

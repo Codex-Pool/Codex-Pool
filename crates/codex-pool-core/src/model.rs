@@ -220,6 +220,27 @@ pub struct ModelRoutingSettings {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ClaudeCodeRoutingSettings {
+    pub enabled: bool,
+    pub opus_target_model: Option<String>,
+    pub sonnet_target_model: Option<String>,
+    pub haiku_target_model: Option<String>,
+    pub updated_at: DateTime<Utc>,
+}
+
+impl Default for ClaudeCodeRoutingSettings {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            opus_target_model: None,
+            sonnet_target_model: None,
+            haiku_target_model: None,
+            updated_at: Utc::now(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct AiErrorLearningSettings {
     pub enabled: bool,
     pub first_seen_timeout_ms: u64,

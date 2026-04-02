@@ -17,7 +17,10 @@ fn parse_upstream_mode(raw: &str) -> Result<UpstreamMode> {
     }
 }
 
-fn resolve_oauth_import_mode(mode: Option<UpstreamMode>, source_type: Option<&str>) -> UpstreamMode {
+fn resolve_oauth_import_mode(
+    mode: Option<UpstreamMode>,
+    source_type: Option<&str>,
+) -> UpstreamMode {
     if let Some(mode) = mode {
         return mode;
     }
@@ -367,9 +370,8 @@ fn derive_admission_rate_limits_expires_at(
     }
     let (blocked_until, _) = derive_rate_limit_block(snapshots, checked_at);
     Some(
-        blocked_until.unwrap_or_else(|| {
-            checked_at + Duration::seconds(rate_limit_cache_ttl_sec_from_env())
-        }),
+        blocked_until
+            .unwrap_or_else(|| checked_at + Duration::seconds(rate_limit_cache_ttl_sec_from_env())),
     )
 }
 
@@ -439,9 +441,10 @@ fn should_refresh_rate_limit_cache_on_seen_ok(
     now: DateTime<Utc>,
     ctx: SeenOkRateLimitRefreshContext<'_>,
 ) -> bool {
-    if !ctx.token_expires_at.is_some_and(|expires_at| {
-        expires_at > now + Duration::seconds(OAUTH_MIN_VALID_SEC)
-    }) {
+    if !ctx
+        .token_expires_at
+        .is_some_and(|expires_at| expires_at > now + Duration::seconds(OAUTH_MIN_VALID_SEC))
+    {
         return false;
     }
     if ctx.refresh_reused_detected {
@@ -497,17 +500,14 @@ fn should_use_access_token_fallback_for_runtime(
     last_refresh_error_code: Option<&str>,
     now: DateTime<Utc>,
 ) -> bool {
-    has_usable_access_token_fallback(
-        has_access_token_fallback,
-        fallback_token_expires_at,
-        now,
-    ) && refresh_credential_is_terminal_invalid(
-        last_refresh_status,
-        refresh_reused_detected,
-        last_refresh_error_code,
-    ) && !token_expires_at.is_some_and(|expires_at| {
-        expires_at > now + Duration::seconds(OAUTH_MIN_VALID_SEC)
-    })
+    has_usable_access_token_fallback(has_access_token_fallback, fallback_token_expires_at, now)
+        && refresh_credential_is_terminal_invalid(
+            last_refresh_status,
+            refresh_reused_detected,
+            last_refresh_error_code,
+        )
+        && !token_expires_at
+            .is_some_and(|expires_at| expires_at > now + Duration::seconds(OAUTH_MIN_VALID_SEC))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -526,11 +526,8 @@ fn oauth_effective_enabled(
     rate_limits_last_error: Option<&str>,
     now: DateTime<Utc>,
 ) -> bool {
-    let fallback_usable = has_usable_access_token_fallback(
-        has_access_token_fallback,
-        fallback_token_expires_at,
-        now,
-    );
+    let fallback_usable =
+        has_usable_access_token_fallback(has_access_token_fallback, fallback_token_expires_at, now);
     let base_enabled = match (auth_provider, credential_kind) {
         (UpstreamAuthProvider::OAuthRefreshToken, _) => {
             enabled
@@ -864,6 +861,17 @@ impl ControlPlaneStore for PostgresStore {
         self.update_model_routing_settings_inner(req).await
     }
 
+    async fn claude_code_routing_settings(&self) -> Result<ClaudeCodeRoutingSettings> {
+        self.load_claude_code_routing_settings_inner().await
+    }
+
+    async fn update_claude_code_routing_settings(
+        &self,
+        req: UpdateClaudeCodeRoutingSettingsRequest,
+    ) -> Result<ClaudeCodeRoutingSettings> {
+        self.update_claude_code_routing_settings_inner(req).await
+    }
+
     async fn upstream_error_learning_settings(&self) -> Result<AiErrorLearningSettings> {
         self.load_upstream_error_learning_settings_inner().await
     }
@@ -872,7 +880,8 @@ impl ControlPlaneStore for PostgresStore {
         &self,
         req: UpdateAiErrorLearningSettingsRequest,
     ) -> Result<AiErrorLearningSettings> {
-        self.update_upstream_error_learning_settings_inner(req).await
+        self.update_upstream_error_learning_settings_inner(req)
+            .await
     }
 
     async fn list_upstream_error_templates(
@@ -886,7 +895,8 @@ impl ControlPlaneStore for PostgresStore {
         &self,
         template_id: Uuid,
     ) -> Result<Option<UpstreamErrorTemplateRecord>> {
-        self.load_upstream_error_template_by_id_inner(template_id).await
+        self.load_upstream_error_template_by_id_inner(template_id)
+            .await
     }
 
     async fn upstream_error_template_by_fingerprint(
@@ -914,7 +924,8 @@ impl ControlPlaneStore for PostgresStore {
         &self,
         record: BuiltinErrorTemplateOverrideRecord,
     ) -> Result<BuiltinErrorTemplateOverrideRecord> {
-        self.save_builtin_error_template_override_inner(record).await
+        self.save_builtin_error_template_override_inner(record)
+            .await
     }
 
     async fn delete_builtin_error_template_override(
@@ -956,9 +967,7 @@ impl ControlPlaneStore for PostgresStore {
         self.recover_rate_limit_refresh_jobs_inner().await
     }
 
-    async fn create_oauth_rate_limit_refresh_job(
-        &self,
-    ) -> Result<OAuthRateLimitRefreshJobSummary> {
+    async fn create_oauth_rate_limit_refresh_job(&self) -> Result<OAuthRateLimitRefreshJobSummary> {
         self.create_rate_limit_refresh_job_inner().await
     }
 
@@ -1000,7 +1009,8 @@ impl ControlPlaneStore for PostgresStore {
         after: u64,
         limit: u32,
     ) -> Result<DataPlaneSnapshotEventsResponse> {
-        self.load_data_plane_snapshot_events_inner(after, limit).await
+        self.load_data_plane_snapshot_events_inner(after, limit)
+            .await
     }
 
     async fn mark_account_seen_ok(
@@ -1034,9 +1044,9 @@ impl ControlPlaneStore for PostgresStore {
 
 #[cfg(test)]
 mod tests {
-    use super::{SeenOkRateLimitRefreshContext, should_refresh_rate_limit_cache_on_seen_ok};
-    use chrono::{Duration, Utc};
+    use super::{should_refresh_rate_limit_cache_on_seen_ok, SeenOkRateLimitRefreshContext};
     use crate::contracts::OAuthRefreshStatus;
+    use chrono::{Duration, Utc};
 
     #[test]
     fn seen_ok_refresh_policy_does_not_skip_fresh_cache() {

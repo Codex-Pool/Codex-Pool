@@ -132,3 +132,30 @@ async fn keeps_client_request_id_in_response_header() {
         Some(request_id)
     );
 }
+
+#[tokio::test]
+async fn accepts_x_api_key_on_anthropic_messages_routes() {
+    let (app, _upstream) = build_test_app_with_allowed_keys(vec!["cp_test_key".to_string()]).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/messages")
+                .header("content-type", "application/json")
+                .header("x-api-key", "cp_test_key")
+                .body(Body::from(
+                    serde_json::json!({
+                        "model": "claude-3-7-sonnet-20250219",
+                        "max_tokens": 16,
+                        "messages": [{"role": "user", "content": "hello"}]
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_ne!(response.status(), StatusCode::UNAUTHORIZED);
+}

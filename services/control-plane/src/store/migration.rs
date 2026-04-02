@@ -148,9 +148,7 @@ async fn export_credit_ledger_archive_rows(pool: &PgPool) -> Result<Vec<serde_js
 }
 
 #[cfg(feature = "postgres-backend")]
-async fn export_credit_authorization_archive_rows(
-    pool: &PgPool,
-) -> Result<Vec<serde_json::Value>> {
+async fn export_credit_authorization_archive_rows(pool: &PgPool) -> Result<Vec<serde_json::Value>> {
     sqlx::query(
         r#"
         SELECT
@@ -241,10 +239,12 @@ fn sqlite_state_to_bundle(state: SqlitePersistedStoreState) -> ControlPlaneMigra
         account_auth_providers: state
             .account_auth_providers
             .into_iter()
-            .map(|(account_id, auth_provider)| AccountAuthProviderMigrationRecord {
-                account_id,
-                auth_provider,
-            })
+            .map(
+                |(account_id, auth_provider)| AccountAuthProviderMigrationRecord {
+                    account_id,
+                    auth_provider,
+                },
+            )
             .collect(),
         oauth_credentials: state
             .oauth_credentials
@@ -295,10 +295,12 @@ fn sqlite_state_to_bundle(state: SqlitePersistedStoreState) -> ControlPlaneMigra
         account_health_states: state
             .account_health_states
             .into_iter()
-            .map(|(account_id, record)| UpstreamAccountHealthStateMigrationRecord {
-                account_id,
-                seen_ok_at: record.seen_ok_at,
-            })
+            .map(
+                |(account_id, record)| UpstreamAccountHealthStateMigrationRecord {
+                    account_id,
+                    seen_ok_at: record.seen_ok_at,
+                },
+            )
             .collect(),
         account_model_support: state
             .account_model_support
@@ -312,6 +314,7 @@ fn sqlite_state_to_bundle(state: SqlitePersistedStoreState) -> ControlPlaneMigra
         routing_profiles: state.routing_profiles.into_values().collect(),
         model_routing_policies: state.model_routing_policies.into_values().collect(),
         model_routing_settings: Some(state.model_routing_settings),
+        claude_code_routing_settings: Some(state.claude_code_routing_settings),
         outbound_proxy_pool_settings: Some(state.outbound_proxy_pool_settings),
         outbound_proxy_nodes: state.outbound_proxy_nodes.into_values().collect(),
         upstream_error_learning_settings: Some(state.upstream_error_learning_settings),
@@ -326,7 +329,12 @@ fn sqlite_state_to_bundle(state: SqlitePersistedStoreState) -> ControlPlaneMigra
 
 fn bundle_to_sqlite_state(bundle: &ControlPlaneMigrationBundle) -> SqlitePersistedStoreState {
     SqlitePersistedStoreState {
-        tenants: bundle.tenants.iter().cloned().map(|item| (item.id, item)).collect(),
+        tenants: bundle
+            .tenants
+            .iter()
+            .cloned()
+            .map(|item| (item.id, item))
+            .collect(),
         api_keys: bundle
             .api_keys
             .iter()
@@ -458,6 +466,10 @@ fn bundle_to_sqlite_state(bundle: &ControlPlaneMigrationBundle) -> SqlitePersist
             .model_routing_settings
             .clone()
             .unwrap_or_else(crate::edition_migration::default_model_routing_settings),
+        claude_code_routing_settings: bundle
+            .claude_code_routing_settings
+            .clone()
+            .unwrap_or_else(crate::edition_migration::default_claude_code_routing_settings),
         outbound_proxy_pool_settings: bundle
             .outbound_proxy_pool_settings
             .clone()
@@ -587,46 +599,47 @@ impl postgres::PostgresStore {
         })
         .collect::<Result<Vec<_>>>()?;
         let routing_profiles = ControlPlaneStore::list_routing_profiles(self).await?;
-        let model_routing_policies =
-            ControlPlaneStore::list_model_routing_policies(self).await?;
+        let model_routing_policies = ControlPlaneStore::list_model_routing_policies(self).await?;
         let model_routing_settings = Some(ControlPlaneStore::model_routing_settings(self).await?);
+        let claude_code_routing_settings =
+            Some(ControlPlaneStore::claude_code_routing_settings(self).await?);
         let outbound_proxy_pool_settings = Some(self.outbound_proxy_pool_settings().await?);
         let outbound_proxy_nodes = self.list_outbound_proxy_nodes().await?;
         let upstream_error_learning_settings = Some(self.upstream_error_learning_settings().await?);
         let upstream_error_templates = self.list_upstream_error_templates(None).await?;
-        let builtin_error_template_overrides =
-            self.list_builtin_error_template_overrides().await?;
+        let builtin_error_template_overrides = self.list_builtin_error_template_overrides().await?;
         let routing_plan_versions = self.list_routing_plan_versions().await?;
 
-        let api_key_tokens = sqlx::query("SELECT token, api_key_id FROM api_key_tokens ORDER BY api_key_id ASC, token ASC")
-            .fetch_all(&pool)
-            .await
-            .context("failed to export api_key_tokens")?
-            .into_iter()
-            .map(|row| {
-                Ok(ApiKeyTokenMigrationRecord {
-                    token: row.try_get("token")?,
-                    api_key_id: row.try_get("api_key_id")?,
-                })
-            })
-            .collect::<Result<Vec<_>>>()?;
-
-        let account_auth_providers = sqlx::query(
-            "SELECT id, auth_provider FROM upstream_accounts ORDER BY id ASC",
+        let api_key_tokens = sqlx::query(
+            "SELECT token, api_key_id FROM api_key_tokens ORDER BY api_key_id ASC, token ASC",
         )
         .fetch_all(&pool)
         .await
-        .context("failed to export upstream account auth providers")?
+        .context("failed to export api_key_tokens")?
         .into_iter()
         .map(|row| {
-            let account_id: uuid::Uuid = row.try_get("id")?;
-            let raw: String = row.try_get("auth_provider")?;
-            Ok(AccountAuthProviderMigrationRecord {
-                account_id,
-                auth_provider: parse_enum(&raw, "upstream account auth provider")?,
+            Ok(ApiKeyTokenMigrationRecord {
+                token: row.try_get("token")?,
+                api_key_id: row.try_get("api_key_id")?,
             })
         })
         .collect::<Result<Vec<_>>>()?;
+
+        let account_auth_providers =
+            sqlx::query("SELECT id, auth_provider FROM upstream_accounts ORDER BY id ASC")
+                .fetch_all(&pool)
+                .await
+                .context("failed to export upstream account auth providers")?
+                .into_iter()
+                .map(|row| {
+                    let account_id: uuid::Uuid = row.try_get("id")?;
+                    let raw: String = row.try_get("auth_provider")?;
+                    Ok(AccountAuthProviderMigrationRecord {
+                        account_id,
+                        auth_provider: parse_enum(&raw, "upstream account auth provider")?,
+                    })
+                })
+                .collect::<Result<Vec<_>>>()?;
 
         let oauth_credentials = sqlx::query(
             r#"
@@ -676,8 +689,10 @@ impl postgres::PostgresStore {
                 refresh_reused_detected: row.try_get("refresh_reused_detected")?,
                 last_refresh_error_code: row.try_get("last_refresh_error_code")?,
                 last_refresh_error: row.try_get("last_refresh_error")?,
-                refresh_failure_count: u32::try_from(row.try_get::<i32, _>("refresh_failure_count")?)
-                    .context("refresh_failure_count out of range")?,
+                refresh_failure_count: u32::try_from(
+                    row.try_get::<i32, _>("refresh_failure_count")?,
+                )
+                .context("refresh_failure_count out of range")?,
                 refresh_backoff_until: row.try_get("refresh_backoff_until")?,
             })
         })
@@ -809,6 +824,7 @@ impl postgres::PostgresStore {
             routing_profiles,
             model_routing_policies,
             model_routing_settings,
+            claude_code_routing_settings,
             outbound_proxy_pool_settings,
             outbound_proxy_nodes,
             upstream_error_learning_settings,
@@ -1000,8 +1016,10 @@ impl postgres::PostgresStore {
             .bind(credential.refresh_reused_detected)
             .bind(&credential.last_refresh_error_code)
             .bind(&credential.last_refresh_error)
-            .bind(i32::try_from(credential.refresh_failure_count)
-                .context("refresh_failure_count overflow")?)
+            .bind(
+                i32::try_from(credential.refresh_failure_count)
+                    .context("refresh_failure_count overflow")?,
+            )
             .bind(credential.refresh_backoff_until)
             .bind(Utc::now())
             .execute(tx.as_mut())
@@ -1236,7 +1254,10 @@ impl postgres::PostgresStore {
                 serde_json::to_string(&settings.planner_model_chain)
                     .context("failed to encode planner_model_chain_json")?,
             )
-            .bind(enum_string(&settings.trigger_mode, "model routing trigger mode")?)
+            .bind(enum_string(
+                &settings.trigger_mode,
+                "model routing trigger mode",
+            )?)
             .bind(settings.kill_switch)
             .bind(settings.updated_at)
             .execute(tx.as_mut())
@@ -1257,7 +1278,10 @@ impl postgres::PostgresStore {
             )
             .bind(true)
             .bind(settings.enabled)
-            .bind(enum_string(&settings.fail_mode, "outbound proxy fail mode")?)
+            .bind(enum_string(
+                &settings.fail_mode,
+                "outbound proxy fail mode",
+            )?)
             .bind(settings.updated_at)
             .execute(tx.as_mut())
             .await
@@ -1362,8 +1386,14 @@ impl postgres::PostgresStore {
             .bind(i32::from(template.normalized_status_code))
             .bind(&template.semantic_error_code)
             .bind(enum_string(&template.action, "upstream error action")?)
-            .bind(enum_string(&template.retry_scope, "upstream error retry scope")?)
-            .bind(enum_string(&template.status, "upstream error template status")?)
+            .bind(enum_string(
+                &template.retry_scope,
+                "upstream error retry scope",
+            )?)
+            .bind(enum_string(
+                &template.status,
+                "upstream error template status",
+            )?)
             .bind(
                 serde_json::to_string(&template.templates)
                     .context("failed to encode upstream error templates_json")?,

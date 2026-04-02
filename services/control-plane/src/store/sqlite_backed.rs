@@ -1,9 +1,9 @@
 use anyhow::Context;
 use sqlx_core::pool::PoolOptions;
 use sqlx_sqlite::SqlitePool;
-use tokio::sync::{Mutex, watch};
 #[cfg(test)]
 use std::sync::atomic::AtomicUsize;
+use tokio::sync::{watch, Mutex};
 
 const SQLITE_STORE_STATE_ROW_ID: i64 = 1;
 const SQLITE_STORE_STATE_VERSION: i64 = 1;
@@ -49,6 +49,8 @@ struct SqlitePersistedStoreState {
     routing_profiles: HashMap<Uuid, RoutingProfile>,
     model_routing_policies: HashMap<Uuid, ModelRoutingPolicy>,
     model_routing_settings: ModelRoutingSettings,
+    #[serde(default)]
+    claude_code_routing_settings: ClaudeCodeRoutingSettings,
     upstream_error_learning_settings: AiErrorLearningSettings,
     upstream_error_templates: Vec<UpstreamErrorTemplateRecord>,
     builtin_error_template_overrides: Vec<BuiltinErrorTemplateOverrideRecord>,
@@ -81,6 +83,7 @@ impl InMemoryStore {
             routing_profiles: self.routing_profiles.read().unwrap().clone(),
             model_routing_policies: self.model_routing_policies.read().unwrap().clone(),
             model_routing_settings: self.model_routing_settings.read().unwrap().clone(),
+            claude_code_routing_settings: self.claude_code_routing_settings.read().unwrap().clone(),
             upstream_error_learning_settings: self
                 .upstream_error_learning_settings
                 .read()
@@ -141,14 +144,13 @@ impl InMemoryStore {
             oauth_rate_limit_refresh_jobs: Arc::new(RwLock::new(
                 state.oauth_rate_limit_refresh_jobs,
             )),
-            outbound_proxy_pool_settings: Arc::new(RwLock::new(
-                state.outbound_proxy_pool_settings,
-            )),
+            outbound_proxy_pool_settings: Arc::new(RwLock::new(state.outbound_proxy_pool_settings)),
             outbound_proxy_nodes: Arc::new(RwLock::new(state.outbound_proxy_nodes)),
             policies: Arc::new(RwLock::new(state.policies)),
             routing_profiles: Arc::new(RwLock::new(state.routing_profiles)),
             model_routing_policies: Arc::new(RwLock::new(state.model_routing_policies)),
             model_routing_settings: Arc::new(RwLock::new(state.model_routing_settings)),
+            claude_code_routing_settings: Arc::new(RwLock::new(state.claude_code_routing_settings)),
             upstream_error_learning_settings: Arc::new(RwLock::new(
                 state.upstream_error_learning_settings,
             )),
@@ -243,9 +245,7 @@ impl SqliteBackedStore {
     }
 
     async fn initialize_schema(pool: &SqlitePool) -> Result<()> {
-        let _ = sqlx::query("PRAGMA journal_mode = WAL")
-            .execute(pool)
-            .await;
+        let _ = sqlx::query("PRAGMA journal_mode = WAL").execute(pool).await;
         let _ = sqlx::query("PRAGMA synchronous = NORMAL")
             .execute(pool)
             .await;
@@ -518,10 +518,7 @@ impl ControlPlaneStore for SqliteBackedStore {
         Ok(result)
     }
 
-    async fn queue_oauth_refresh_token(
-        &self,
-        req: ImportOAuthRefreshTokenRequest,
-    ) -> Result<bool> {
+    async fn queue_oauth_refresh_token(&self, req: ImportOAuthRefreshTokenRequest) -> Result<bool> {
         let created = ControlPlaneStore::queue_oauth_refresh_token(&self.inner, req).await?;
         self.persist_state_after_write().await?;
         Ok(created)
@@ -597,7 +594,9 @@ impl ControlPlaneStore for SqliteBackedStore {
     }
 
     async fn delete_oauth_inventory_records(&self, record_ids: Vec<Uuid>) -> Result<()> {
-        self.inner.delete_oauth_inventory_records(record_ids).await?;
+        self.inner
+            .delete_oauth_inventory_records(record_ids)
+            .await?;
         self.persist_state_after_write().await?;
         Ok(())
     }
@@ -609,7 +608,9 @@ impl ControlPlaneStore for SqliteBackedStore {
     }
 
     async fn restore_oauth_inventory_records(&self, record_ids: Vec<Uuid>) -> Result<()> {
-        self.inner.restore_oauth_inventory_records(record_ids).await?;
+        self.inner
+            .restore_oauth_inventory_records(record_ids)
+            .await?;
         self.persist_state_after_write().await?;
         Ok(())
     }
@@ -621,7 +622,9 @@ impl ControlPlaneStore for SqliteBackedStore {
     }
 
     async fn reprobe_oauth_inventory_records(&self, record_ids: Vec<Uuid>) -> Result<()> {
-        self.inner.reprobe_oauth_inventory_records(record_ids).await?;
+        self.inner
+            .reprobe_oauth_inventory_records(record_ids)
+            .await?;
         self.persist_state_after_write().await?;
         Ok(())
     }
@@ -714,6 +717,19 @@ impl ControlPlaneStore for SqliteBackedStore {
         Ok(settings)
     }
 
+    async fn claude_code_routing_settings(&self) -> Result<ClaudeCodeRoutingSettings> {
+        ControlPlaneStore::claude_code_routing_settings(&self.inner).await
+    }
+
+    async fn update_claude_code_routing_settings(
+        &self,
+        req: UpdateClaudeCodeRoutingSettingsRequest,
+    ) -> Result<ClaudeCodeRoutingSettings> {
+        let settings = self.inner.update_claude_code_routing_settings(req).await?;
+        self.persist_state_after_write().await?;
+        Ok(settings)
+    }
+
     async fn upstream_error_learning_settings(&self) -> Result<AiErrorLearningSettings> {
         self.inner.upstream_error_learning_settings().await
     }
@@ -772,7 +788,10 @@ impl ControlPlaneStore for SqliteBackedStore {
         &self,
         record: BuiltinErrorTemplateOverrideRecord,
     ) -> Result<BuiltinErrorTemplateOverrideRecord> {
-        let saved = self.inner.save_builtin_error_template_override(record).await?;
+        let saved = self
+            .inner
+            .save_builtin_error_template_override(record)
+            .await?;
         self.persist_state_after_write().await?;
         Ok(saved)
     }
@@ -823,7 +842,10 @@ impl ControlPlaneStore for SqliteBackedStore {
     }
 
     async fn activate_oauth_refresh_token_vault(&self) -> Result<u64> {
-        let activated = self.inner.activate_oauth_refresh_token_vault_inner().await?;
+        let activated = self
+            .inner
+            .activate_oauth_refresh_token_vault_inner()
+            .await?;
         self.persist_state_after_write().await?;
         Ok(activated)
     }
@@ -858,8 +880,7 @@ impl ControlPlaneStore for SqliteBackedStore {
 
     async fn refresh_due_oauth_rate_limit_caches(&self) -> Result<u64> {
         let before = self.current_revision();
-        let refreshed =
-            ControlPlaneStore::refresh_due_oauth_rate_limit_caches(&self.inner).await?;
+        let refreshed = ControlPlaneStore::refresh_due_oauth_rate_limit_caches(&self.inner).await?;
         self.persist_if_revision_changed(before).await?;
         Ok(refreshed)
     }
@@ -901,7 +922,10 @@ impl ControlPlaneStore for SqliteBackedStore {
         account_id: Uuid,
         enabled: bool,
     ) -> Result<OAuthFamilyActionResponse> {
-        let response = self.inner.set_oauth_family_enabled(account_id, enabled).await?;
+        let response = self
+            .inner
+            .set_oauth_family_enabled(account_id, enabled)
+            .await?;
         self.persist_state_after_write().await?;
         Ok(response)
     }
@@ -1000,8 +1024,10 @@ impl ControlPlaneStore for SqliteBackedStore {
 #[cfg(test)]
 mod sqlite_backed_store_tests {
     use super::{
-        normalize_sqlite_database_url, AccountPoolState, OAuthVaultRecordStatus,
-        SqliteBackedStore,
+        normalize_sqlite_database_url, AccountPoolState, OAuthVaultRecordStatus, SqliteBackedStore,
+    };
+    use crate::contracts::{
+        CreateApiKeyRequest, CreateTenantRequest, CreateUpstreamAccountRequest,
     };
     use crate::contracts::{
         ImportOAuthRefreshTokenRequest, OAuthAccountPoolState, OAuthInventoryFailureStage,
@@ -1011,9 +1037,6 @@ mod sqlite_backed_store_tests {
         OAuthRefreshErrorCode, OAuthTokenClient, OAuthTokenClientError, OAuthTokenInfo,
     };
     use crate::store::ControlPlaneStore;
-    use crate::contracts::{
-        CreateApiKeyRequest, CreateTenantRequest, CreateUpstreamAccountRequest,
-    };
     use crate::store::UpsertOneTimeSessionAccountRequest;
     use async_trait::async_trait;
     use base64::Engine;
@@ -1142,7 +1165,10 @@ mod sqlite_backed_store_tests {
             _access_token: &str,
             _base_url: Option<&str>,
             _chatgpt_account_id: Option<&str>,
-        ) -> Result<Vec<crate::contracts::OAuthRateLimitSnapshot>, crate::oauth::OAuthTokenClientError> {
+        ) -> Result<
+            Vec<crate::contracts::OAuthRateLimitSnapshot>,
+            crate::oauth::OAuthTokenClientError,
+        > {
             Ok(self.rate_limits.clone())
         }
     }
@@ -1232,7 +1258,10 @@ mod sqlite_backed_store_tests {
         assert_eq!(keys[0].id, created_key.record.id);
         assert_eq!(accounts.len(), 1);
         assert_eq!(accounts[0].id, created_account.id);
-        assert_eq!(validated.as_ref().map(|item| item.api_key_id), Some(created_key.record.id));
+        assert_eq!(
+            validated.as_ref().map(|item| item.api_key_id),
+            Some(created_key.record.id)
+        );
     }
 
     #[tokio::test]
@@ -1378,7 +1407,11 @@ mod sqlite_backed_store_tests {
             "expected concurrent deletes to coalesce persists, got {persist_writes} writes for 12 deletes"
         );
         assert!(
-            store.list_upstream_accounts().await.expect("list accounts").is_empty(),
+            store
+                .list_upstream_accounts()
+                .await
+                .expect("list accounts")
+                .is_empty(),
             "all accounts should be deleted"
         );
     }
@@ -1456,7 +1489,10 @@ mod sqlite_backed_store_tests {
                     .queue_oauth_refresh_token(request)
                     .await
                     .expect("queue oauth refresh token");
-                assert!(created, "each queued refresh token should create a new vault item");
+                assert!(
+                    created,
+                    "each queued refresh token should create a new vault item"
+                );
             }));
         }
 
@@ -1471,7 +1507,11 @@ mod sqlite_backed_store_tests {
             "expected mixed concurrent writes to coalesce persists, got {persist_writes} writes for {total_operations} operations"
         );
         assert!(
-            store.list_upstream_accounts().await.expect("list accounts").is_empty(),
+            store
+                .list_upstream_accounts()
+                .await
+                .expect("list accounts")
+                .is_empty(),
             "deletes should remove all runtime accounts while queued imports stay cold"
         );
         assert_eq!(
@@ -1516,7 +1556,10 @@ mod sqlite_backed_store_tests {
             .list_upstream_accounts()
             .await
             .expect("list accounts after queue");
-        assert!(queued_accounts.is_empty(), "queued oauth account should stay cold before activation");
+        assert!(
+            queued_accounts.is_empty(),
+            "queued oauth account should stay cold before activation"
+        );
 
         let activated = store
             .activate_oauth_refresh_token_vault()
@@ -1533,8 +1576,8 @@ mod sqlite_backed_store_tests {
     }
 
     #[tokio::test]
-    async fn sqlite_backed_store_queue_oauth_refresh_token_persists_ready_inventory_without_refresh()
-    {
+    async fn sqlite_backed_store_queue_oauth_refresh_token_persists_ready_inventory_without_refresh(
+    ) {
         let database_url = temp_sqlite_url("cp-store-sqlite-vault-ready");
         let refresh_calls = Arc::new(AtomicUsize::new(0));
         let store = SqliteBackedStore::connect_with_oauth(
@@ -1576,7 +1619,11 @@ mod sqlite_backed_store_tests {
 
         assert_eq!(refresh_calls.load(Ordering::SeqCst), 0);
         assert!(
-            store.list_upstream_accounts().await.expect("list accounts").is_empty(),
+            store
+                .list_upstream_accounts()
+                .await
+                .expect("list accounts")
+                .is_empty(),
             "ready inventory should stay out of runtime before activation"
         );
 
@@ -1648,8 +1695,8 @@ mod sqlite_backed_store_tests {
     }
 
     #[tokio::test]
-    async fn sqlite_backed_store_activation_uses_ready_without_refresh_and_needs_refresh_with_single_refresh()
-    {
+    async fn sqlite_backed_store_activation_uses_ready_without_refresh_and_needs_refresh_with_single_refresh(
+    ) {
         let database_url = temp_sqlite_url("cp-store-sqlite-ready-then-refresh");
         let refresh_calls = Arc::new(AtomicUsize::new(0));
         let store = SqliteBackedStore::connect_with_oauth(
@@ -2184,7 +2231,11 @@ mod sqlite_backed_store_tests {
                 .expect("activate oauth vault");
             assert_eq!(activated, 0);
             assert!(
-                store.list_upstream_accounts().await.expect("list accounts").is_empty(),
+                store
+                    .list_upstream_accounts()
+                    .await
+                    .expect("list accounts")
+                    .is_empty(),
                 "fatal activation failures should never materialize runtime accounts"
             );
 
@@ -2367,7 +2418,11 @@ mod sqlite_backed_store_tests {
             .expect("purge pending accounts after due");
         assert_eq!(purged, 1);
         assert!(
-            store.list_upstream_accounts().await.expect("list accounts").is_empty(),
+            store
+                .list_upstream_accounts()
+                .await
+                .expect("list accounts")
+                .is_empty(),
             "purged account should be deleted from runtime store"
         );
     }

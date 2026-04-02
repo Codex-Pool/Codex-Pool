@@ -1,4 +1,5 @@
 const AI_ROUTING_SETTINGS_SINGLETON_ROW: bool = true;
+const CLAUDE_CODE_ROUTING_SETTINGS_SINGLETON_ROW: bool = true;
 const PRIMARY_RATE_LIMIT_WINDOW_MINUTES: i64 = 300;
 const SECONDARY_RATE_LIMIT_WINDOW_MINUTES: i64 = 10_080;
 const ROUTING_PLAN_REASON_PROFILE_UPSERT: &str = "routing_profile_upsert";
@@ -363,10 +364,9 @@ impl PostgresStore {
         req: UpdateModelRoutingSettingsRequest,
     ) -> Result<ModelRoutingSettings> {
         let updated_at = Utc::now();
-        let planner_model_chain_json = serde_json::to_string(&normalize_string_list(
-            req.planner_model_chain.clone(),
-        ))
-        .context("failed to encode model routing planner model chain")?;
+        let planner_model_chain_json =
+            serde_json::to_string(&normalize_string_list(req.planner_model_chain.clone()))
+                .context("failed to encode model routing planner model chain")?;
         sqlx::query(
             r#"
             INSERT INTO ai_routing_settings (
@@ -406,6 +406,107 @@ impl PostgresStore {
             planner_model_chain: normalize_string_list(req.planner_model_chain),
             trigger_mode: req.trigger_mode,
             kill_switch: req.kill_switch,
+            updated_at,
+        })
+    }
+
+    async fn load_claude_code_routing_settings_inner(&self) -> Result<ClaudeCodeRoutingSettings> {
+        let row = sqlx::query(
+            r#"
+            SELECT
+                enabled,
+                opus_target_model,
+                sonnet_target_model,
+                haiku_target_model,
+                updated_at
+            FROM claude_code_routing_settings
+            WHERE singleton = $1
+            "#,
+        )
+        .bind(CLAUDE_CODE_ROUTING_SETTINGS_SINGLETON_ROW)
+        .fetch_optional(&self.pool)
+        .await
+        .context("failed to load claude code routing settings")?;
+
+        let Some(row) = row else {
+            return Ok(default_claude_code_routing_settings(Utc::now()));
+        };
+
+        Ok(ClaudeCodeRoutingSettings {
+            enabled: row.try_get("enabled")?,
+            opus_target_model: normalize_optional_model(
+                row.try_get::<Option<String>, _>("opus_target_model")?,
+            ),
+            sonnet_target_model: normalize_optional_model(
+                row.try_get::<Option<String>, _>("sonnet_target_model")?,
+            ),
+            haiku_target_model: normalize_optional_model(
+                row.try_get::<Option<String>, _>("haiku_target_model")?,
+            ),
+            updated_at: row.try_get("updated_at")?,
+        })
+    }
+
+    async fn update_claude_code_routing_settings_inner(
+        &self,
+        req: UpdateClaudeCodeRoutingSettingsRequest,
+    ) -> Result<ClaudeCodeRoutingSettings> {
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .context("failed to start claude code routing settings transaction")?;
+        let updated_at = Utc::now();
+        let opus_target_model = normalize_optional_model(req.opus_target_model);
+        let sonnet_target_model = normalize_optional_model(req.sonnet_target_model);
+        let haiku_target_model = normalize_optional_model(req.haiku_target_model);
+
+        sqlx::query(
+            r#"
+            INSERT INTO claude_code_routing_settings (
+                singleton,
+                enabled,
+                opus_target_model,
+                sonnet_target_model,
+                haiku_target_model,
+                updated_at
+            )
+            VALUES ($1, $2, $3, $4, $5, $6)
+            ON CONFLICT (singleton) DO UPDATE
+            SET
+                enabled = EXCLUDED.enabled,
+                opus_target_model = EXCLUDED.opus_target_model,
+                sonnet_target_model = EXCLUDED.sonnet_target_model,
+                haiku_target_model = EXCLUDED.haiku_target_model,
+                updated_at = EXCLUDED.updated_at
+            "#,
+        )
+        .bind(CLAUDE_CODE_ROUTING_SETTINGS_SINGLETON_ROW)
+        .bind(req.enabled)
+        .bind(opus_target_model.clone())
+        .bind(sonnet_target_model.clone())
+        .bind(haiku_target_model.clone())
+        .bind(updated_at)
+        .execute(tx.as_mut())
+        .await
+        .context("failed to update claude code routing settings")?;
+
+        self.bump_revision_tx(&mut tx).await?;
+        self.append_data_plane_outbox_event_tx(
+            &mut tx,
+            DataPlaneSnapshotEventType::RoutingPlanRefresh,
+            Uuid::nil(),
+        )
+        .await?;
+        tx.commit()
+            .await
+            .context("failed to commit claude code routing settings transaction")?;
+
+        Ok(ClaudeCodeRoutingSettings {
+            enabled: req.enabled,
+            opus_target_model,
+            sonnet_target_model,
+            haiku_target_model,
             updated_at,
         })
     }
@@ -500,7 +601,10 @@ impl PostgresStore {
         &self,
         accounts: &[UpstreamAccount],
     ) -> Result<HashMap<Uuid, AccountRoutingTraits>> {
-        let account_ids = accounts.iter().map(|account| account.id).collect::<std::collections::HashSet<_>>();
+        let account_ids = accounts
+            .iter()
+            .map(|account| account.id)
+            .collect::<std::collections::HashSet<_>>();
         Ok(self
             .load_active_snapshot_accounts_and_traits_inner(None)
             .await?
@@ -518,7 +622,9 @@ impl PostgresStore {
     ) -> Result<Option<CompiledRoutingPlan>> {
         let profiles = self.list_routing_profiles_inner().await?;
         let policies = self.list_model_routing_policies_inner().await?;
-        let metadata = self.load_latest_routing_plan_version_metadata_inner().await?;
+        let metadata = self
+            .load_latest_routing_plan_version_metadata_inner()
+            .await?;
         let version_id = metadata
             .as_ref()
             .map(|value| value.id)
@@ -543,7 +649,9 @@ impl PostgresStore {
         &self,
         reason: Option<&str>,
     ) -> Result<Option<RoutingPlanVersion>> {
-        let snapshot_records = self.load_active_snapshot_accounts_and_traits_inner(None).await?;
+        let snapshot_records = self
+            .load_active_snapshot_accounts_and_traits_inner(None)
+            .await?;
         let accounts = snapshot_records
             .iter()
             .map(|record| record.account.clone())
@@ -625,7 +733,9 @@ impl PostgresStore {
     }
 
     async fn load_compiled_routing_plan_inner(&self) -> Result<Option<CompiledRoutingPlan>> {
-        let snapshot_records = self.load_active_snapshot_accounts_and_traits_inner(None).await?;
+        let snapshot_records = self
+            .load_active_snapshot_accounts_and_traits_inner(None)
+            .await?;
         self.load_compiled_routing_plan_inner_from_records(&snapshot_records)
             .await
     }
@@ -644,7 +754,9 @@ impl PostgresStore {
             .collect::<HashMap<_, _>>();
         let profiles = self.list_routing_profiles_inner().await?;
         let policies = self.list_model_routing_policies_inner().await?;
-        let metadata = self.load_latest_routing_plan_version_metadata_inner().await?;
+        let metadata = self
+            .load_latest_routing_plan_version_metadata_inner()
+            .await?;
         let version_id = metadata
             .as_ref()
             .map(|value| value.id)
@@ -771,7 +883,8 @@ impl PostgresStore {
             let refresh_reused_detected = row
                 .try_get::<Option<bool>, _>("refresh_reused_detected")?
                 .unwrap_or(false);
-            let last_refresh_error_code = row.try_get::<Option<String>, _>("last_refresh_error_code")?;
+            let last_refresh_error_code =
+                row.try_get::<Option<String>, _>("last_refresh_error_code")?;
             let has_access_token_fallback = row
                 .try_get::<Option<String>, _>("fallback_access_token_enc")?
                 .is_some();
@@ -781,7 +894,8 @@ impl PostgresStore {
                 row.try_get::<Option<DateTime<Utc>>, _>("rate_limits_expires_at")?;
             let rate_limits_last_error_code =
                 row.try_get::<Option<String>, _>("rate_limits_last_error_code")?;
-            let rate_limits_last_error = row.try_get::<Option<String>, _>("rate_limits_last_error")?;
+            let rate_limits_last_error =
+                row.try_get::<Option<String>, _>("rate_limits_last_error")?;
             let credential_kind = match (auth_provider.clone(), mode.clone()) {
                 (UpstreamAuthProvider::OAuthRefreshToken, _) => {
                     Some(SessionCredentialKind::RefreshRotatable)
@@ -923,6 +1037,16 @@ fn default_model_routing_settings(updated_at: DateTime<Utc>) -> ModelRoutingSett
     }
 }
 
+fn default_claude_code_routing_settings(updated_at: DateTime<Utc>) -> ClaudeCodeRoutingSettings {
+    ClaudeCodeRoutingSettings {
+        enabled: false,
+        opus_target_model: None,
+        sonnet_target_model: None,
+        haiku_target_model: None,
+        updated_at,
+    }
+}
+
 fn normalize_string_list(values: Vec<String>) -> Vec<String> {
     let mut normalized = values
         .into_iter()
@@ -948,6 +1072,13 @@ fn parse_json_uuid_array(raw: Option<String>) -> Vec<Uuid> {
     values.sort();
     values.dedup();
     values
+}
+
+fn normalize_optional_model(value: Option<String>) -> Option<String> {
+    value.and_then(|value| {
+        let trimmed = value.trim();
+        (!trimmed.is_empty()).then(|| trimmed.to_string())
+    })
 }
 
 fn parse_model_routing_trigger_mode(raw: &str) -> Result<ModelRoutingTriggerMode> {
@@ -1130,11 +1261,7 @@ fn compile_routing_plan_from_state(
     let default_route = default_policy
         .as_ref()
         .map(|policy| {
-            build_compiled_fallback_segments(
-                &policy.fallback_profile_ids,
-                &compiled_profiles,
-                None,
-            )
+            build_compiled_fallback_segments(&policy.fallback_profile_ids, &compiled_profiles, None)
         })
         .unwrap_or_default();
 

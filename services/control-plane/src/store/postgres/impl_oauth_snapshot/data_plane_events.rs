@@ -61,7 +61,9 @@ impl PostgresStore {
         .await
         .context("failed to read data-plane outbox min cursor")?;
         min_id
-            .map(|value| u64::try_from(value.max(0)).context("data-plane outbox min must be non-negative"))
+            .map(|value| {
+                u64::try_from(value.max(0)).context("data-plane outbox min must be non-negative")
+            })
             .transpose()
     }
 
@@ -81,7 +83,10 @@ impl PostgresStore {
         Ok(deleted)
     }
 
-    async fn load_snapshot_account_by_id(&self, account_id: Uuid) -> Result<Option<UpstreamAccount>> {
+    async fn load_snapshot_account_by_id(
+        &self,
+        account_id: Uuid,
+    ) -> Result<Option<UpstreamAccount>> {
         let row = sqlx::query(
             r#"
             SELECT
@@ -135,18 +140,22 @@ impl PostgresStore {
         let refresh_reused_detected = row
             .try_get::<Option<bool>, _>("refresh_reused_detected")?
             .unwrap_or(false);
-        let last_refresh_error_code = row.try_get::<Option<String>, _>("last_refresh_error_code")?;
+        let last_refresh_error_code =
+            row.try_get::<Option<String>, _>("last_refresh_error_code")?;
         let has_access_token_fallback = row
             .try_get::<Option<String>, _>("fallback_access_token_enc")?
             .is_some();
         let fallback_token_expires_at =
             row.try_get::<Option<DateTime<Utc>>, _>("fallback_token_expires_at")?;
-        let rate_limits_expires_at = row.try_get::<Option<DateTime<Utc>>, _>("rate_limits_expires_at")?;
+        let rate_limits_expires_at =
+            row.try_get::<Option<DateTime<Utc>>, _>("rate_limits_expires_at")?;
         let rate_limits_last_error_code =
             row.try_get::<Option<String>, _>("rate_limits_last_error_code")?;
         let rate_limits_last_error = row.try_get::<Option<String>, _>("rate_limits_last_error")?;
         let credential_kind = match (auth_provider.clone(), mode.clone()) {
-            (UpstreamAuthProvider::OAuthRefreshToken, _) => Some(SessionCredentialKind::RefreshRotatable),
+            (UpstreamAuthProvider::OAuthRefreshToken, _) => {
+                Some(SessionCredentialKind::RefreshRotatable)
+            }
             (UpstreamAuthProvider::LegacyBearer, UpstreamMode::ChatGptSession)
             | (UpstreamAuthProvider::LegacyBearer, UpstreamMode::CodexOauth) => {
                 Some(SessionCredentialKind::OneTimeAccessToken)
@@ -298,7 +307,8 @@ impl PostgresStore {
             let id = u64::try_from(id_i64.max(0))
                 .context("data-plane outbox event id must be non-negative")?;
             cursor = cursor.max(id);
-            let event_type = parse_outbox_event_type(row.try_get::<String, _>("event_type")?.as_str())?;
+            let event_type =
+                parse_outbox_event_type(row.try_get::<String, _>("event_type")?.as_str())?;
             let account_id = row.try_get::<Uuid, _>("account_id")?;
             let account = if matches!(event_type, DataPlaneSnapshotEventType::AccountUpsert) {
                 self.load_snapshot_account_by_id(account_id).await?
@@ -315,46 +325,42 @@ impl PostgresStore {
             } else {
                 None
             };
-            let ai_error_learning_settings = if matches!(
-                event_type,
-                DataPlaneSnapshotEventType::RoutingPlanRefresh
-            ) {
-                Some(self.load_upstream_error_learning_settings_inner().await?)
-            } else {
-                None
-            };
-            let approved_upstream_error_templates = if matches!(
-                event_type,
-                DataPlaneSnapshotEventType::RoutingPlanRefresh
-            ) {
-                Some(self.load_approved_upstream_error_templates_inner().await?)
-            } else {
-                None
-            };
-            let builtin_error_templates = if matches!(
-                event_type,
-                DataPlaneSnapshotEventType::RoutingPlanRefresh
-            ) {
-                Some(self.list_builtin_error_templates().await?)
-            } else {
-                None
-            };
-            let outbound_proxy_pool_settings = if matches!(
-                event_type,
-                DataPlaneSnapshotEventType::RoutingPlanRefresh
-            ) {
-                Some(self.load_outbound_proxy_pool_settings_inner().await?)
-            } else {
-                None
-            };
-            let outbound_proxy_nodes = if matches!(
-                event_type,
-                DataPlaneSnapshotEventType::RoutingPlanRefresh
-            ) {
-                Some(self.list_outbound_proxy_nodes_inner().await?)
-            } else {
-                None
-            };
+            let ai_error_learning_settings =
+                if matches!(event_type, DataPlaneSnapshotEventType::RoutingPlanRefresh) {
+                    Some(self.load_upstream_error_learning_settings_inner().await?)
+                } else {
+                    None
+                };
+            let approved_upstream_error_templates =
+                if matches!(event_type, DataPlaneSnapshotEventType::RoutingPlanRefresh) {
+                    Some(self.load_approved_upstream_error_templates_inner().await?)
+                } else {
+                    None
+                };
+            let builtin_error_templates =
+                if matches!(event_type, DataPlaneSnapshotEventType::RoutingPlanRefresh) {
+                    Some(self.list_builtin_error_templates().await?)
+                } else {
+                    None
+                };
+            let outbound_proxy_pool_settings =
+                if matches!(event_type, DataPlaneSnapshotEventType::RoutingPlanRefresh) {
+                    Some(self.load_outbound_proxy_pool_settings_inner().await?)
+                } else {
+                    None
+                };
+            let outbound_proxy_nodes =
+                if matches!(event_type, DataPlaneSnapshotEventType::RoutingPlanRefresh) {
+                    Some(self.list_outbound_proxy_nodes_inner().await?)
+                } else {
+                    None
+                };
+            let claude_code_routing_settings =
+                if matches!(event_type, DataPlaneSnapshotEventType::RoutingPlanRefresh) {
+                    Some(self.load_claude_code_routing_settings_inner().await?)
+                } else {
+                    None
+                };
             events.push(DataPlaneSnapshotEvent {
                 id,
                 event_type,
@@ -366,6 +372,7 @@ impl PostgresStore {
                 builtin_error_templates,
                 outbound_proxy_pool_settings,
                 outbound_proxy_nodes,
+                claude_code_routing_settings,
                 created_at: row.try_get::<DateTime<Utc>, _>("created_at")?,
             });
         }

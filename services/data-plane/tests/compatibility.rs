@@ -11,10 +11,14 @@ use axum::Router;
 use bytes::Bytes;
 use codex_pool_core::api::UsageSummary;
 use codex_pool_core::events::RequestLogEvent;
-use codex_pool_core::model::{RoutingStrategy, UpstreamAccount, UpstreamMode};
+use codex_pool_core::model::{
+    ClaudeCodeRoutingSettings, RoutingStrategy, UpstreamAccount, UpstreamMode,
+};
 use data_plane::app::{
     build_app_with_event_sink as dp_build_app_with_event_sink,
     build_app_with_event_sink_and_allowed_keys as dp_build_app_with_event_sink_and_allowed_keys,
+    build_embedded_app_with_event_sink_without_status_routes as dp_build_embedded_app_with_event_sink_without_status_routes,
+    AppState,
 };
 use data_plane::config::DataPlaneConfig;
 use data_plane::event::{EventSink, NoopEventSink};
@@ -48,6 +52,14 @@ async fn build_app_with_event_sink_and_allowed_keys(
 ) -> anyhow::Result<Router> {
     let _env_guard = support::lock_env().await;
     dp_build_app_with_event_sink_and_allowed_keys(config, event_sink, allowed_keys).await
+}
+
+async fn build_embedded_app_with_event_sink(
+    config: DataPlaneConfig,
+    event_sink: Arc<dyn EventSink>,
+) -> anyhow::Result<(Router, Arc<AppState>)> {
+    let _env_guard = support::lock_env().await;
+    dp_build_embedded_app_with_event_sink_without_status_routes(config, event_sink).await
 }
 
 fn test_account(base_url: String, token: &str) -> UpstreamAccount {
@@ -98,6 +110,51 @@ async fn test_app(accounts: Vec<UpstreamAccount>) -> Router {
     build_app_with_event_sink(cfg, Arc::new(NoopEventSink))
         .await
         .expect("app should build")
+}
+
+async fn embedded_test_app(accounts: Vec<UpstreamAccount>) -> (Router, Arc<AppState>) {
+    let cfg = DataPlaneConfig {
+        listen_addr: "127.0.0.1:0".parse().unwrap(),
+        routing_strategy: RoutingStrategy::RoundRobin,
+        upstream_accounts: accounts,
+        account_ejection_ttl_sec: 30,
+        enable_request_failover: true,
+        same_account_quick_retry_max: 1,
+        request_failover_wait_ms: 2_000,
+        retry_poll_interval_ms: 100,
+        sticky_prefer_non_conflicting: true,
+        shared_routing_cache_enabled: true,
+        enable_metered_stream_billing: true,
+        billing_authorize_required_for_stream: true,
+        stream_billing_reserve_microcredits: 2_000_000,
+        billing_dynamic_preauth_enabled: true,
+        billing_preauth_expected_output_tokens: 256,
+        billing_preauth_safety_factor: 1.3,
+        billing_preauth_min_microcredits: 1_000,
+        billing_preauth_max_microcredits: 1_000_000_000_000,
+        billing_preauth_unit_price_microcredits: 10_000,
+        stream_billing_drain_timeout_ms: 5_000,
+        billing_capture_retry_max: 3,
+        billing_capture_retry_backoff_ms: 200,
+        redis_url: None,
+        auth_validate_url: None,
+        auth_validate_cache_ttl_sec: 30,
+        auth_validate_negative_cache_ttl_sec: 5,
+        auth_fail_open: false,
+        enable_internal_debug_routes: false,
+    };
+    build_embedded_app_with_event_sink(cfg, Arc::new(NoopEventSink))
+        .await
+        .expect("app should build")
+}
+
+fn set_claude_code_sonnet_target(state: &AppState, target_model: Option<&str>) {
+    state.replace_claude_code_routing_settings(ClaudeCodeRoutingSettings {
+        enabled: true,
+        sonnet_target_model: target_model.map(ToString::to_string),
+        updated_at: chrono::Utc::now(),
+        ..ClaudeCodeRoutingSettings::default()
+    });
 }
 
 async fn spawn_live_test_app(accounts: Vec<UpstreamAccount>) -> String {
@@ -4720,4 +4777,270 @@ async fn request_log_event_contains_identity_from_online_validation() {
     assert_eq!(events[0].tenant_id, Some(tenant_id));
     assert_eq!(events[0].api_key_id, Some(api_key_id));
     assert_eq!(events[0].event_version, 2);
+}
+
+#[tokio::test]
+async fn anthropic_messages_translate_non_stream_responses() {
+    let upstream = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v1/responses"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "id": "resp_anthropic_non_stream",
+            "status": "completed",
+            "usage": {"input_tokens": 7, "output_tokens": 3},
+            "output": [{
+                "type": "message",
+                "role": "assistant",
+                "content": [{"type": "output_text", "text": "OK"}]
+            }]
+        })))
+        .mount(&upstream)
+        .await;
+
+    let (app, state) =
+        embedded_test_app(vec![test_account(upstream.uri(), "upstream-token")]).await;
+    set_claude_code_sonnet_target(&state, Some("gpt-5.4"));
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/messages")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    json!({
+                        "model": "claude-3-7-sonnet-20250219",
+                        "system": "Answer tersely.",
+                        "max_tokens": 32,
+                        "messages": [{"role": "user", "content": "Reply with exactly OK."}]
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let payload: Value =
+        serde_json::from_slice(&response.into_body().collect().await.unwrap().to_bytes()).unwrap();
+    assert_eq!(payload["type"], "message");
+    assert_eq!(payload["role"], "assistant");
+    assert_eq!(payload["model"], "claude-3-7-sonnet-20250219");
+    assert_eq!(payload["content"][0]["type"], "text");
+    assert_eq!(payload["content"][0]["text"], "OK");
+    assert_eq!(payload["stop_reason"], "end_turn");
+    assert_eq!(payload["usage"]["input_tokens"], 7);
+    assert_eq!(payload["usage"]["output_tokens"], 3);
+
+    let upstream_requests = upstream.received_requests().await.unwrap();
+    assert_eq!(upstream_requests.len(), 1);
+    let forwarded: Value = serde_json::from_slice(&upstream_requests[0].body).unwrap();
+    assert_eq!(forwarded["model"], "gpt-5.4");
+    assert_eq!(forwarded["instructions"], "Answer tersely.");
+    assert_eq!(forwarded["max_output_tokens"], 32);
+    assert_eq!(
+        forwarded["input"],
+        json!([{
+            "role": "user",
+            "content": [{
+                "type": "input_text",
+                "text": "Reply with exactly OK."
+            }]
+        }])
+    );
+}
+
+#[tokio::test]
+async fn anthropic_messages_stream_emit_raw_message_event_order() {
+    let upstream = MockServer::start().await;
+    let sse_payload = concat!(
+        "event: response.created\n",
+        "data: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_anthropic_stream\",\"status\":\"in_progress\"}}\n\n",
+        "event: response.output_text.delta\n",
+        "data: {\"type\":\"response.output_text.delta\",\"delta\":\"OK\"}\n\n",
+        "event: response.completed\n",
+        "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_anthropic_stream\",\"status\":\"completed\",\"usage\":{\"input_tokens\":7,\"output_tokens\":3},\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"OK\"}]}]}}\n\n",
+        "data: [DONE]\n\n",
+    );
+    Mock::given(method("POST"))
+        .and(path("/v1/responses"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(sse_payload, "text/event-stream"))
+        .mount(&upstream)
+        .await;
+
+    let (app, state) =
+        embedded_test_app(vec![test_account(upstream.uri(), "upstream-token")]).await;
+    set_claude_code_sonnet_target(&state, Some("gpt-5.4"));
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/messages")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    json!({
+                        "model": "claude-3-7-sonnet-20250219",
+                        "max_tokens": 32,
+                        "stream": true,
+                        "messages": [{"role": "user", "content": "Reply with exactly OK."}]
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let content_type = response
+        .headers()
+        .get(CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or_default()
+        .to_string();
+    assert!(content_type.contains("text/event-stream"));
+
+    let body = String::from_utf8(
+        response
+            .into_body()
+            .collect()
+            .await
+            .unwrap()
+            .to_bytes()
+            .to_vec(),
+    )
+    .unwrap();
+
+    let order = [
+        "event: message_start",
+        "event: content_block_start",
+        "event: content_block_delta",
+        "event: content_block_stop",
+        "event: message_delta",
+        "event: message_stop",
+    ];
+    let mut previous_index = 0usize;
+    for marker in order {
+        let index = body
+            .find(marker)
+            .unwrap_or_else(|| panic!("missing marker: {marker}\n{body}"));
+        assert!(
+            index >= previous_index,
+            "marker {marker} appeared out of order\n{body}"
+        );
+        previous_index = index;
+    }
+    assert!(body.contains("\"type\":\"text_delta\""));
+    assert!(body.contains("\"text\":\"OK\""));
+    assert!(body.contains("\"stop_reason\":\"end_turn\""));
+    assert!(body.contains("\"usage\":{\"input_tokens\":7,\"output_tokens\":3}"));
+}
+
+#[tokio::test]
+async fn anthropic_messages_return_explicit_family_mapping_errors() {
+    let upstream = MockServer::start().await;
+    let (app, state) =
+        embedded_test_app(vec![test_account(upstream.uri(), "upstream-token")]).await;
+
+    state.replace_claude_code_routing_settings(ClaudeCodeRoutingSettings {
+        enabled: true,
+        updated_at: chrono::Utc::now(),
+        ..ClaudeCodeRoutingSettings::default()
+    });
+
+    let unmapped = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/messages")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    json!({
+                        "model": "claude-3-7-sonnet-20250219",
+                        "max_tokens": 16,
+                        "messages": [{"role": "user", "content": "hello"}]
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(unmapped.status(), StatusCode::BAD_REQUEST);
+    let unmapped_payload: Value =
+        serde_json::from_slice(&unmapped.into_body().collect().await.unwrap().to_bytes()).unwrap();
+    assert_eq!(unmapped_payload["type"], "error");
+    assert_eq!(unmapped_payload["error"]["type"], "invalid_request_error");
+    assert!(unmapped_payload["error"]["message"]
+        .as_str()
+        .unwrap_or_default()
+        .contains("mapped"));
+
+    let unsupported = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/messages")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    json!({
+                        "model": "claude-3-7-unknown-20250219",
+                        "max_tokens": 16,
+                        "messages": [{"role": "user", "content": "hello"}]
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(unsupported.status(), StatusCode::BAD_REQUEST);
+    let unsupported_payload: Value =
+        serde_json::from_slice(&unsupported.into_body().collect().await.unwrap().to_bytes())
+            .unwrap();
+    assert_eq!(unsupported_payload["type"], "error");
+    assert_eq!(
+        unsupported_payload["error"]["type"],
+        "invalid_request_error"
+    );
+    assert!(unsupported_payload["error"]["message"]
+        .as_str()
+        .unwrap_or_default()
+        .contains("unsupported"));
+}
+
+#[tokio::test]
+async fn anthropic_count_tokens_uses_local_estimation() {
+    let upstream = MockServer::start().await;
+    let (app, state) =
+        embedded_test_app(vec![test_account(upstream.uri(), "upstream-token")]).await;
+    set_claude_code_sonnet_target(&state, Some("gpt-5.4"));
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/messages/count_tokens")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    json!({
+                        "model": "claude-3-7-sonnet-20250219",
+                        "system": "Count these prompt tokens.",
+                        "messages": [{"role": "user", "content": "hello from anthropic count tokens"}]
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let payload: Value =
+        serde_json::from_slice(&response.into_body().collect().await.unwrap().to_bytes()).unwrap();
+    assert!(payload["input_tokens"].as_i64().unwrap_or_default() > 0);
+    assert_eq!(upstream.received_requests().await.unwrap().len(), 0);
 }

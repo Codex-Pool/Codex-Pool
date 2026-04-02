@@ -1,4 +1,4 @@
-use crate::model::UpstreamErrorTemplateRecord;
+use crate::model::{ClaudeCodeRoutingSettings, UpstreamErrorTemplateRecord};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
@@ -42,4 +42,18 @@ pub struct ResolveUpstreamErrorTemplateResponse {
     pub template: UpstreamErrorTemplateRecord,
     #[serde(default)]
     pub created: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ClaudeCodeRoutingSettingsResponse {
+    #[serde(flatten)]
+    pub settings: ClaudeCodeRoutingSettings,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UpdateClaudeCodeRoutingSettingsRequest {
+    pub enabled: bool,
+    pub opus_target_model: Option<String>,
+    pub sonnet_target_model: Option<String>,
+    pub haiku_target_model: Option<String>,
 }

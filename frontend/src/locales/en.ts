@@ -1,3739 +1,4021 @@
 export default {
-    accounts: {
-        actions: {
-            add: "Add Account",
-            apiKeyNoGroupAction: "API-key account: no linked-account action",
-            batchDelete: "Batch Delete",
-            batchDeleteConfirm: "Delete {{count}} selected accounts?",
-            batchDisable: "Batch Disable",
-            batchEnable: "Batch Enable",
-            batchMenu: "Batch Actions",
-            batchPauseFamily: "Batch Pause Family ({{count}})",
-            batchRefreshLogin: "Batch Refresh Login ({{count}})",
-            batchResumeFamily: "Batch Resume Family ({{count}})",
-            comfortableMode: "Comfortable Mode",
-            compactMode: "Compact Mode",
-            delete: "Delete Account",
-            deleteConfirm: "Delete account {{label}}?",
-            disableAccount: "Disable Account",
-            disable: "Disable",
-            enableAccount: "Enable Account",
-            export: "Export CSV",
-            filter: "Filter List",
-            oneTimeNoGroupAction: "One-time session account: no linked-account action",
-            pauseGroup: "Pause Linked Accounts",
-            refreshAccounts: "Refresh",
-            refreshLogin: "Refresh Login",
-            refreshingAccounts: "Refreshing",
-            resumeGroup: "Resume Linked Accounts",
-            selectAll: "Select all filtered results",
-            selectOne: "Select account {{label}}",
-            selectedCount: "{{count}} selected",
-            view: "View Details",
-            viewDetails: "View Details",
-            edit: "Edit Properties",
-            refresh: "Force Refresh",
-            suspend: "Suspend",
-            exportSuccess: "Export successful",
-            refreshTriggered: "Account refresh triggered"
-        },
-        columns: {
-            actions: "Actions",
-            account: "Account",
-            added: "Added",
-            credentialType: "Credential Type",
-            health: "Health Status",
-            id: "Account ID",
-            loginStatus: "Login Status",
-            nextRefresh: "Next Refresh",
-            plan: "Plan",
-            provider: "Provider / Mode",
-            rateLimit: "Rate Limit Usage",
-            binding: "Binding",
-            unbound: "unbound"
-        },
-        details: {
-            description: "View account profile, OAuth status, limits, and raw payloads.",
-            officialDescription: "Official OpenAI model metadata is read-only here. Manual override pricing can be edited below.",
-            limitsTitle: "Rate Limits",
-            noOauthStatus: "No OAuth status data yet.",
-            noSupportedModels: "No available model list has been captured for this account yet.",
-            oauthNotApplicable: "OAuth details are not available for this account type.",
-            oauthTitle: "OAuth Status",
-            profileTitle: "Account Profile",
-            rawTitle: "Raw Payload",
-            supportedModelsCount: "{{count}} models",
-            tabAria: "Account detail tabs",
-            tabs: {
-                limits: "Limits",
-                oauth: "OAuth",
-                profile: "Profile",
-                raw: "Raw"
-            },
-            sections: {
-                cache: "Rate Limit Cache",
-                connection: "Connection",
-                credentials: "Credentials",
-                identity: "Identity",
-                refresh: "Refresh State",
-                supportedModels: "Available Models",
-                subscription: "Subscription"
-            },
-            fields: {
-                email: "Email",
-                label: "Label",
-                mode: "Mode",
-                accountId: "Account ID",
-                enabled: "Enabled",
-                baseUrl: "Base URL",
-                chatgptAccountId: "ChatGPT Account ID",
-                priority: "Priority",
-                createdAt: "Created At",
-                bearerToken: "Bearer Token",
-                authProvider: "Auth Provider",
-                credentialKind: "Credential Kind",
-                lastRefreshStatus: "Last Refresh Status",
-                effectiveEnabled: "Effective Enabled",
-                chatgptPlanType: "ChatGPT Plan Type",
-                sourceType: "Source Type",
-                tokenFamilyId: "Token Family ID",
-                tokenVersion: "Token Version",
-                tokenExpiresAt: "Token Expires At",
-                nextRefreshAt: "Next Refresh At",
-                lastRefreshAt: "Last Refresh At",
-                refreshReusedDetected: "Refresh Reused Detected",
-                lastRefreshErrorCode: "Last Refresh Error Code",
-                lastRefreshError: "Last Refresh Error",
-                rateLimitsFetchedAt: "Rate Limits Fetched At",
-                rateLimitsExpiresAt: "Rate Limits Expires At",
-                rateLimitsLastErrorCode: "Rate Limits Last Error Code",
-                rateLimitsLastError: "Rate Limits Last Error",
-                rawAccount: "Account Payload",
-                rawOauthStatus: "OAuth Status Payload"
-            }
-        },
-        filters: {
-            active: "Active",
-            all: "All",
-            credential: "Credential Type",
-            credentialAll: "All Credentials",
-            credentialAt: "AT",
-            credentialRt: "RT",
-            credentialUnknown: "Unknown",
-            disabled: "Disabled",
-            mode: "Mode",
-            modeAll: "All Modes",
-            modeApiKey: "API Key",
-            modeOAuth: "OAuth Session",
-            plan: "Plan Filter",
-            planAll: "All Plans",
-            planUnknown: "Not Reported",
-            total: "Matched {{count}}",
-            suspended: "Suspended"
-        },
-        messages: {
-            batchAllFailed: "{{action}} failed",
-            batchAllSuccess: "{{action}} completed",
-            batchPartialFailed: "{{failed}} operations failed{{error}}",
-            batchPartialFailedTitle: "{{action}} partially failed",
-            batchSuccessCount: "{{count}} succeeded",
-            batchUnknownError: "Batch operation failed",
-            deleteFailed: "Failed to delete account",
-            deleteSuccess: "Account deleted",
-            disableFailed: "Failed to disable account",
-            disableSuccess: "Account disabled",
-            enableFailed: "Failed to enable account",
-            enableSuccess: "Account enabled",
-            exportSuccess: "Export successful",
-            pauseFamilyFailed: "Failed to pause linked accounts",
-            pauseFamilySuccess: "Linked accounts paused",
-            rateLimitPollingTimeout: "Rate-limit refresh job polling timed out.",
-            rateLimitRefreshFailedStatus: "Rate-limit refresh job failed, status={{status}}",
-            rateLimitRefreshFailedSummary: "Rate-limit refresh job failed: {{summary}}",
-            batchRefreshStarted: "Started login refresh for {{count}} accounts",
-            refreshFailed: "Login refresh failed",
-            refreshFailedStatus: "Login refresh failed, status={{status}}",
-            refreshFailedSummary: "Login refresh failed: {{summary}}",
-            refreshPollingTimeout: "Login refresh job polling timed out.",
-            refreshJobId: "Job ID: {{jobId}}",
-            refreshJobSummary: "Job ID: {{jobId}} · {{processed}}/{{total}}",
-            refreshListFailed: "Failed to refresh usage",
-            refreshListSuccess: "Usage refreshed",
-            refreshSuccess: "Login refresh completed",
-            requestFailed: "Request failed. Please try again later.",
-            resumeFamilyFailed: "Failed to resume linked accounts",
-            resumeFamilySuccess: "Linked accounts resumed",
-            toggleUnsupported: "Current backend does not support account enable/disable. Please upgrade control-plane.",
-            refreshTriggered: "Login refresh started"
-        },
-        rateLimitRefreshJobStatus: {
-            queued: "Queued",
-            running: "Running",
-            completed: "Completed",
-            failed: "Failed",
-            cancelled: "Cancelled",
-            unknown: "Unknown"
-        },
-        mode: {
-            apiKey: "API Key",
-            chatgptSession: "ChatGPT OAuth",
-            codexOauth: "Codex OAuth",
-            unknown: "Other"
-        },
-        nextRefresh: {
-            none: "Not scheduled"
-        },
-        oauth: {
-            kindShort: {
-                oneTime: "AT",
-                refreshRotatable: "RT",
-                unknown: "Unknown"
-            },
-            loading: "Loading…",
-            notApplicable: "-",
-            provider: {
-                legacyBearer: "Legacy bearer token",
-                refreshToken: "Refresh token",
-                unknown: "Unknown provider"
-            },
-            sourceType: {
-                codex: "Codex",
-                unknown: "Unknown source"
-            },
-            status: {
-                failed: "Failed",
-                never: "Not refreshed",
-                ok: "Healthy"
-            },
-            unknownError: "unknown",
-            versionPrefix: "v",
-            planPrefix: "Plan: ",
-            kind: {
-                refreshRotatable: "Refresh-token account",
-                oneTime: "One-time access-token account",
-                unknown: "Unknown credential type"
-            }
-        },
-        rateLimits: {
-            labels: {
-                fiveHours: "5-Hour Limit",
-                github: "GitHub",
-                oneWeek: "Weekly Limit"
-            },
-            shortLabels: {
-                fiveHours: "5h",
-                oneWeek: "7d"
-            },
-            moreDetails: "More details (+{{count}})",
-            noReset: "Reset time unavailable",
-            remainingPrefix: "Remaining",
-            resetAt: "{{absolute}} ({{relative}}) reset",
-            unavailable: "No rate limit data",
-            usedPrefix: "Used"
-        },
-        planValues: {
-            business: "Business",
-            enterprise: "Enterprise",
-            free: "Free",
-            plus: "Plus",
-            pro: "Pro",
-            team: "Team"
-        },
-        searchPlaceholder: "Search by email, label, URL…",
-        notAvailable: "N/A",
-        health: {
-            ok: "OK",
-            failed: "Failed",
-            disabled: "Disabled"
-        },
-        status: {
-            active: "Active",
-            disabled: "Disabled"
-        },
-        plan: {
-            enterprise: "Enterprise",
-            free: "Free",
-            plus: "Plus",
-            pro: "Pro",
-            team: "Team",
-            unknown: "Unknown plan"
-        },
-        subtitle: "Manage API credentials and billing health.",
-        syncing: "Syncing account status…",
-        title: "Accounts Pool"
+  accounts: {
+    actions: {
+      add: "Add Account",
+      apiKeyNoGroupAction: "API-key account: no linked-account action",
+      batchDelete: "Batch Delete",
+      batchDeleteConfirm: "Delete {{count}} selected accounts?",
+      batchDisable: "Batch Disable",
+      batchEnable: "Batch Enable",
+      batchMenu: "Batch Actions",
+      batchPauseFamily: "Batch Pause Family ({{count}})",
+      batchRefreshLogin: "Batch Refresh Login ({{count}})",
+      batchResumeFamily: "Batch Resume Family ({{count}})",
+      comfortableMode: "Comfortable Mode",
+      compactMode: "Compact Mode",
+      delete: "Delete Account",
+      deleteConfirm: "Delete account {{label}}?",
+      disableAccount: "Disable Account",
+      disable: "Disable",
+      enableAccount: "Enable Account",
+      export: "Export CSV",
+      filter: "Filter List",
+      oneTimeNoGroupAction:
+        "One-time session account: no linked-account action",
+      pauseGroup: "Pause Linked Accounts",
+      refreshAccounts: "Refresh",
+      refreshLogin: "Refresh Login",
+      refreshingAccounts: "Refreshing",
+      resumeGroup: "Resume Linked Accounts",
+      selectAll: "Select all filtered results",
+      selectOne: "Select account {{label}}",
+      selectedCount: "{{count}} selected",
+      view: "View Details",
+      viewDetails: "View Details",
+      edit: "Edit Properties",
+      refresh: "Force Refresh",
+      suspend: "Suspend",
+      exportSuccess: "Export successful",
+      refreshTriggered: "Account refresh triggered",
     },
-    billing: {
-        antigravity: {
-            activeGranularity: "Granularity in focus",
-            activeScope: "Current scope",
-            activeTenant: "Active tenant",
-            averageDeduction: "Average deduction",
-            averageDeductionHint: "Estimated from negative ledger deltas across recorded usage events.",
-            balanceHint: "Current tenant credit balance available for future requests.",
-            balanceAfter: "Balance {{value}}",
-            contractHint: "Billing follows the same tenant credits contract used by the main branch.",
-            currentBalanceChip: "Balance snapshot",
-            eventType: {
-                adminRecharge: "Admin recharge",
-                unknown: "Unknown event",
-                usage: "Usage"
-            },
-            ledgerRows: "Ledger rows",
-            ledgerSearch: "Search ledger rows, request IDs, or models…",
-            ledgerSignalsDescription: "Quickly read recharge events, deduction events, ledger row count, and the current balance snapshot.",
-            ledgerSignalsTitle: "Ledger signals",
-            lastUpdated: "Last updated {{time}}",
-            lastUpdatedLabel: "Last updated",
-            loading: "Loading tenant billing…",
-            logCoverage: "Log coverage",
-            logCoverageHint: "Traceable request log rows within the selected time window.",
-            monthConsumedHint: "Aggregate deductions recorded during the active calendar month.",
-            noActivityTitle: "This tenant has no billing activity yet",
-            noActivityDescription: "Tenant {{tenant}} has not recorded any recharge or usage deductions yet, so the trend and ledger remain empty. Once you prepare accounts or send requests, the real billing trail will start to appear here.",
-            noTenant: "No tenant available",
-            noTenantDescription: "Create or sync a tenant first, then this page can show the real credits summary and ledger.",
-            rechargeEvents: "Recharge events",
-            requestCountHint: "Requests included in the current cost summary window.",
-            scopeTitle: "Scope",
-            scopePanelDescription: "Switch tenant scope and reporting granularity to align the cost window you are reviewing.",
-            scopePanelTitle: "Billing scope",
-            tenantCreditEvent: "Tenant credit event",
-            tenantLabel: "Tenant",
-            todayConsumedHint: "Credits consumed by request processing during the current day.",
-            totalCostHint: "Estimated total cost in the selected time window.",
-            usageEvents: "Usage events",
-            avgCostHint: "Average request cost computed from total cost divided by requests."
-        },
-        columns: {
-            balanceAfter: "Balance After Change",
-            billingDetail: "Billing Details",
-            deductedCredits: "Deducted Credits",
-            deductionEvents: "Deduction Events",
-            delta: "Delta Credits",
-            eventType: "Event",
-            model: "Model",
-            periodDay: "Date",
-            periodMonth: "Month",
-            requestType: "Request Type",
-            source: "Source",
-            timestamp: "Time"
-        },
-        exportCsv: "Export CSV",
-        filters: {
-            granularityAriaLabel: "Billing granularity",
-            tenantAriaLabel: "Tenant filter",
-            tenantPlaceholder: "Select tenant"
-        },
-        granularity: {
-            day: "Daily",
-            month: "Monthly"
-        },
-        ledger: {
-            codeLabels: {
-                accountDeactivated: "Account deactivated",
-                billingUsageMissing: "Missing usage settlement fields",
-                failoverExhausted: "Retry/failover exhausted",
-                noUpstreamAccount: "No upstream account available",
-                streamPreludeError: "Stream prelude error",
-                tokenInvalidated: "Token invalidated",
-                transportError: "Upstream network error",
-                upstreamRequestFailed: "Upstream request failed",
-                unknown: "Unknown"
-            },
-            details: {
-                accrued: "Accrued: {{value}} credits",
-                adjustment: "Adjustment: {{value}}",
-                extraCharge: "Extra charge: {{value}} credits",
-                failoverAction: "Action: {{action}}",
-                failure: "Failure: {{summary}}",
-                failurePrefix: "Failure:",
-                serviceTier: "Service Tier: {{tier}}",
-                source: "Source: {{source}}",
-                upstreamStatus: "Upstream {{status}}",
-                tokenSettlement: "Token settlement: input {{input}} + cached {{cached}} + output {{output}}",
-                unitPrice: "Unit price: {{prices}} credits/1M tokens"
-            },
-            empty: "No ledger entries yet.",
-            failoverActions: {
-                crossAccountFailover: "Cross-account failover",
-                retrySameAccount: "Retry same account",
-                returnFailure: "Return failure",
-                unknown: "Unknown"
-            },
-            releaseReasons: {
-                billingSettleFailed: "Billing settlement failed",
-                failoverExhausted: "Retry/failover exhausted",
-                invalidUpstreamUrl: "Invalid upstream URL configuration",
-                noUpstreamAccount: "No upstream account available",
-                streamPreludeError: "Stream prelude error",
-                streamUsageMissing: "Stream usage missing",
-                transportError: "Upstream network error",
-                upstreamRequestFailed: "Upstream request failed",
-                unknown: "Unknown"
-            },
-            showRaw: "Show raw entries",
-            subtitle: "Filtered by current tenant.",
-            title: "Ledger Entries",
-            requestTypes: {
-                nonStream: "Non-stream",
-                stream: "Stream",
-                unknown: "-"
-            },
-            tokenSegments: {
-                cached: "Cached",
-                input: "Input",
-                output: "Output"
-            }
-        },
-        messages: {
-            rechargeFailedTitle: "Recharge failed",
-            rechargeSuccessDetail: "+{{amount}}, balance {{balance}}",
-            rechargeSuccessTitle: "Recharge successful",
-            retryLater: "Please try again later"
-        },
-        recharge: {
-            amountAriaLabel: "Recharge amount",
-            amountPlaceholder: "Recharge credits (microcredits)",
-            reasonAriaLabel: "Recharge reason",
-            reasonPlaceholder: "Recharge reason",
-            submit: "Execute Recharge",
-            subtitle: "Recharge the currently selected tenant.",
-            title: "Admin Recharge"
-        },
-        snapshot: {
-            empty: "No settlement snapshots yet.",
-            subtitle: "Aggregate deduction events by {{granularity}} for month-end settlement and reconciliation.",
-            title: "Settlement Snapshot"
-        },
-        subtitle: "Primary view: credit ledger (actual charges), with tenant-level admin filtering.",
-        summary: {
-            currentBalance: "Current Balance",
-            deductionHint: "Only negative ledger deduction events are counted.",
-            monthConsumed: "This Month Consumption",
-            todayConsumed: "Today's Consumption",
-            unitCredits: "Unit: credits"
-        },
-        title: "Billing Center",
-        trend: {
-            noData: "No trend data yet.",
-            seriesConsumed: "Consumed Credits",
-            subtitle: "Show ledger deductions aggregated by {{granularity}}.",
-            title: "Consumption Trend"
-        }
+    columns: {
+      actions: "Actions",
+      account: "Account",
+      added: "Added",
+      credentialType: "Credential Type",
+      health: "Health Status",
+      id: "Account ID",
+      loginStatus: "Login Status",
+      nextRefresh: "Next Refresh",
+      plan: "Plan",
+      provider: "Provider / Mode",
+      rateLimit: "Rate Limit Usage",
+      binding: "Binding",
+      unbound: "unbound",
     },
-    common: {
-        cancel: "Cancel",
-        close: "Close",
-        collapseSidebar: "Collapse sidebar",
-        confirm: "Confirm",
-        delete: "Delete",
-        edit: "Edit",
-        expand: "Expand",
-        collapse: "Collapse",
-        expandSidebar: "Expand sidebar",
-        loading: "Loading…",
-        logout: "Sign Out",
-        no: "No",
-        noData: "No data yet.",
-        never: "Never",
-        openMenu: "Open menu",
-        closeMenu: "Close menu",
-        refresh: "Refresh",
-        skipToMainContent: "Skip to main content",
-        table: {
-            allItemsSelected: "All items selected",
-            columns: "Columns",
-            clearSelection: "Clear selection",
-            dataTableAria: "Data table",
-            firstPage: "First page",
-            go: "Go",
-            jumpToPage: "Jump to page",
-            lastPage: "Last page",
-            nextPage: "Next page",
-            pageOf: "Page {{page}} / {{total}}",
-            previousPage: "Previous page",
-            range: "{{start}}-{{end}} / {{total}}",
-            rowActions: "Row actions",
-            rowsPerPage: "Rows per page",
-            searchLabel: "Search table",
-            searchPlaceholder: "Search in current list…",
-            selectAll: "Select page",
-            selectFiltered: "Select all filtered results ({{count}})",
-            selectRow: "Select row",
-            selectedCount: "{{count}} selected",
-            statusLabel: "Status",
-            statusFilter: "Status filter",
-            totalItems: "Total {{count}} items"
-        },
-        languages: {
-            english: "English",
-            simplifiedChinese: "Simplified Chinese"
-        },
-        tokenSegments: {
-            cached: "Cached",
-            input: "Input",
-            output: "Output"
-        },
-        units: {
-            millisecondsShort: "{{value}}ms",
-            secondsShort: "{{value}}s"
-        },
-        current: "Current",
-        actions: "Actions",
-        toggleLanguage: "Toggle language",
-        toggleTheme: "Toggle theme",
-        uiPreferences: {
-            title: "Interface Preferences",
-            drawerPlacement: "Drawer placement",
-            drawerPlacementOptions: {
-                bottom: "Bottom",
-                right: "Right",
-                left: "Left",
-                top: "Top"
-            }
-        },
-        yes: "Yes",
-        save: "Save",
-        search: "Search…",
-        routeLoading: "Loading page…",
-        status: {
-            healthy: "Healthy",
-            degraded: "Degraded",
-            offline: "Offline",
-            disabled: "Disabled",
-            available: "Available"
-        }
+    details: {
+      description:
+        "View account profile, OAuth status, limits, and raw payloads.",
+      officialDescription:
+        "Official OpenAI model metadata is read-only here. Manual override pricing can be edited below.",
+      limitsTitle: "Rate Limits",
+      noOauthStatus: "No OAuth status data yet.",
+      noSupportedModels:
+        "No available model list has been captured for this account yet.",
+      oauthNotApplicable:
+        "OAuth details are not available for this account type.",
+      oauthTitle: "OAuth Status",
+      profileTitle: "Account Profile",
+      rawTitle: "Raw Payload",
+      supportedModelsCount: "{{count}} models",
+      tabAria: "Account detail tabs",
+      tabs: {
+        limits: "Limits",
+        oauth: "OAuth",
+        profile: "Profile",
+        raw: "Raw",
+      },
+      sections: {
+        cache: "Rate Limit Cache",
+        connection: "Connection",
+        credentials: "Credentials",
+        identity: "Identity",
+        refresh: "Refresh State",
+        supportedModels: "Available Models",
+        subscription: "Subscription",
+      },
+      fields: {
+        email: "Email",
+        label: "Label",
+        mode: "Mode",
+        accountId: "Account ID",
+        enabled: "Enabled",
+        baseUrl: "Base URL",
+        chatgptAccountId: "ChatGPT Account ID",
+        priority: "Priority",
+        createdAt: "Created At",
+        bearerToken: "Bearer Token",
+        authProvider: "Auth Provider",
+        credentialKind: "Credential Kind",
+        lastRefreshStatus: "Last Refresh Status",
+        effectiveEnabled: "Effective Enabled",
+        chatgptPlanType: "ChatGPT Plan Type",
+        sourceType: "Source Type",
+        tokenFamilyId: "Token Family ID",
+        tokenVersion: "Token Version",
+        tokenExpiresAt: "Token Expires At",
+        nextRefreshAt: "Next Refresh At",
+        lastRefreshAt: "Last Refresh At",
+        refreshReusedDetected: "Refresh Reused Detected",
+        lastRefreshErrorCode: "Last Refresh Error Code",
+        lastRefreshError: "Last Refresh Error",
+        rateLimitsFetchedAt: "Rate Limits Fetched At",
+        rateLimitsExpiresAt: "Rate Limits Expires At",
+        rateLimitsLastErrorCode: "Rate Limits Last Error Code",
+        rateLimitsLastError: "Rate Limits Last Error",
+        rawAccount: "Account Payload",
+        rawOauthStatus: "OAuth Status Payload",
+      },
     },
-    serviceTier: {
-        default: "Default",
-        flex: "Flex",
-        priority: "Priority"
+    filters: {
+      active: "Active",
+      all: "All",
+      credential: "Credential Type",
+      credentialAll: "All Credentials",
+      credentialAt: "AT",
+      credentialRt: "RT",
+      credentialUnknown: "Unknown",
+      disabled: "Disabled",
+      mode: "Mode",
+      modeAll: "All Modes",
+      modeApiKey: "API Key",
+      modeOAuth: "OAuth Session",
+      plan: "Plan Filter",
+      planAll: "All Plans",
+      planUnknown: "Not Reported",
+      total: "Matched {{count}}",
+      suspended: "Suspended",
     },
-    config: {
-        antigravity: {
-            loading: "Loading configuration…",
-            metrics: {
-                authValidation: "Auth validation",
-                controlPlane: "Control plane listen",
-                dataPlane: "Data plane URL",
-                refreshStatus: "Refresh status"
-            },
-            notesEmpty: "No notes added",
-            notesPresent: "Notes available",
-            notesStatus: "Notes status",
-            refreshDisabled: "Auto refresh disabled",
-            refreshEnabled: "Auto refresh enabled",
-            refreshIntervalLabel: "Refresh interval",
-            reset: "Reset",
-            saveFailed: "Failed to save configuration.",
-            section: {
-                connection: "Connection",
-                refresh: "Refresh"
-            },
-            runtimePanelTitle: "Runtime sync state",
-            synced: "In sync with server config",
-            unsavedChanges: "Unsaved changes"
-        },
-        controlPlane: {
-            authValidateUrl: "Auth Validation URL",
-            dataPlaneUrl: "Forwarding Service URL",
-            desc: "Configure how control plane talks to forwarding services",
-            listen: "Control Plane Listen Address (read-only)",
-            title: "Control Plane Connection"
-        },
-        refreshSettings: {
-            desc: "Control the switch and interval for automatic login credential refresh",
-            enableDesc: "If disabled, expiring access credentials will no longer refresh automatically.",
-            enableLabel: "Enable auto refresh",
-            intervalSec: "Refresh interval (seconds)",
-            notes: "Notes",
-            title: "Auto Refresh Settings"
-        },
-        themeLab: {
-            title: "Theme Lab",
-            description: "Bring the default shell closer to native HeroUI Pro styling and fine-tune it in this browser.",
-            localOnly: "Local to this browser",
-            currentMode: "Current mode: {{value}}",
-            resolvedMode: "Resolved mode: {{value}}",
-            modeTitle: "Theme mode",
-            modeDescription: "Switch between light, dark, or system. This drives the global HeroUI theme instead of page-local styling.",
-            modeLightHint: "Always use the HeroUI light theme.",
-            modeDarkHint: "Always use the HeroUI dark theme.",
-            modeSystemHint: "Follow the system appearance preference automatically.",
-            radiusTitle: "Shape radius",
-            radiusDescription: "Adjust the curvature used by cards, inputs, and panel surfaces.",
-            densityTitle: "Page density",
-            densityDescription: "Adjust global spacing and shell breathing room across the workbench.",
-            footer: "These settings apply instantly to the current admin console and persist in local browser storage. Runtime config save/reset does not modify them.",
-            reset: "Restore HeroUI Pro defaults",
-            previewTitle: "Live preview",
-            previewDescription: "Use a standard surface, form row, and action cluster to quickly inspect the current baseline.",
-            previewMetric: "Preview metric",
-            previewMetricHint: "Check surface hierarchy, text weight, borders, and shadow balance.",
-            previewInputLabel: "Preview input",
-            previewInputValue: "The current theme is already affecting this field.",
-            previewPrimaryAction: "Primary action",
-            previewSecondaryAction: "Secondary action",
-            previewChipHealthy: "Healthy",
-            previewChipAttention: "Attention",
-            previewResolvedChip: "Applied: {{value}}",
-            previewChipRadius: "Radius: {{value}}",
-            previewChipDensity: "Density: {{value}}",
-            density: {
-                compact: "Compact",
-                comfortable: "Comfortable"
-            },
-            radius: {
-                compact: "Crisp",
-                default: "Native default",
-                relaxed: "Relaxed"
-            }
-        },
-        runtimeHint: {
-            desc: "Changes take effect immediately. After restart, environment variables and config.toml still take priority.",
-            title: "Runtime Config Notice"
-        },
-        save: "Save Changes",
-        subtitle: "Runtime settings and global variables",
-        success: "Configuration saved successfully.",
-        title: "Configuration",
-        reload: {
-            title: "Runtime Reload Enabled",
-            desc: "Changes to caching and timeouts will be synced globally and take effect immediately without requiring service restarts."
-        },
-        system: {
-            title: "System Strategy",
-            desc: "Configure global operations context.",
-            maintenance: "Maintenance Mode",
-            maintenanceDesc: "Reject all new requests globally holding 503.",
-            logRetention: "Log Retention (Days)",
-            logRetentionDesc: "Rolling window for clickhouse trace storage."
-        },
-        network: {
-            title: "Network Profiling",
-            desc: "Define global ratelimits to prevent upstream banning.",
-            tpm: "Global Tokens Per Min",
-            tpmDesc: "Maximum simultaneous requests to AI endpoints.",
-            scaling: "Cloud Resource Scaling",
-            scalingDesc: "Allow dynamic node allocation bounds."
-        }
+    messages: {
+      batchAllFailed: "{{action}} failed",
+      batchAllSuccess: "{{action}} completed",
+      batchPartialFailed: "{{failed}} operations failed{{error}}",
+      batchPartialFailedTitle: "{{action}} partially failed",
+      batchSuccessCount: "{{count}} succeeded",
+      batchUnknownError: "Batch operation failed",
+      deleteFailed: "Failed to delete account",
+      deleteSuccess: "Account deleted",
+      disableFailed: "Failed to disable account",
+      disableSuccess: "Account disabled",
+      enableFailed: "Failed to enable account",
+      enableSuccess: "Account enabled",
+      exportSuccess: "Export successful",
+      pauseFamilyFailed: "Failed to pause linked accounts",
+      pauseFamilySuccess: "Linked accounts paused",
+      rateLimitPollingTimeout: "Rate-limit refresh job polling timed out.",
+      rateLimitRefreshFailedStatus:
+        "Rate-limit refresh job failed, status={{status}}",
+      rateLimitRefreshFailedSummary:
+        "Rate-limit refresh job failed: {{summary}}",
+      batchRefreshStarted: "Started login refresh for {{count}} accounts",
+      refreshFailed: "Login refresh failed",
+      refreshFailedStatus: "Login refresh failed, status={{status}}",
+      refreshFailedSummary: "Login refresh failed: {{summary}}",
+      refreshPollingTimeout: "Login refresh job polling timed out.",
+      refreshJobId: "Job ID: {{jobId}}",
+      refreshJobSummary: "Job ID: {{jobId}} · {{processed}}/{{total}}",
+      refreshListFailed: "Failed to refresh usage",
+      refreshListSuccess: "Usage refreshed",
+      refreshSuccess: "Login refresh completed",
+      requestFailed: "Request failed. Please try again later.",
+      resumeFamilyFailed: "Failed to resume linked accounts",
+      resumeFamilySuccess: "Linked accounts resumed",
+      toggleUnsupported:
+        "Current backend does not support account enable/disable. Please upgrade control-plane.",
+      refreshTriggered: "Login refresh started",
     },
-    dashboard: {
-        actions: {
-            openMenu: "Open actions menu",
-            viewAccounts: "View accounts",
-            viewBilling: "View billing",
-            viewImports: "View imports",
-            viewLogs: "View request logs"
-        },
-        antigravity: {
-            activeAccounts: "{{count}} active",
-            last24Hours: "Last 24 hours",
-            loading: "Loading dashboard data…",
-            signal: "Operational signal"
-        },
-        alerts: {
-            checkRoutes: "Check Routes",
-            columns: {
-                action: "Suggested Action",
-                message: "Message",
-                severity: "Severity",
-                source: "Source",
-                status: "Status",
-                time: "Time"
-            },
-            empty: "All systems looking good.",
-            emptyDescription: "No active infrastructure or usage-pipeline alerts are visible in the current window.",
-            resolve: "Mark Resolved",
-            searchPlaceholder: "Search alerts…",
-            subtitle: "System states needing review",
-            title: "Requires Attention",
-            usageRepoUnavailable: "Usage analytics storage is unavailable",
-            dataPlaneDisconnected: "Data plane disconnected",
-            now: "Now",
-            severity: {
-                critical: "Critical",
-                warning: "Warning",
-                info: "Info"
-            },
-            source: {
-                data_plane: "Data Plane",
-                usage_repo: "Usage Repo"
-            },
-            status: {
-                open: "Open",
-                resolved: "Resolved"
-            }
-        },
-        currentScope: "Current: {{scope}}",
-        filters: {
-            apiKeyAriaLabel: "API key filter",
-            apiKeyPlaceholder: "Select API key",
-            description: "Start broad, then narrow to one tenant or API key when a spike, alert, or cost change needs explanation.",
-            eyebrow: "Context",
-            range: {
-                last24Hours: "Last 24 hours",
-                last30Days: "Last 30 days",
-                last7Days: "Last 7 days"
-            },
-            rangeAriaLabel: "Time range",
-            scopeAriaLabel: "Scope filter",
-            tenantAriaLabel: "Tenant filter",
-            tenantPlaceholder: "Select tenant",
-            title: "Scope and filters"
-        },
-        hero: {
-            eyebrow: "Operations overview"
-        },
-        meta: {
-            autoRefresh: "Auto-refresh every 30 seconds"
-        },
-        kpi: {
-            activeApiKeysInRange: "Active API keys (selected range)",
-            accounts: "Accounts",
-            accountsDesc: "Admin-only operational metric",
-            apiKeys: "API keys",
-            apiKeysDesc: "Configured keys in system",
-            avgFirstTokenSpeed: "Average first-token speed",
-            avgFirstTokenSpeedDesc: "TTFT (streaming exact / non-stream approximate)",
-            globalScope: "Global scope",
-            rpm: "RPM",
-            rpmDesc: "Requests per minute",
-            requests: {
-                apiKey: "Current API key requests (selected range)",
-                global: "Total account requests (selected range)",
-                tenant: "Current tenant API key requests (selected range)"
-            },
-            tenants: "Tenants",
-            tenantsDesc: "Admin-only operational metric",
-            totalRequests: "Total requests",
-            totalTokens: "Token consumption total",
-            totalTokensDesc: "Input + cached + output + reasoning",
-            tpm: "TPM",
-            tpmDesc: "Tokens per minute",
-            running: "Running",
-            totalConfigured: "Total Configured",
-            uptime: "Uptime 99.99%",
-            reqs: "Total Requests",
-            reqsDesc: "+12.5% from last month",
-            failed: "Failed Requests",
-            failedDesc: "+180 today",
-            avgLatency: "Avg Latency",
-            avgLatencyDesc: "-5ms from last month",
-            activeTokens: "Active Tokens",
-            activeTokensDesc: "+24 new tokens mapped",
-            oauthLabel: "OAuth"
-        },
-        modelDistribution: {
-            a11y: {
-                model: "Model",
-                summary: "Model distribution includes {{count}} rows sorted by {{mode}}. Leading model: {{top}}. Accessible data table follows.",
-                summaryEmpty: "No model distribution data is available for the current selection.",
-                tableLabel: "Model distribution data table"
-            },
-            description: "Top models by request count or token usage.",
-            empty: "No model distribution data yet",
-            modeRequests: "By requests",
-            modeTokens: "By tokens",
-            other: "Other",
-            title: "Model request distribution"
-        },
-        overview: {
-            attentionNeeded: "Action recommended",
-            autoRefresh: "Auto-refresh every 30 seconds",
-            degraded: "Degraded",
-            description: "Read this strip first to see whether alerts, the usage pipeline, or managed inventory needs attention.",
-            eyebrow: "Pulse",
-            inventory: "Available upstream inventory",
-            managedScope: "Managed scope right now",
-            openAlerts: "Open alerts",
-            stable: "No active incidents",
-            title: "Operational pulse",
-            usagePipeline: "Usage pipeline"
-        },
-        poolOverview: {
-            title: "Account pool overview",
-            description: "See how inventory, routable capacity, cooling accounts, and pending delete records are distributed.",
-            totalLabel: "Total",
-            inventory: "Inventory",
-            inventoryDesc: "Stored in the pool but not yet in the routable set.",
-            routable: "Routable",
-            routableDesc: "Currently healthy enough to serve routing traffic.",
-            cooling: "Cooling",
-            coolingDesc: "Waiting for quota recovery or reprobe before routing again.",
-            pendingDelete: "Pending delete",
-            pendingDeleteDesc: "Already moved into the pending delete lifecycle.",
-            shareOfPool: "Share of pool"
-        },
-        healthSignals: {
-            title: "Health signals",
-            description: "Separate healthy capacity from quota, transient, fatal, and admin-driven states.",
-            healthy: "Healthy",
-            healthyDesc: "Accounts currently carrying healthy runtime signals.",
-            quota: "Quota",
-            quotaDesc: "Accounts cooling because of rate limits or quota exhaustion.",
-            fatal: "Fatal",
-            fatalDesc: "Signals that usually require restore or delete decisions.",
-            transient: "Transient",
-            transientDesc: "Temporary failures that can recover after reprobe.",
-            admin: "Admin",
-            adminDesc: "States driven by operator actions or admin decisions."
-        },
-        scope: {
-            apiKey: "API Key View",
-            global: "Global View",
-            tenant: "Tenant View"
-        },
-        subtitle: "Monitor gateway health, usage shifts, and managed inventory from one operating view.",
-        table: {
-            apiKey: "API Key",
-            requests: "Requests"
-        },
-        tokenComponents: {
-            cached: "Cached",
-            input: "Input",
-            output: "Output",
-            reasoning: "Reasoning"
-        },
-        tokenTrend: {
-            a11y: {
-                summary: "Hourly token trend covering {{count}} time points from {{start}} to {{end}}. Accessible data table follows.",
-                summaryEmpty: "No token trend data is available for the current selection.",
-                tableLabel: "Token usage trend data table",
-                timestamp: "Timestamp"
-            },
-            description: "Compare input, cached, output, and reasoning tokens over time. Turn components on or off to isolate where spend is moving.",
-            empty: "No token trend data yet",
-            title: "Token usage trend"
-        },
-        title: "Overview",
-        topApiKeys: {
-            empty: "No ranking data yet",
-            scopeDescription: "Scope: {{scope}} / selected time window",
-            title: "Top API Keys"
-        },
-        trafficChart: {
-            scope: {
-                apiKey: "Scope: current API key requests",
-                global: "Scope: global account requests + global tenant API key requests",
-                tenant: "Scope: current tenant API key requests"
-            },
-            series: {
-                accountRequests: "Account requests",
-                tenantApiKeyRequests: "Tenant API key requests",
-                tenantApiKeyRequestsSingle: "Tenant API key requests"
-            },
-            title: "Traffic Overview",
-            subtitle: "Hourly proxy volume past 24h",
-            success: "Successful",
-            blocked: "Blocked"
-        }
+    rateLimitRefreshJobStatus: {
+      queued: "Queued",
+      running: "Running",
+      completed: "Completed",
+      failed: "Failed",
+      cancelled: "Cancelled",
+      unknown: "Unknown",
     },
-    importJobs: {
-        actions: {
-            cancel: "Cancel",
-            cancelJob: "Cancel job",
-            confirmCancelJob: "Cancel this import job?",
-            exportFailed: "Export failed items",
-            refreshItems: "Refresh items",
-            remove: "Remove",
-            retryFailed: "Retry failed",
-            removeFromList: "Remove from list"
-        },
-        antigravity: {
-            loading: "Loading import jobs…",
-            intakeTitle: "Import intake",
-            intakeDescription: "Choose the credential mode here and launch the next file-import batch.",
-            intakeHint: "After you upload multiple .json/.jsonl files, the backend merges them into one import job and keeps the state visible in the queue on the left.",
-            newImport: "New Import",
-            pause: "Pause",
-            recentHint: "Monitor the latest tracked import jobs, resume paused work, and retry failures from one queue.",
-            resume: "Resume",
-            status: {
-                paused: "Paused"
-            }
-        },
-        admission: {
-            ready: "Ready",
-            readyDesc: "Admission passed and the record is ready to move toward runtime.",
-            needsRefresh: "Needs refresh",
-            needsRefreshDesc: "Accepted, but a refresh is still required before runtime activation.",
-            noQuota: "No quota",
-            noQuotaDesc: "Admission already detected quota or rate-limit blockers.",
-            failed: "Admission failed",
-            failedDesc: "Admission or activation has already ended in terminal failure.",
-            status: {
-                ready: "Ready",
-                needsRefresh: "Needs refresh",
-                noQuota: "No quota",
-                failed: "Failed",
-                queued: "Queued",
-                unknown: "Unknown"
-            },
-            failureStage: {
-                admissionProbe: "Admission probe",
-                activationRefresh: "Activation refresh",
-                activationRateLimits: "Activation rate-limit check",
-                runtimeRefresh: "Runtime refresh"
-            }
-        },
-        detail: {
-            columns: {
-                admission: "Admission",
-                error: "Error",
-                failure: "Failure stage",
-                label: "Label",
-                line: "Line",
-                message: "Outcome",
-                retry: "Retry",
-                source: "Source",
-                status: "Status"
-            },
-            filterLabel: "Status filter",
-            description: "Review admission counts and row-level outcomes from the selected import job.",
-            filters: {
-                admission: "Admission filter",
-                allAdmissions: "All admissions",
-                allStatuses: "All import states",
-                status: "Import status"
-            },
-            itemsEmpty: "No matching job items.",
-            itemsDescription: "Inspect each imported record by admission result, failure stage, and retryability.",
-            itemsLoading: "Loading job items…",
-            itemsTitle: "Imported item audit",
-            jobIdLabel: "Job ID: {{jobId}}",
-            loadMore: "Load more",
-            loadedCount: "Loaded {{count}} records",
-            loadingMore: "Loading…",
-            retryQuery: "Retry query",
-            searchPlaceholderModern: "Search by label / email / error…",
-            selectHint: "Select a job to view details.",
-            summaryLoading: "Loading job summary…",
-            title: "Job Details",
-            unreadable: "This job cannot be read (possibly expired or invalid ID).",
-            searchPlaceholder: "Search by label / email / error"
-        },
-        dropzone: {
-            acceptsNew: "Upload multiple .json/.jsonl files in one batch. The backend will merge them into a single job.",
-            creatingTitle: "Creating import job…",
-            selectFiles: "Select Files",
-            titleNew: "Drop import files here",
-            uploading: "Uploading…",
-            wait: "Please wait while the file is transmitted securely.",
-            title: "Click to Upload or Drag File Here",
-            accepts: "Accepts <code>.csv</code> or line-separated <code>.txt</code> format. Max 50,000 rows per file.",
-            browse: "Browse Files",
-            creatingDesc: "Please wait. The new job will appear in the queue automatically."
-        },
-        error: "Upload Failed",
-        manual: {
-            add: "Add",
-            placeholderModern: "Paste job_id…",
-            title: "Manual job tracking",
-            placeholder: "Paste job_id"
-        },
-        messages: {
-            jobNotFound: "Job not found or inaccessible",
-            queryFailed: "Query Failed",
-            unknownError: "unknown error",
-            uploadFailedTitle: "Import failed"
-        },
-        errors: {
-            importFailed: "Import failed",
-            invalidRecord: "Invalid record",
-            invalidRefreshToken: "Invalid refresh token",
-            missingAccessToken: "Missing access_token",
-            missingCredentials: "Missing credentials",
-            missingRefreshToken: "Missing refresh_token",
-            oauthProviderNotConfigured: "OAuth provider not configured",
-            rateLimited: "Rate limited",
-            refreshTokenReused: "Refresh token already used",
-            unknown: "Unknown import error",
-            upstreamNetworkError: "Upstream network error",
-            upstreamUnavailable: "Upstream service unavailable"
-        },
-        credentialMode: {
-            title: "Credential Mode",
-            description: "Choose whether this batch imports rotatable refresh_token accounts or one-time access_token accounts. OAuth login import stays unchanged.",
-            refreshToken: "Import RT",
-            refreshTokenHint: "Use refresh_token when you want managed refresh and token rotation.",
-            accessToken: "Import AK",
-            accessTokenHint: "Use access_token when you want one-time imports without refresh rotation."
-        },
-        metrics: {
-            created: "Created",
-            createdDesc: "New account-pool records created from this batch.",
-            failed: "Failed",
-            failedDesc: "Items that ultimately ended in failed status.",
-            processed: "Processed",
-            status: "Status",
-            throughput: "Throughput",
-            throughputDesc: "Approximate imports per minute while the job is running.",
-            total: "Total",
-            updated: "Existing / Updated",
-            updatedDesc: "Existing records that were refreshed or merged."
-        },
-        precheck: {
-            createdNotice: "Import job created: {{id}}",
-            defaultReady: "File format and size checks passed.",
-            duplicateBatch: "These files are already in the staging list.",
-            duplicateName: "Duplicate filename detected. Review source before importing.",
-            emptyPreview: "No valid data row found in preview. File may be empty.",
-            firstLineInvalid: "JSONL first line is invalid JSON. Import may fail.",
-            firstLineObject: "First line is not a JSON object. Import may fail.",
-            firstLineValid: "JSONL first-line structure check passed.",
-            jsonEmpty: "JSON file appears empty.",
-            jsonInvalid: "JSON file is invalid. Import may fail.",
-            jsonValid: "JSON structure check passed.",
-            noneImportable: "No importable files. Resolve blocked files first.",
-            skipLargeJson: "Large file detected. Local JSON parse skipped; backend will validate.",
-            status: {
-                invalid: "Blocked",
-                ready: "Ready",
-                warning: "Needs Review"
-            }
-        },
-        progress: {
-            done: "Completed",
-            etaLabel: "Estimated Remaining: ",
-            etaMinutes: "About {{count}} minutes",
-            jobIdLabel: "Job ID: {{jobId}}",
-            lessThanMinute: "Less than 1 minute",
-            noJobSelected: "Create or select an import job to see live progress here.",
-            title: "Live Import Progress",
-            topErrors: "Top Error Breakdown"
-        },
-        queue: {
-            columns: {
-                jobId: "Job ID"
-            },
-            description: "The browser keeps recent tracked jobs here so you can switch between batches quickly.",
-            descRecent: "The queue auto-polls job status. Click a job to inspect items and errors.",
-            emptyRecent: "No tracked jobs yet. Upload files or add a job_id manually.",
-            titleRecent: "Recent import jobs",
-            tracked: "tracked locally",
-            title: "Recent Tracking Jobs",
-            empty: "No jobs uploaded in this session yet.",
-            card: {
-                processed: "processed",
-                new: "new",
-                errors: "errors"
-            }
-        },
-        status: {
-            all: "All",
-            cancelled: "Cancelled",
-            completed: "Completed",
-            created: "Created",
-            failed: "Failed",
-            pending: "Pending",
-            paused: "Paused",
-            processing: "Processing",
-            queued: "Queued",
-            running: "Running",
-            skipped: "Skipped",
-            updated: "Existing / Updated"
-        },
-        subtitleModern: "Add files in bulk, review checks, then import in one click with live progress and error details.",
-        template: {
-            downloadJsonl: "Download Template",
-            title: "Import Template",
-            desc: "Download our recommended template to ensure columns strictly map to system requirements.",
-            download: "Download CSV Template",
-            titleNew: "Import Template",
-            descNew: "Download the JSONL template and fill in refresh_token or access_token based on the selected credential mode."
-        },
-        title: "Batch Import Jobs",
-        description: "Upload credential files, monitor admission outcomes, and audit every imported record from one workbench.",
-        validation: {
-            fileTooLarge: "File {{name}} exceeds 20MB. Please split and retry.",
-            unsupportedFormat: "File {{name}} is unsupported. Only .json / .jsonl are allowed.",
-            format: "Only .csv or .txt files are allowed.",
-            size: "File is too large. Maximum size is 10MB."
-        },
-        workspace: {
-            clearQueue: "Clear List",
-            columns: {
-                action: "Action",
-                check: "Precheck",
-                file: "File",
-                size: "Size",
-                status: "Status"
-            },
-            confirmClear: "Clear the current staged file list?",
-            desc: "Drag & drop or select files in bulk, run checks, then click Start Import.",
-            empty: "No staged files yet. Drag files into the area above.",
-            invalidFiles: "Blocked {{count}}",
-            invalidHint: "{{count}} files are blocked and will be excluded when importing.",
-            moreChecks: "more checks",
-            readyFiles: "Ready {{count}}",
-            readyHint: "Precheck complete. Ready to start importing.",
-            startImportWithCount: "Start Import ({{count}} files)",
-            stepCheck: "Run Checks",
-            stepCheckDesc: "Validate format, size, and duplicate names",
-            stepImport: "Start Import",
-            stepImportDesc: "Create a job and watch live progress",
-            stepSelect: "Add Files",
-            title: "File Import Workspace",
-            totalFiles: "{{count}} files",
-            totalSize: "Total {{size}}",
-            warningFiles: "Needs Review {{count}}"
-        },
-        subtitle: "Upload account secrets securely in strictly formatted CSV/TXT files."
+    mode: {
+      apiKey: "API Key",
+      chatgptSession: "ChatGPT OAuth",
+      codexOauth: "Codex OAuth",
+      unknown: "Other",
     },
-    oauthImport: {
-        title: "OAuth Login Import",
-        subtitle: "Sign in with Codex OAuth and import the logged-in account directly into the pool.",
-        wizard: {
-            label: "Import wizard",
-            description: "Walk through OAuth sign-in, callback fallback, and result review so the account lands in the pool cleanly.",
-            progress: "Flow progress",
-            current: "Current",
-            completed: "Done",
-            noSession: "There is no login session yet. Start from step one to open the OAuth flow.",
-            setupHint: "Creating a session immediately opens the OAuth window and starts polling for callback delivery."
-        },
-        start: {
-            title: "Start Codex OAuth Login",
-            description: "Create a login session, complete OAuth authorization, then auto-import the account."
-        },
-        authorize: {
-            title: "Complete OAuth authorization",
-            description: "Open the authorization window, finish sign-in, and wait for the callback.",
-            callbackLabel: "Callback URL",
-            helperTitle: "What to watch",
-            helperDescription: "If the popup is blocked or the automatic callback never lands, submit the manual callback URL from the next panel."
-        },
-        form: {
-            label: "Account Label (Optional)",
-            labelPlaceholder: "Leave empty to auto-generate from email/account ID",
-            baseUrl: "Base URL",
-            priority: "Priority",
-            enabled: "Enable account after import"
-        },
-        monitor: {
-            title: "Watch token exchange and import",
-            description: "The backend is exchanging credentials and importing the account into the pool.",
-            activeLabel: "Import is still running",
-            activeHint: "Stay on this page or check the account pool later. The status card on the left keeps refreshing automatically."
-        },
-        actions: {
-            startLogin: "Start OAuth Login",
-            reopenAuth: "Open OAuth Window Again",
-            goAccounts: "Go to Accounts",
-            submitCallback: "Submit Callback URL"
-        },
-        status: {
-            label: "Session Status",
-            idle: "Not started",
-            waiting_callback: "Waiting for callback",
-            exchanging: "Exchanging token",
-            importing: "Importing account",
-            completed: "Completed",
-            failed: "Failed",
-            expired: "Expired",
-            sessionId: "Session ID: {{id}}",
-            callbackUrl: "Callback URL: {{url}}",
-            expiresAt: "Expires at: {{time}}"
-        },
-        error: {
-            failed: "OAuth import failed."
-        },
-        result: {
-            success: "Account imported successfully.",
-            accountId: "Account ID: {{id}}",
-            accountLabel: "Label: {{label}}",
-            email: "Email: {{email}}",
-            reviewTitle: "Review import result",
-            reviewDescription: "Confirm whether the account was created, updated, or needs another import attempt.",
-            chatgptAccountId: "ChatGPT account ID: {{id}}",
-            chatgptPlanType: "Plan type: {{plan}}",
-            pending: "The flow reached the final step, but the backend result payload has not finished arriving yet.",
-            created: "Created",
-            updated: "Already exists"
-        },
-        manual: {
-            title: "Manual Callback Fallback",
-            description: "If automatic callback is unreachable, paste the full redirect URL here.",
-            placeholder: "Paste full callback URL containing code/state…",
-            hint: "Use this only when automatic callback fails."
-        },
-        notifications: {
-            popupBlockedTitle: "Popup blocked",
-            popupBlockedDescription: "Allow popups and reopen the OAuth window.",
-            sessionCreatedTitle: "Session created",
-            sessionCreatedDescription: "OAuth window opened. Complete sign-in to continue.",
-            sessionCreateFailedTitle: "Failed to create session",
-            manualSubmitTitle: "Callback submitted",
-            manualSubmitSuccess: "Manual callback completed and account imported.",
-            manualSubmitAccepted: "Manual callback accepted. Session is processing.",
-            manualSubmitFailedTitle: "Manual callback failed",
-            unknownError: "Unexpected error. Please try again."
-        }
+    nextRefresh: {
+      none: "Not scheduled",
     },
-    login: {
-        brand: {
-            badge: "Admin Workspace Access",
-            points: {
-                audit: "Every sign-in, route change, and high-risk action can be traced later by request ID.",
-                resilience: "Routing stays stable while you review tenants, keys, usage, and billing.",
-                security: "Tenant boundaries and credential controls stay enforced by default."
-            },
-            subtitle: "A controlled entry point for daily system operations.",
-            title: "Sign in to run Codex Pool with confidence"
-        },
-        messages: {
-            failed: "Sign in failed. Please check username and password.",
-            invalidCredentials: "Incorrect username or password. Please try again.",
-            sessionExpired: "Your session expired. Please sign in again."
-        },
-        password: "Password",
-        hidePassword: "Hide password",
-        showPassword: "Show password",
-        passwordPlaceholder: "Enter admin password",
-        securityHint: "Repeated sign-in failures are recorded in audit logs for later review.",
-        submit: "Sign In",
-        subtitle: "OpenAI-compatible proxy · account pool management",
-        title: "Sign in",
-        username: "Username",
-        usernamePlaceholder: "Enter admin username"
+    oauth: {
+      kindShort: {
+        oneTime: "AT",
+        refreshRotatable: "RT",
+        unknown: "Unknown",
+      },
+      loading: "Loading…",
+      notApplicable: "-",
+      provider: {
+        legacyBearer: "Legacy bearer token",
+        refreshToken: "Refresh token",
+        unknown: "Unknown provider",
+      },
+      sourceType: {
+        codex: "Codex",
+        unknown: "Unknown source",
+      },
+      status: {
+        failed: "Failed",
+        never: "Not refreshed",
+        ok: "Healthy",
+      },
+      unknownError: "unknown",
+      versionPrefix: "v",
+      planPrefix: "Plan: ",
+      kind: {
+        refreshRotatable: "Refresh-token account",
+        oneTime: "One-time access-token account",
+        unknown: "Unknown credential type",
+      },
     },
-    logs: {
-        audit: {
-            actionValues: {
-                adminOperation: "Admin operation",
-                authOperation: "Auth operation",
-                requestOperation: "Request operation",
-                tenantOperation: "Tenant operation",
-                unknown: "Unknown action"
-            },
-            actorTypes: {
-                adminUser: "Admin user",
-                apiKey: "API key",
-                system: "System",
-                tenantUser: "Tenant user",
-                unknown: "Unknown actor"
-            },
-            columns: {
-                action: "Action",
-                actor: "Actor",
-                createdAt: "Time",
-                reason: "Reason",
-                result: "Result",
-                target: "Target",
-                tenant: "Tenant"
-            },
-            description: "Scope: Control Plane audit events (role / action / result / target / payload).",
-            empty: "No audit log data available",
-            filters: {
-                actionPlaceholder: "Action",
-                actorIdPlaceholder: "Actor ID",
-                actorTypePlaceholder: "Actor type",
-                keywordPlaceholder: "Keyword (reason / payload)",
-                resultStatusPlaceholder: "Result status",
-                actionAriaLabel: "Action filter",
-                actorIdAriaLabel: "Actor ID filter",
-                actorTypeAriaLabel: "Actor type filter",
-                keywordAriaLabel: "Keyword filter",
-                rangeAriaLabel: "Time range",
-                resultStatusAriaLabel: "Result status filter",
-                tenantAriaLabel: "Tenant filter"
-            },
-            resultStatuses: {
-                denied: "Denied",
-                failed: "Failed",
-                ok: "Success",
-                unknown: "Unknown result"
-            },
-            title: "Audit Logs"
-        },
-        columns: {
-            level: "Level",
-            message: "Message",
-            service: "Service Node",
-            timestamp: "Timestamp"
-        },
-        export: "Export logs",
-        filters: {
-            allTenants: "All tenants"
-        },
-        focus: "Focus:",
-        levels: {
-            all: "All Levels",
-            error: "Error",
-            info: "Info",
-            warn: "Warning"
-        },
-        messages: {
-            configUpdated: "Updated runtime config snapshot in memory",
-            empty: "No message details",
-            keyCreated: "Created API key {{keyId}}",
-            keyPatched: "Set API key {{keyId}} enabled={{enabled}}",
-            modelsLoaded: "Loaded models from upstream account {{label}}",
-            modelsProbed: "Model probe ({{trigger}}): tested {{tested}} models via {{label}} (available {{available}}, unavailable {{unavailable}})",
-            proxiesTested: "Tested {{count}} proxy nodes",
-            systemState: "Queried system state: {{count}} accounts",
-            unmappedAction: "{{action}} · {{message}}"
-        },
-        range: {
-            last24Hours: "Last 24 hours",
-            last30Days: "Last 30 days",
-            last7Days: "Last 7 days"
-        },
-        request: {
-            columns: {
-                apiKey: "API Key",
-                createdAt: "Time",
-                errorCode: "Error",
-                latency: "Latency",
-                path: "Path",
-                requestId: "Request ID",
-                serviceTier: "Tier",
-                status: "Status",
-                tenant: "Tenant"
-            },
-            description: "Scope: Raw Data Plane request events (status / latency / path / tenant / API key / request ID).",
-            empty: "No request log data available",
-            filters: {
-                apiKeyIdPlaceholder: "API Key ID",
-                keywordPlaceholder: "Keyword (path / error / model)",
-                requestIdPlaceholder: "Request ID",
-                statusCodePlaceholder: "Status code (e.g. 500)",
-                apiKeyAriaLabel: "API key filter",
-                keywordAriaLabel: "Keyword filter",
-                rangeAriaLabel: "Time range",
-                requestIdAriaLabel: "Request ID filter",
-                statusCodeAriaLabel: "Status code filter",
-                tenantAriaLabel: "Tenant filter"
-            },
-            title: "Request Logs"
-        },
-        events: {
-            title: "Unified Event Stream",
-            description: "Inspect request, account pool, patrol, import, infrastructure, and admin action events from one workbench.",
-            meta: "Start from request_id, then drill into correlated events and raw payloads.",
-            summaryTitle: "Current signal window",
-            summaryDescription: "A quick read on how much operational noise is moving through the control plane right now.",
-            tableTitle: "Event stream",
-            tableDescription: "Filter by category and severity, then inspect payloads and correlation chains.",
-            searchPlaceholder: "Search event, request ID, account, reason…",
-            empty: "No events in the selected window.",
-            categories: {
-                request: "Request",
-                accountPool: "Account pool",
-                patrol: "Patrol",
-                import: "Import",
-                infra: "Infrastructure",
-                adminAction: "Admin action",
-                unknown: "Unknown"
-            },
-            severities: {
-                debug: "Debug",
-                info: "Info",
-                warn: "Warning",
-                error: "Error",
-                unknown: "Unknown"
-            },
-            metrics: {
-                total: "Events",
-                totalDesc: "Unified request, account pool, patrol, import, infrastructure, and admin events.",
-                error: "Errors",
-                errorDesc: "Severity=error entries in the current window.",
-                accountPool: "Account pool",
-                accountPoolDesc: "State transitions, restores, deletes, and operator-side actions.",
-                request: "Requests",
-                requestDesc: "Events currently classified as request within the selected window."
-            },
-            columns: {
-                time: "Time",
-                category: "Category",
-                severity: "Severity",
-                event: "Event",
-                context: "Context"
-            },
-            actions: {
-                inspect: "Inspect"
-            },
-            filters: {
-                category: "Category",
-                range: "Time range",
-                severity: "Severity",
-                allCategories: "All categories",
-                allSeverities: "All severities"
-            },
-            fields: {
-                requestId: "Request ID",
-                account: "Account",
-                reasonCode: "Reason code",
-                time: "Time",
-                path: "Path",
-                method: "Method",
-                jobId: "Job ID",
-                model: "Model",
-                tenant: "Tenant",
-                authProvider: "Auth provider",
-                reasonClass: "Reason class",
-                routeDecision: "Routing decision",
-                nextActionAt: "Next action",
-                statusCode: "Status code",
-                upstreamStatusCode: "Upstream status code",
-                latency: "Latency"
-            },
-            eventTypes: {
-                requestReceived: "Request received",
-                requestCompleted: "Request completed",
-                requestFailed: "Request failed",
-                routingCandidateSelected: "Routing candidate selected",
-                sameAccountRetry: "Same-account retry",
-                crossAccountFailover: "Cross-account failover",
-                continuationCursorSaved: "Continuation cursor saved",
-                continuationCursorRestored: "Continuation cursor restored",
-                wsHttpFallback: "WebSocket fell back to HTTP",
-                proxySelectionFailed: "Proxy selection failed",
-                probeSucceeded: "Probe succeeded",
-                activePatrolBatchCompleted: "Active patrol batch completed",
-                rateLimitRefreshBatchCompleted: "Rate-limit refresh batch completed",
-                pendingDeleteBatchCompleted: "Pending-delete batch completed",
-                accountPoolStateTransition: "Account pool state changed",
-                accountDeleted: "Account deleted",
-                importJobCreated: "Import job created",
-                importJobCompleted: "Import job completed",
-                importJobFailed: "Import job failed",
-                upstreamEvent: "Upstream event",
-                unknown: "Unknown event"
-            },
-            reasonCodes: {
-                requestReceived: "Request entered the system",
-                routingCandidateSelected: "Routing candidate selected",
-                rateLimited: "Rate limited",
-                transportError: "Transport error",
-                proxyUnavailable: "Proxy unavailable",
-                continuationCursorRestored: "Continuation cursor restored",
-                rateLimitRefreshBatchCompleted: "Rate-limit refresh batch completed",
-                pendingDeleteBatchCompleted: "Pending-delete batch completed",
-                accountDeactivated: "Account deactivated",
-                previousResponseNotFound: "Previous response not found",
-                upstreamRequestFailed: "Upstream request failed",
-                invalidRefreshToken: "Invalid refresh token",
-                refreshTokenReused: "Refresh token reused",
-                upstreamUnavailable: "Upstream unavailable",
-                unknown: "Unknown reason"
-            },
-            reasonClasses: {
-                healthy: "Healthy",
-                quota: "Quota",
-                fatal: "Fatal",
-                transient: "Transient",
-                admin: "Admin",
-                unknown: "Unknown class"
-            },
-            routingDecisions: {
-                recentSuccess: "Prioritize recent success",
-                freshProbe: "Prefer fresh probe results",
-                roundRobin: "Round robin",
-                sameAccountRetry: "Same-account retry",
-                crossAccountFailover: "Cross-account failover",
-                requestReceived: "Request just entered the system",
-                unknown: "Unknown decision"
-            },
-            authProviders: {
-                oauthRefreshToken: "OAuth refresh token",
-                legacyBearer: "Legacy bearer",
-                codexOauth: "Codex OAuth",
-                unknown: "Unknown auth provider"
-            },
-            insightsTitle: "Event focus",
-            insightsDescription: "Start with the most common event types and reason codes, then decide whether to follow request_id or open details directly.",
-            topEventTypes: "Top event types",
-            topReasons: "Top reason codes",
-            noInsights: "There is not enough summarized event data for the current filter yet.",
-            previewTitle: "Preview",
-            detailTitle: "Event detail",
-            detailDescription: "Inspect raw payloads, message previews, and correlation chains.",
-            detailDescriptionWithRequest: "Request ID: {{requestId}}",
-            payloadTitle: "Payload JSON",
-            payloadDescription: "Raw payload stored in the unified event stream.",
-            correlationTitle: "Correlation chain",
-            correlationDescription: "All events sharing the same request_id."
-        },
-        search: "Search payload or service…",
-        subtitle: "Real-time audit trails and operational context.",
-        time: {
-            displayMode: "Displayed in local time ({{timezone}}). UTC is preserved in tooltips and exports.",
-            tooltip: "Local: {{local}} | UTC: {{utc}}"
-        },
-        tabs: {
-            audit: "Audit Logs",
-            request: "Request Logs",
-            system: "System Logs"
-        },
-        title: "System Logs",
-        waiting: "Waiting for incoming streams…",
-        actions: {
-            systemState: "System State",
-            configUpdate: "Config Update",
-            proxiesTest: "Proxy Health Check",
-            keyCreate: "API Key Created",
-            keyPatch: "API Key Updated",
-            modelsList: "Model List Fetch",
-            modelsProbe: "Model Probe",
-            unknown: "Unknown action ({{action}})"
-        },
-        antigravity: {
-            stream: "Stream"
-        }
+    rateLimits: {
+      labels: {
+        fiveHours: "5-Hour Limit",
+        github: "GitHub",
+        oneWeek: "Weekly Limit",
+      },
+      shortLabels: {
+        fiveHours: "5h",
+        oneWeek: "7d",
+      },
+      moreDetails: "More details (+{{count}})",
+      noReset: "Reset time unavailable",
+      remainingPrefix: "Remaining",
+      resetAt: "{{absolute}} ({{relative}}) reset",
+      unavailable: "No rate limit data",
+      usedPrefix: "Used",
     },
-    models: {
-        actions: {
-            copyModelId: "Copy model ID",
-            createModel: "Create model",
-            syncOpenAiCatalog: "Sync OpenAI catalog",
-            probeAvailability: "Probe availability",
-            openDetails: "Details",
-            deleteModel: "Delete model",
-            deletePricing: "Delete pricing",
-            deleteBillingRule: "Delete rule",
-            editBillingRule: "Edit rule",
-            editModel: "Edit model",
-            probeNow: "Probe Now",
-            saveModelProfile: "Save model profile",
-            savePricing: "Save pricing",
-            saveBillingRule: "Save rule",
-            newBillingRule: "New rule",
-            search: "Search model IDs…",
-            sync: "Sync Status"
-        },
-        availability: {
-            available: "Available",
-            issueHint: "View unavailable reason",
-            neverChecked: "Never checked",
-            noErrorDetail: "No error detail",
-            unavailable: "Unavailable",
-            unknown: "Unknown",
-            viewIssue: "View Issue"
-        },
-        cache: {
-            fresh: "fresh",
-            stale: "stale"
-        },
-        catalog: {
-            customOnly: "Custom model",
-            hidden: "Hidden",
-            listed: "Listed",
-            unlisted: "Unlisted"
-        },
-        columns: {
-            actions: "Details",
-            availability: "Availability",
-            cachedInputPrice: "Cached Input Price",
-            context: "Context / Max output",
-            modalities: "Modalities",
-            syncedAt: "Synced",
-            catalog: "Catalog",
-            checkedAt: "Last Checked",
-            id: "Model Name",
-            inputPrice: "Input Price",
-            outputPrice: "Output Price",
-            pricingStatus: "Pricing Status",
-            provider: "Provider / Hub"
-        },
-        description: "View model availability and manage model profiles and pricing here.",
-        dialog: {
-            description: "Edit profile and pricing in this dialog. Saved pricing will be written back to the model pool list immediately.",
-            officialDescription: "Official OpenAI model metadata is read-only here. Manual override pricing can be edited below.",
-            tabListAriaLabel: "Model profile tabs",
-            titleWithId: "Model profile · {{modelId}}"
-        },
-        empty: "No models mapped or exposed yet.",
-        emptySyncRequired: "No official catalog yet. Sync OpenAI catalog first.",
-        emptyActions: {
-            goAccounts: "Go to Accounts",
-            importAccount: "Import Accounts"
-        },
-        errors: {
-            deleteModelEntityFailed: "Failed to delete model entity.",
-            deleteModelPricingFailed: "Failed to delete model pricing.",
-            openAiCatalogSyncFailed: "Failed to sync OpenAI catalog.",
-            deleteBillingRuleFailed: "Failed to delete tiered pricing rule.",
-            modelIdRequired: "Model ID cannot be empty.",
-            probeFailed: "Model probing failed.",
-            saveBillingRuleFailed: "Failed to save tiered pricing rule.",
-            saveModelPricingFailed: "Failed to save model pricing.",
-            saveModelProfileFailed: "Failed to save model profile."
-        },
-        filters: {
-            allProviders: "All providers",
-            providerLabel: "Provider filter",
-            availabilityLabel: "Availability filter",
-            allAvailability: "All availability"
-        },
-        antigravity: {
-            notAvailable: "N/A",
-            summaryTitle: "Catalog Overview",
-            summaryDescription: "Quickly assess the current model pool from availability, provider coverage, and catalog breadth.",
-            catalogTitle: "Probe & Sync Status",
-            catalogDescription: "Probe cache freshness and official catalog sync state are collected here.",
-            maintenance: "Catalog maintenance",
-            maintenanceProbeDescription: "Refresh availability probing for the current account pool now.",
-            maintenanceSyncDescription: "Resync the official catalog snapshot and metadata.",
-            cacheFresh: "Probe cache fresh",
-            cacheStale: "Probe cache stale",
-            catalogNeedsSync: "Catalog needs sync",
-            catalogReady: "Catalog synced",
-            cacheUpdatedAt: "Cache updated at",
-            probeSource: "Probe source account",
-            catalogSyncedAt: "Catalog synced at",
-            cacheTtl: "Cache TTL",
-            cacheTtlHours: "{{hours}} hours",
-            catalogLastError: "Latest catalog error",
-            catalogAttentionTitle: "Operator attention needed",
-            catalogAttentionSyncRequired: "The official catalog has not completed a recent sync yet. Run a sync first, then confirm the model directory is complete again.",
-            catalogAttentionRetry: "The most recent catalog sync or availability probe did not complete successfully. This page keeps the readable summary, while deeper technical details should be checked in the unified event stream.",
-            catalogAttentionCacheStale: "The probe cache is stale. Run another availability probe before making decisions from outdated model status.",
-            directoryTitle: "Model Directory",
-            directoryDescription: "Filter models by provider and availability, then inspect pricing and official metadata.",
-            noDescription: "No official description is available.",
-            ungroupedFamily: "Ungrouped models",
-            deprecated: "Deprecated",
-            copyModelIdSuccess: "Copied model ID: {{modelId}}",
-            copyModelIdFailed: "Failed to copy model ID.",
-            effectivePricingSource: "Effective pricing source",
-            officialPageStatus: "Official catalog page",
-            officialPageReady: "Available",
-            officialPageMissing: "Unavailable",
-            emptyFilteredTitle: "No models match the current filters",
-            emptyFilteredDescription: "Adjust the provider, availability, or search keyword to continue exploring the catalog.",
-            noSectionItems: "No structured official metadata is available here yet.",
-            availabilityOutcomeLabel: "Latest probe outcome",
-            availabilityOutcome: {
-                available: "The latest probe marked this model as available.",
-                unavailable: "The latest probe marked this model as temporarily unavailable. Check the event stream for deeper investigation.",
-                unavailableWithStatus: "The latest probe returned HTTP {{status}}, so this model is currently unavailable.",
-                unknown: "A stable probe conclusion is not available yet."
-            },
-            metrics: {
-                total: "Total models",
-                totalDesc: "Total models currently mapped or exposed by the pool.",
-                available: "Available models",
-                availableDesc: "Models that most recently probed as available.",
-                unavailable: "Unavailable models",
-                unavailableDesc: "Models that still return probe errors or remain unreachable.",
-                providers: "Providers",
-                providersDesc: "Distinct providers or hubs represented in the catalog."
-            },
-            sections: {
-                operational: "Operational state",
-                pricing: "Pricing snapshot",
-                identity: "Identity",
-                limits: "Limits",
-                modalities: "Modalities",
-                endpoints: "Endpoints",
-                features: "Features",
-                tools: "Tools",
-                snapshots: "Snapshots",
-                pricingNotes: "Pricing notes"
-            }
-        },
-        form: {
-            modelId: "Model ID",
-            modelIdLockedHint: "Existing models cannot change the ID. Use \"Create model\" to add a new one.",
-            modelIdPlaceholder: "Example: gpt-5.3-codex",
-            provider: "Provider",
-            providerPlaceholder: "Example: openai / custom",
-            source: "Source",
-            sourceValues: {
-                entityOnly: "Entity only",
-                pricingOnly: "Pricing only",
-                upstream: "Upstream"
-            },
-            visibility: "Visibility",
-            visibilityPlaceholder: "Example: list / hide"
-        },
-        hints: {
-            cannotDeleteMissingPricing: "The current model has no local pricing record. Save pricing first before deleting it.",
-            cannotDeleteNonLocalEntity: "The current model is not a local entity model, so its entity cannot be deleted."
-        },
-        loadingHint: "Checking directory and availability status. The latest model list will appear automatically once complete.",
-        notice: {
-            modelEntityDeleted: "Model entity deleted.",
-            modelPricingDeleted: "Model pricing record deleted.",
-            billingRuleDeleted: "Tiered pricing rule deleted.",
-            modelPricingSaved: "Model pricing saved: {{model}}",
-            openAiCatalogSynced: "OpenAI catalog synced: {{count}} models updated.",
-            billingRuleSaved: "Tiered pricing rule saved: {{model}}",
-            modelProfileSaved: "Model profile saved: {{model}}",
-            probeCompleted: "Model probing completed. The latest model pool has been synced."
-        },
-        pricing: {
-            cachedInputPrice: "Cached input price",
-            creditsPerMillionTokens: "credits / 1M tokens",
-            disabled: "Disabled",
-            enablePricing: "Enable pricing",
-            enabled: "Enabled",
-            inputPrice: "Input price",
-            notConfigured: "Not configured",
-            outputPrice: "Output price",
-            perMillionTokensMicrocredits: "Per 1M tokens, in microcredits",
-            sectionTitle: "Model pricing",
-            effectiveSectionTitle: "Effective pricing",
-            manualOverride: "Manual override",
-            officialBase: "Official base",
-            overrideSectionTitle: "Manual price override",
-            sourceLabels: {
-                officialSync: "OpenAI official",
-                manualOverride: "Manual override",
-                probeOnly: "Probe only",
-                unknown: "Unknown"
-            },
-        },
-        rules: {
-            cachedInputMultiplierPpm: "Cached input multiplier (ppm)",
-            empty: "No tiered pricing rules are configured for this model yet.",
-            enableRule: "Enable rule",
-            inputMultiplierPpm: "Input multiplier (ppm)",
-            noThreshold: "none",
-            outputMultiplierPpm: "Output multiplier (ppm)",
-            priorityLabel: "Priority",
-            requestKind: "Request kind",
-            requestKinds: {
-                any: "Any",
-                chat: "Chat",
-                compact: "Compact",
-                response: "Responses",
-                unknown: "Unknown"
-            },
-            ruleSummary: "Threshold {{threshold}} · input ×{{inputMultiplier}} · cached ×{{cachedMultiplier}} · output ×{{outputMultiplier}}",
-            scope: "Scope",
-            scopes: {
-                request: "Request",
-                session: "Session",
-                unknown: "Unknown"
-            },
-            sectionDescription: "Configure request/session-based multipliers for long-context or special billing bands.",
-            sectionTitle: "Tiered pricing rules",
-            thresholdInputTokens: "Threshold input tokens"
-        },
-        probeSourceUnknown: "unknown account",
-        probeSummary: "Probe cache: {{stale}}, checked {{checkedAt}}, ttl {{ttlHours}}h, source {{source}}",
-        syncHint: {
-            notSynced: "OpenAI catalog has not been synced yet.",
-            syncedAt: "Catalog synced {{time}}"
-        },
-        profile: {
-            sectionTitle: "Model profile"
-        },
-        syncing: "Mapping endpoint capabilities…",
-        tabs: {
-            pricing: "Pricing",
-            profile: "Profile"
-        },
-        title: "Models",
-        subtitle: "Available endpoints mapped from the accounts pool.",
-        detail: {
-            title: "Model Details",
-            notFound: "Model not found. It may have been removed or filtered out.",
-            httpStatus: "HTTP Status",
-            error: "Error",
-            noError: "No error detail",
-            officialTitle: "Official metadata",
-            officialDescription: "Official OpenAI model metadata is read-only here. Manual override pricing can be edited below.",
-            contextWindow: "Context window",
-            maxOutputTokens: "Max output tokens",
-            knowledgeCutoff: "Knowledge cutoff",
-            reasoningTokenSupport: "Reasoning token support",
-            sourceUrl: "Source URL",
-            openOfficialPage: "Open official page",
-            capabilitiesTitle: "Capabilities",
-            inputModalities: "Input modalities",
-            outputModalities: "Output modalities",
-            endpoints: "Endpoints",
-            maxInputTokens: "Max input tokens",
-            capabilityDetails: {
-                supported: "Supported",
-                notSupported: "Not supported",
-                inputAndOutput: "Input and output",
-                inputOnly: "Input only",
-                outputOnly: "Output only"
-            },
-            rawText: "Official text snapshot",
-        }
+    planValues: {
+      business: "Business",
+      enterprise: "Enterprise",
+      free: "Free",
+      plus: "Plus",
+      pro: "Pro",
+      team: "Team",
     },
-    costReports: {
-        admin: {
-            title: "Cost Reports",
-            description: "Read-only estimated USD usage for the last 30 days."
-        },
-        tenant: {
-            title: "Usage Cost Reports",
-            description: "Read-only estimated USD usage for your current tenant."
-        },
-        summary: {
-            totalCost: "Estimated cost",
-            totalRequests: "Total requests",
-            avgCostPerRequest: "Average cost / request"
-        },
-        chart: {
-            title: "Cost trend",
-            description: "Estimated USD cost aggregated from request logs.",
-            empty: "No cost data is available for the selected scope yet.",
-            series: {
-                cost: "Estimated cost"
-            }
-        },
-        logs: {
-            title: "Request logs",
-            empty: "No request logs are available for this scope.",
-            searchPlaceholder: "Search request ID, model, tenant, or status",
-            columns: {
-                time: "Time",
-                tenant: "Tenant",
-                requestId: "Request ID",
-                model: "Model",
-                status: "Status",
-                cost: "Estimated cost"
-            }
-        },
-        filters: {
-            tenant: "Tenant",
-            allTenants: "All tenants",
-            apiKey: "API key",
-            allApiKeys: "All API keys",
-            day: "By day",
-            month: "By month"
-        }
+    searchPlaceholder: "Search by email, label, URL…",
+    notAvailable: "N/A",
+    health: {
+      ok: "OK",
+      failed: "Failed",
+      disabled: "Disabled",
     },
-    nav: {
-        accounts: "Accounts Pool",
-        modelRouting: "Model Routing",
-        apiKeyGroups: "Group Management",
-        apiKeys: "Key Pool",
-        billing: "Billing",
-        config: "Configuration",
-        dashboard: "Dashboard",
-        inventory: "Inventory",
-        groups: {
-            analytics: "Analytics",
-            assets: "Pool Assets",
-            operations: "Operations",
-            system: "System"
-        },
-        importJobs: "Import Jobs",
-        oauthImport: "OAuth Login Import",
-        logs: "System Logs",
-        mainNavigation: "Main navigation",
-        models: "Models",
-        online: "Online",
-        openNavigation: "Open navigation",
-        proxies: "Proxies",
-        system: "System Status",
-        tenants: "Tenant Pool",
+    status: {
+      active: "Active",
+      disabled: "Disabled",
+    },
+    plan: {
+      enterprise: "Enterprise",
+      free: "Free",
+      plus: "Plus",
+      pro: "Pro",
+      team: "Team",
+      unknown: "Unknown plan",
+    },
+    subtitle: "Manage API credentials and billing health.",
+    syncing: "Syncing account status…",
+    title: "Accounts Pool",
+  },
+  billing: {
+    antigravity: {
+      activeGranularity: "Granularity in focus",
+      activeScope: "Current scope",
+      activeTenant: "Active tenant",
+      averageDeduction: "Average deduction",
+      averageDeductionHint:
+        "Estimated from negative ledger deltas across recorded usage events.",
+      balanceHint:
+        "Current tenant credit balance available for future requests.",
+      balanceAfter: "Balance {{value}}",
+      contractHint:
+        "Billing follows the same tenant credits contract used by the main branch.",
+      currentBalanceChip: "Balance snapshot",
+      eventType: {
+        adminRecharge: "Admin recharge",
+        unknown: "Unknown event",
         usage: "Usage",
-        cleanup: "Cleanup",
-        closeNavigation: "Close navigation"
+      },
+      ledgerRows: "Ledger rows",
+      ledgerSearch: "Search ledger rows, request IDs, or models…",
+      ledgerSignalsDescription:
+        "Quickly read recharge events, deduction events, ledger row count, and the current balance snapshot.",
+      ledgerSignalsTitle: "Ledger signals",
+      lastUpdated: "Last updated {{time}}",
+      lastUpdatedLabel: "Last updated",
+      loading: "Loading tenant billing…",
+      logCoverage: "Log coverage",
+      logCoverageHint:
+        "Traceable request log rows within the selected time window.",
+      monthConsumedHint:
+        "Aggregate deductions recorded during the active calendar month.",
+      noActivityTitle: "This tenant has no billing activity yet",
+      noActivityDescription:
+        "Tenant {{tenant}} has not recorded any recharge or usage deductions yet, so the trend and ledger remain empty. Once you prepare accounts or send requests, the real billing trail will start to appear here.",
+      noTenant: "No tenant available",
+      noTenantDescription:
+        "Create or sync a tenant first, then this page can show the real credits summary and ledger.",
+      rechargeEvents: "Recharge events",
+      requestCountHint: "Requests included in the current cost summary window.",
+      scopeTitle: "Scope",
+      scopePanelDescription:
+        "Switch tenant scope and reporting granularity to align the cost window you are reviewing.",
+      scopePanelTitle: "Billing scope",
+      tenantCreditEvent: "Tenant credit event",
+      tenantLabel: "Tenant",
+      todayConsumedHint:
+        "Credits consumed by request processing during the current day.",
+      totalCostHint: "Estimated total cost in the selected time window.",
+      usageEvents: "Usage events",
+      avgCostHint:
+        "Average request cost computed from total cost divided by requests.",
     },
-    accountPool: {
-        title: "Account pool",
-        subtitle: "Use one four-state model to monitor inventory, routable capacity, cooling records, and pending delete accounts.",
-        meta: "The current operating states are inventory / routable / cooling / pending_delete.",
-        empty: "No account pool records match the current filters.",
-        searchPlaceholder: "Search email, label, account ID, reason…",
-        filters: {
-            state: "State",
-            scope: "Scope",
-            reasonClass: "Reason class",
-            allStates: "All states",
-            allScopes: "All scopes",
-            allReasons: "All reason classes"
-        },
-        state: {
-            inventory: "Inventory",
-            routable: "Routable",
-            cooling: "Cooling",
-            pendingDelete: "Pending delete",
-            unknown: "Unknown state"
-        },
-        scope: {
-            runtime: "Runtime",
-            inventory: "Inventory"
-        },
-        reasonClass: {
-            healthy: "Healthy",
-            quota: "Quota",
-            fatal: "Fatal",
-            transient: "Transient",
-            admin: "Admin",
-            unknown: "Unknown reason class"
-        },
-        refreshState: {
-            healthy: "Healthy",
-            degraded: "Degraded",
-            missing: "Missing",
-            invalid: "Invalid",
-            unknown: "Unknown"
-        },
-        healthFreshness: {
-            fresh: "Fresh",
-            stale: "Stale",
-            unknown: "Unknown"
-        },
-        probeOutcome: {
-            ok: "Passed",
-            quota: "Quota",
-            transient: "Transient issue",
-            fatal: "Fatal issue",
-            unknown: "Not probed"
-        },
-        signalSource: {
-            active: "Active patrol",
-            passive: "Request traffic",
-            unknown: "Unknown"
-        },
-        reasonCode: {
-            none: "No blocking reason code",
-            tokenInvalidated: "Token invalidated",
-            accountDeactivated: "Account deactivated",
-            invalidRefreshToken: "Invalid refresh token",
-            refreshTokenRevoked: "Refresh token revoked",
-            refreshTokenReused: "Refresh token reused",
-            rateLimited: "Rate limited",
-            quotaExhausted: "Usage exhausted",
-            upstreamUnavailable: "Upstream unavailable",
-            transportError: "Transport error",
-            overloaded: "Upstream overloaded",
-            operatorRetiredInvalidRefreshToken: "Operator retired the account for an invalid refresh token",
-            unknown: "Unknown blocking reason"
-        },
-        routeEligible: {
-            yes: "Route eligible",
-            no: "Not routable"
-        },
-        actions: {
-            inspect: "Inspect",
-            more: "More actions",
-            reprobe: "Reprobe",
-            restore: "Restore",
-            delete: "Delete"
-        },
-        columns: {
-            account: "Account",
-            state: "State",
-            reason: "Reason",
-            credentials: "Credentials",
-            operationalStatus: "Operational status",
-            quota: "Usage",
-            updatedAt: "Updated at",
-            recentSignal: "Recent signal",
-            actions: "Actions"
-        },
-        metrics: {
-            inventory: "Inventory",
-            routable: "Routable",
-            cooling: "Cooling",
-            pendingDelete: "Pending delete",
-            records: "{{count}} records",
-            totalRecords: "Total records",
-            filteredRecords: "Filtered records",
-            inventoryDesc: "Still in inventory and not yet routable.",
-            routableDesc: "Currently healthy enough to join routing.",
-            coolingDesc: "In a quota or transient cooling window.",
-            pendingDeleteDesc: "Already moved into pending delete cleanup."
-        },
-        rateLimits: {
-            defaultLabel: "quota",
-            empty: "No quota snapshot available",
-            unavailable: "unavailable",
-            fiveHoursShort: "5h",
-            oneWeekShort: "7d",
-            githubShort: "GitHub"
-        },
-        recentSignal: {
-            updatedFallback: "Last updated",
-            window12h: "Last 12h",
-            window24h: "Last 24h",
-            active: "Active",
-            sparse: "Sparse",
-            silent: "Silent",
-            busy: "Busy",
-            noHeatmap: "No signal heatmap available",
-            summaryWithDetail: "{{relative}} · {{detail}}",
-            bucketTooltip: "{{time}} · {{count}} signals · active {{active}} / passive {{passive}}",
-            legend: {
-                success: "Success",
-                mixed: "Partially failed",
-                error: "All failed",
-                request: "Request traffic",
-                patrol: "Active patrol"
-            }
-        },
-        cooling: {
-            imminent: "Resuming soon",
-            thawIn: "{{hours}}h {{minutes}}m until restore"
-        },
-        sections: {
-            stateOverviewTitle: "State overview",
-            stateOverviewDescription: "Start with the distribution across inventory, routable, cooling, and pending delete.",
-            reasonOverviewTitle: "Reason classes",
-            reasonOverviewDescription: "Then separate healthy, quota, fatal, transient, and admin-driven states.",
-            recordsTitle: "Pool records",
-            recordsDescription: "Filter records by state, scope, and reason class, then run available actions."
-        },
-        detail: {
-            modalTitle: "Account pool record",
-            description: "Inspect the selected record's operating state, credentials, and usage summary.",
-            empty: "Record details are not available yet.",
-            sections: {
-                status: "Operating state",
-                profile: "Account profile",
-                recentSignal: "Recent signal heatmap",
-                credentials: "Credential posture",
-                quota: "Usage summary",
-                realTest: "Real test"
-            },
-            test: {
-                description: "Send a real Responses conversation against this runtime account. The result counts as request traffic and does not count as active patrol.",
-                runtimeOnly: "The first version of real testing only supports runtime records",
-                modelLabel: "Test model",
-                promptLabel: "Test input",
-                promptPlaceholder: "Enter the prompt to send through this account…",
-                send: "Send test",
-                clearSession: "Clear session",
-                noModels: "No models available",
-                emptyAssistant: "This response did not return any displayable text.",
-                assistantLabel: "Assistant",
-                userLabel: "User",
-                requestId: "Request ID",
-                responseId: "Response ID",
-                latency: "Latency",
-                rawError: "Raw error",
-                statusCode: "Status code",
-                errorCode: "Error code",
-                inputTokens: "Input tokens",
-                cachedInputTokens: "Cached input tokens",
-                outputTokens: "Output tokens",
-                reasoningTokens: "Reasoning tokens"
-            }
-        },
-        fields: {
-            nextAction: "Next action",
-            routeEligible: "Route eligibility",
-            healthFreshness: "Health freshness",
-            lastSignalAt: "Last signal",
-            lastSignalSource: "Signal source",
-            lastProbeAt: "Last probe at",
-            lastProbeOutcome: "Last probe outcome",
-            updatedAt: "Updated at",
-            createdAt: "Created at",
-            email: "Email",
-            chatgptAccountId: "ChatGPT account ID",
-            plan: "Plan",
-            sourceType: "Source type",
-            recordScope: "Record scope",
-            mode: "Mode",
-            authProvider: "Auth provider",
-            credentialKind: "Credential kind",
-            refreshState: "Refresh credential state",
-            reasonCode: "Reason code",
-            hasRefreshCredential: "Has refresh credential",
-            accessTokenFallback: "Has access-token fallback",
-            rateLimitsFetchedAt: "Usage snapshot updated at"
-        },
-        messages: {
-            confirmDeleteTitle: "Delete {{label}}?",
-            confirmDeleteDescription: "The record will be removed from the account pool.",
-            actionSuccessTitle: "{{action}} completed",
-            actionSuccessDescription: "{{label}} has been updated.",
-            actionPartialTitle: "{{action}} partially failed",
-            actionFailedTitle: "{{action}} failed",
-            actionFailed: "Please try again later."
-        }
+    columns: {
+      balanceAfter: "Balance After Change",
+      billingDetail: "Billing Details",
+      deductedCredits: "Deducted Credits",
+      deductionEvents: "Deduction Events",
+      delta: "Delta Credits",
+      eventType: "Event",
+      model: "Model",
+      periodDay: "Date",
+      periodMonth: "Month",
+      requestType: "Request Type",
+      source: "Source",
+      timestamp: "Time",
     },
-    notifications: {
-        dismiss: "Dismiss notification",
-        loginFailed: {
-            title: "Sign in failed"
-        },
-        sessionExpired: {
-            title: "Session expired",
-            description: "Please sign in again to continue."
-        }
+    exportCsv: "Export CSV",
+    filters: {
+      granularityAriaLabel: "Billing granularity",
+      tenantAriaLabel: "Tenant filter",
+      tenantPlaceholder: "Select tenant",
     },
-    errors: {
-        common: {
-            failed: "Failed",
-            network: "Network error. Please check your connection.",
-            timeout: "Request timed out. Please try again."
-        },
-        api: {
-            unauthorized: "Unauthorized. Please sign in again.",
-            invalidRequest: "Invalid request.",
-            invalidProxyUrl: "The proxy URL is invalid.",
-            notFound: "Resource not found.",
-            serviceUnavailable: "Service unavailable.",
-            internalError: "Internal server error.",
-            oauthProviderNotConfigured: "OAuth provider is not configured.",
-            oauthCallbackListenerUnavailable: "OAuth callback listener is unavailable.",
-            invalidRefreshToken: "Refresh token is invalid or expired.",
-            refreshTokenReused: "Refresh token has been reused. Obtain the latest refresh token.",
-            refreshTokenRevoked: "Refresh token has been revoked.",
-            oauthMissingClientId: "OAuth provider is misconfigured (missing client_id).",
-            oauthUnauthorizedClient: "OAuth client is unauthorized.",
-            upstreamUnavailable: "Upstream service unavailable.",
-            upstreamNetworkError: "Upstream network error.",
-            oauthExchangeFailed: "OAuth exchange failed."
-        },
-        http: {
-            badRequest: "Bad request",
-            unauthorized: "Unauthorized",
-            forbidden: "Forbidden",
-            notFound: "Not found",
-            conflict: "Conflict",
-            payloadTooLarge: "Payload too large",
-            rateLimited: "Rate limited",
-            internalServerError: "Server error",
-            badGateway: "Bad gateway",
-            serviceUnavailable: "Service unavailable",
-            gatewayTimeout: "Gateway timeout"
-        }
+    granularity: {
+      day: "Daily",
+      month: "Monthly",
     },
-    proxies: {
-        actions: {
-            add: "Add Proxy",
-            delete: "Delete",
-            edit: "Edit",
-            test: "Test",
-            testAll: "Test All"
-        },
-        antigravity: {
-            auth: "Auth",
-            authConfigured: "Configured",
-            lastErrorSummary: "The latest probe failed. Continue the investigation in the unified event stream.",
-            authNone: "None",
-            emptyDescription: "Add the first proxy node to start routing traffic through the admin-managed pool.",
-            latency: "Latency",
-            scheme: "Scheme"
-        },
-        badges: {
-            auth: "Auth"
-        },
-        columns: {
-            actions: "Actions",
-            lastTest: "Last Test",
-            latency: "Latency",
-            proxy: "Proxy",
-            status: "Status",
-            weight: "Weight"
-        },
-        deleteDialog: {
-            confirm: "Delete Proxy",
-            description: "Delete {{label}} from the outbound proxy pool? Existing clients will stop using it after the next refresh.",
-            title: "Delete Proxy"
-        },
-        editor: {
-            create: "Create Proxy",
-            createTitle: "Create Outbound Proxy",
-            description: "Configure a global outbound proxy node. Leave the URL blank during edit to keep the current secret unchanged.",
-            editTitle: "Edit Outbound Proxy",
-            enabledHint: "Disabled nodes stay in the list but will not be selected or tested automatically.",
-            errors: {
-                labelRequired: "Please enter a proxy label.",
-                proxyUrlRequired: "Please enter a proxy URL.",
-                weightInvalid: "Weight must be greater than zero."
-            },
-            fields: {
-                enabled: "Enabled",
-                label: "Label",
-                proxyUrl: "Proxy URL",
-                weight: "Weight"
-            },
-            proxyUrlHint: "Supported schemes: http://, https://, socks5://. Host and port are required; credentials can be embedded in the URL.",
-            proxyUrlPlaceholder: "http://user:password@127.0.0.1:6152",
-            save: "Save Changes"
-        },
-        empty: "No outbound proxies configured yet.",
-        failModeDescriptions: {
-            allowDirectFallback: "If every healthy proxy fails, the platform may fall back to a direct connection.",
-            strictProxy: "If no healthy proxy is available, outbound requests fail immediately instead of bypassing the pool."
-        },
-        failModes: {
-            allowDirectFallback: "Allow direct fallback",
-            strictProxy: "Strict proxy only"
-        },
-        filters: {
-            all: "All nodes",
-            degraded: "Degraded",
-            disabled: "Disabled",
-            healthy: "Healthy",
-            label: "Status filter",
-            offline: "Offline"
-        },
-        health: {
-            degraded: "Degraded",
-            disabled: "Disabled",
-            healthy: "Healthy",
-            offline: "Offline"
-        },
-        list: {
-            description: "Add, edit, delete, and test weighted proxy nodes. The admin API stores secrets but only returns masked URLs.",
-            title: "Proxy Nodes"
-        },
-        loading: "Loading outbound proxy pool…",
-        meta: {
-            enabled: "{{count}} enabled",
-            healthy: "{{count}} healthy",
-            total: "{{count}} nodes"
-        },
-        notifications: {
-            nodeCreateFailedTitle: "Failed to create proxy",
-            nodeCreatedDescription: "The proxy node has been added to the global pool.",
-            nodeCreatedTitle: "Proxy created",
-            nodeDeleteFailedTitle: "Failed to delete proxy",
-            nodeDeletedDescription: "The proxy node has been removed from the global pool.",
-            nodeDeletedTitle: "Proxy deleted",
-            nodeUpdateFailedTitle: "Failed to update proxy",
-            nodeUpdatedDescription: "The proxy node has been updated.",
-            nodeUpdatedTitle: "Proxy updated",
-            settingsFailedTitle: "Failed to save proxy settings",
-            settingsSavedDescription: "The global outbound proxy pool settings have been saved.",
-            settingsSavedTitle: "Proxy settings saved",
-            singleTestCompletedDescription: "The proxy test has finished.",
-            testCompletedDescription: "Finished testing {{count}} proxy nodes.",
-            testCompletedTitle: "Proxy test finished",
-            testFailedTitle: "Proxy test failed",
-            validationFailedTitle: "Please review the proxy form"
-        },
-        pending: "Not tested yet",
-        searchPlaceholder: "Search label, masked URL, or latest error…",
-        settings: {
-            description: "These settings apply to every outbound HTTP and WebSocket request that goes through the platform.",
-            enabled: "Enable outbound proxy pool",
-            enabledHint: "When disabled, all outbound traffic stays direct. When enabled, traffic is selected from the weighted proxy pool below.",
-            failMode: "Failure mode",
-            save: "Save Settings",
-            title: "Global Proxy Pool"
-        },
-        stats: {
-            enabled: "Enabled Nodes",
-            healthy: "Healthy Nodes",
-            total: "Total Nodes"
-        },
-        subtitle: "Configure a global outbound proxy pool for all upstream traffic. This replaces the old node-health placeholder page.",
-        title: "Outbound Proxy Pool"
+    ledger: {
+      codeLabels: {
+        accountDeactivated: "Account deactivated",
+        billingUsageMissing: "Missing usage settlement fields",
+        failoverExhausted: "Retry/failover exhausted",
+        noUpstreamAccount: "No upstream account available",
+        streamPreludeError: "Stream prelude error",
+        tokenInvalidated: "Token invalidated",
+        transportError: "Upstream network error",
+        upstreamRequestFailed: "Upstream request failed",
+        unknown: "Unknown",
+      },
+      details: {
+        accrued: "Accrued: {{value}} credits",
+        adjustment: "Adjustment: {{value}}",
+        extraCharge: "Extra charge: {{value}} credits",
+        failoverAction: "Action: {{action}}",
+        failure: "Failure: {{summary}}",
+        failurePrefix: "Failure:",
+        serviceTier: "Service Tier: {{tier}}",
+        source: "Source: {{source}}",
+        upstreamStatus: "Upstream {{status}}",
+        tokenSettlement:
+          "Token settlement: input {{input}} + cached {{cached}} + output {{output}}",
+        unitPrice: "Unit price: {{prices}} credits/1M tokens",
+      },
+      empty: "No ledger entries yet.",
+      failoverActions: {
+        crossAccountFailover: "Cross-account failover",
+        retrySameAccount: "Retry same account",
+        returnFailure: "Return failure",
+        unknown: "Unknown",
+      },
+      releaseReasons: {
+        billingSettleFailed: "Billing settlement failed",
+        failoverExhausted: "Retry/failover exhausted",
+        invalidUpstreamUrl: "Invalid upstream URL configuration",
+        noUpstreamAccount: "No upstream account available",
+        streamPreludeError: "Stream prelude error",
+        streamUsageMissing: "Stream usage missing",
+        transportError: "Upstream network error",
+        upstreamRequestFailed: "Upstream request failed",
+        unknown: "Unknown",
+      },
+      showRaw: "Show raw entries",
+      subtitle: "Filtered by current tenant.",
+      title: "Ledger Entries",
+      requestTypes: {
+        nonStream: "Non-stream",
+        stream: "Stream",
+        unknown: "-",
+      },
+      tokenSegments: {
+        cached: "Cached",
+        input: "Input",
+        output: "Output",
+      },
+    },
+    messages: {
+      rechargeFailedTitle: "Recharge failed",
+      rechargeSuccessDetail: "+{{amount}}, balance {{balance}}",
+      rechargeSuccessTitle: "Recharge successful",
+      retryLater: "Please try again later",
+    },
+    recharge: {
+      amountAriaLabel: "Recharge amount",
+      amountPlaceholder: "Recharge credits (microcredits)",
+      reasonAriaLabel: "Recharge reason",
+      reasonPlaceholder: "Recharge reason",
+      submit: "Execute Recharge",
+      subtitle: "Recharge the currently selected tenant.",
+      title: "Admin Recharge",
+    },
+    snapshot: {
+      empty: "No settlement snapshots yet.",
+      subtitle:
+        "Aggregate deduction events by {{granularity}} for month-end settlement and reconciliation.",
+      title: "Settlement Snapshot",
+    },
+    subtitle:
+      "Primary view: credit ledger (actual charges), with tenant-level admin filtering.",
+    summary: {
+      currentBalance: "Current Balance",
+      deductionHint: "Only negative ledger deduction events are counted.",
+      monthConsumed: "This Month Consumption",
+      todayConsumed: "Today's Consumption",
+      unitCredits: "Unit: credits",
+    },
+    title: "Billing Center",
+    trend: {
+      noData: "No trend data yet.",
+      seriesConsumed: "Consumed Credits",
+      subtitle: "Show ledger deductions aggregated by {{granularity}}.",
+      title: "Consumption Trend",
+    },
+  },
+  common: {
+    cancel: "Cancel",
+    close: "Close",
+    collapseSidebar: "Collapse sidebar",
+    confirm: "Confirm",
+    delete: "Delete",
+    edit: "Edit",
+    expand: "Expand",
+    collapse: "Collapse",
+    expandSidebar: "Expand sidebar",
+    loading: "Loading…",
+    logout: "Sign Out",
+    no: "No",
+    noData: "No data yet.",
+    never: "Never",
+    openMenu: "Open menu",
+    closeMenu: "Close menu",
+    refresh: "Refresh",
+    skipToMainContent: "Skip to main content",
+    table: {
+      allItemsSelected: "All items selected",
+      columns: "Columns",
+      clearSelection: "Clear selection",
+      dataTableAria: "Data table",
+      firstPage: "First page",
+      go: "Go",
+      jumpToPage: "Jump to page",
+      lastPage: "Last page",
+      nextPage: "Next page",
+      pageOf: "Page {{page}} / {{total}}",
+      previousPage: "Previous page",
+      range: "{{start}}-{{end}} / {{total}}",
+      rowActions: "Row actions",
+      rowsPerPage: "Rows per page",
+      searchLabel: "Search table",
+      searchPlaceholder: "Search in current list…",
+      selectAll: "Select page",
+      selectFiltered: "Select all filtered results ({{count}})",
+      selectRow: "Select row",
+      selectedCount: "{{count}} selected",
+      statusLabel: "Status",
+      statusFilter: "Status filter",
+      totalItems: "Total {{count}} items",
+    },
+    languages: {
+      english: "English",
+      simplifiedChinese: "Simplified Chinese",
+    },
+    tokenSegments: {
+      cached: "Cached",
+      input: "Input",
+      output: "Output",
+    },
+    units: {
+      millisecondsShort: "{{value}}ms",
+      secondsShort: "{{value}}s",
+    },
+    current: "Current",
+    actions: "Actions",
+    toggleLanguage: "Toggle language",
+    toggleTheme: "Toggle theme",
+    uiPreferences: {
+      title: "Interface Preferences",
+      drawerPlacement: "Drawer placement",
+      drawerPlacementOptions: {
+        bottom: "Bottom",
+        right: "Right",
+        left: "Left",
+        top: "Top",
+      },
+    },
+    yes: "Yes",
+    save: "Save",
+    search: "Search…",
+    routeLoading: "Loading page…",
+    status: {
+      healthy: "Healthy",
+      degraded: "Degraded",
+      offline: "Offline",
+      disabled: "Disabled",
+      available: "Available",
+    },
+  },
+  serviceTier: {
+    default: "Default",
+    flex: "Flex",
+    priority: "Priority",
+  },
+  config: {
+    antigravity: {
+      loading: "Loading configuration…",
+      metrics: {
+        authValidation: "Auth validation",
+        controlPlane: "Control plane listen",
+        dataPlane: "Data plane URL",
+        refreshStatus: "Refresh status",
+      },
+      notesEmpty: "No notes added",
+      notesPresent: "Notes available",
+      notesStatus: "Notes status",
+      refreshDisabled: "Auto refresh disabled",
+      refreshEnabled: "Auto refresh enabled",
+      refreshIntervalLabel: "Refresh interval",
+      reset: "Reset",
+      saveFailed: "Failed to save configuration.",
+      section: {
+        connection: "Connection",
+        refresh: "Refresh",
+      },
+      runtimePanelTitle: "Runtime sync state",
+      synced: "In sync with server config",
+      unsavedChanges: "Unsaved changes",
+    },
+    controlPlane: {
+      authValidateUrl: "Auth Validation URL",
+      dataPlaneUrl: "Forwarding Service URL",
+      desc: "Configure how control plane talks to forwarding services",
+      listen: "Control Plane Listen Address (read-only)",
+      title: "Control Plane Connection",
+    },
+    refreshSettings: {
+      desc: "Control the switch and interval for automatic login credential refresh",
+      enableDesc:
+        "If disabled, expiring access credentials will no longer refresh automatically.",
+      enableLabel: "Enable auto refresh",
+      intervalSec: "Refresh interval (seconds)",
+      notes: "Notes",
+      title: "Auto Refresh Settings",
+    },
+    themeLab: {
+      title: "Theme Lab",
+      description:
+        "Bring the default shell closer to native HeroUI Pro styling and fine-tune it in this browser.",
+      localOnly: "Local to this browser",
+      currentMode: "Current mode: {{value}}",
+      resolvedMode: "Resolved mode: {{value}}",
+      modeTitle: "Theme mode",
+      modeDescription:
+        "Switch between light, dark, or system. This drives the global HeroUI theme instead of page-local styling.",
+      modeLightHint: "Always use the HeroUI light theme.",
+      modeDarkHint: "Always use the HeroUI dark theme.",
+      modeSystemHint: "Follow the system appearance preference automatically.",
+      radiusTitle: "Shape radius",
+      radiusDescription:
+        "Adjust the curvature used by cards, inputs, and panel surfaces.",
+      densityTitle: "Page density",
+      densityDescription:
+        "Adjust global spacing and shell breathing room across the workbench.",
+      footer:
+        "These settings apply instantly to the current admin console and persist in local browser storage. Runtime config save/reset does not modify them.",
+      reset: "Restore HeroUI Pro defaults",
+      previewTitle: "Live preview",
+      previewDescription:
+        "Use a standard surface, form row, and action cluster to quickly inspect the current baseline.",
+      previewMetric: "Preview metric",
+      previewMetricHint:
+        "Check surface hierarchy, text weight, borders, and shadow balance.",
+      previewInputLabel: "Preview input",
+      previewInputValue: "The current theme is already affecting this field.",
+      previewPrimaryAction: "Primary action",
+      previewSecondaryAction: "Secondary action",
+      previewChipHealthy: "Healthy",
+      previewChipAttention: "Attention",
+      previewResolvedChip: "Applied: {{value}}",
+      previewChipRadius: "Radius: {{value}}",
+      previewChipDensity: "Density: {{value}}",
+      density: {
+        compact: "Compact",
+        comfortable: "Comfortable",
+      },
+      radius: {
+        compact: "Crisp",
+        default: "Native default",
+        relaxed: "Relaxed",
+      },
+    },
+    runtimeHint: {
+      desc: "Changes take effect immediately. After restart, environment variables and config.toml still take priority.",
+      title: "Runtime Config Notice",
+    },
+    save: "Save Changes",
+    subtitle: "Runtime settings and global variables",
+    success: "Configuration saved successfully.",
+    title: "Configuration",
+    reload: {
+      title: "Runtime Reload Enabled",
+      desc: "Changes to caching and timeouts will be synced globally and take effect immediately without requiring service restarts.",
     },
     system: {
-        antigravity: {
-            billingMode: {
-                costReportOnly: "Cost report only",
-                creditEnforced: "Credit enforced"
-            },
-            capabilitiesDescription: "Review the edition envelope and tenant-facing switches in one place.",
-            capabilitiesTitle: "Capability Envelope",
-            category: {
-                config: "Configuration",
-                diagnostics: "Diagnostics",
-                runtime: "Runtime"
-            },
-            componentsDescription: "Verify that control-plane, data-plane, and usage storage are all responding as expected.",
-            componentsTitle: "Core Components",
-            config: {
-                authValidateUrl: "Auth Validate URL",
-                controlPlaneListen: "Control Plane Listen",
-                dataPlaneUrl: "Data Plane URL",
-                oauthRefresh: "OAuth Refresh",
-                refreshInterval: "Refresh Interval"
-            },
-            counts: {
-                apiKeys: "API Keys",
-                enabledAccounts: "Enabled Accounts",
-                oauthAccounts: "OAuth Accounts",
-                tenants: "Tenants",
-                totalAccounts: "Total Accounts"
-            },
-            dataPlane: {
-                accounts: "Accounts",
-                active: "Active"
-            },
-            dataPlaneIssue: "Runtime diagnostics report issues in the data plane.",
-            debug: {
-                authValidatorEnabled: "Auth validator",
-                billingReconcileAdjust: "Billing reconcile adjustments",
-                billingReconcileFailed: "Billing reconcile failures",
-                billingReconcileReleased: "Billing reconcile releases",
-                billingReconcileScanned: "Billing reconcile scanned",
-                failoverEnabled: "Failover enabled",
-                quickRetryMax: "Quick retry max",
-                requestFailoverWait: "Failover wait",
-                retryPollInterval: "Retry poll interval",
-                sharedRoutingCache: "Shared routing cache",
-                snapshotRevision: "Snapshot revision"
-            },
-            debugSignals: "Debug Signals",
-            debugSignalsDescription: "Keep automatic failover, auth validation, cache, and billing reconcile signals in one compact view.",
-            disabled: "Disabled",
-            edition: {
-                business: "Business",
-                personal: "Personal",
-                team: "Team"
-            },
-            enabled: "Enabled",
-            features: {
-                costReports: "Cost reports",
-                costReportsHint: "A lighter visibility mode suited to personal and team editions.",
-                creditBilling: "Credit billing",
-                creditBillingHint: "Required before strict credit enforcement and preauth flows are active.",
-                multiTenant: "Multi-tenant",
-                multiTenantHint: "Whether the control plane isolates resources and workflows by tenant.",
-                tenantPortal: "Tenant portal",
-                tenantPortalHint: "Whether a self-service tenant workspace is exposed.",
-                tenantRecharge: "Tenant recharge",
-                tenantRechargeHint: "Whether tenants can recharge balances and manage credits themselves.",
-                tenantSelfService: "Tenant self-service",
-                tenantSelfServiceHint: "Whether registration, password reset, and similar tenant flows are enabled."
-            },
-            generatedAtHint: "Last runtime snapshot timestamp",
-            loading: "Loading system state…",
-            milliseconds: "{{value}}ms",
-            runtimeConfig: "Runtime Config",
-            runtimeConfigDescription: "These values reflect the effective control-plane, data-plane, and OAuth refresh configuration on this instance.",
-            runtimeCounts: "Runtime Counts",
-            runtimeCountsDescription: "Quickly gauge the account, key, and tenant footprint carried by this instance.",
-            seconds: "{{value}} seconds",
-            summary: {
-                billingMode: "Billing mode",
-                billingModeHint: "Current billing contract mode",
-                edition: "Edition",
-                editionHint: "Edition and capability envelope",
-                generatedAt: "Generated at",
-                generatedAtHint: "Last runtime snapshot timestamp",
-                uptimeHint: "Control plane runtime duration"
-            }
+      title: "System Strategy",
+      desc: "Configure global operations context.",
+      maintenance: "Maintenance Mode",
+      maintenanceDesc: "Reject all new requests globally holding 503.",
+      logRetention: "Log Retention (Days)",
+      logRetentionDesc: "Rolling window for clickhouse trace storage.",
+    },
+    network: {
+      title: "Network Profiling",
+      desc: "Define global ratelimits to prevent upstream banning.",
+      tpm: "Global Tokens Per Min",
+      tpmDesc: "Maximum simultaneous requests to AI endpoints.",
+      scaling: "Cloud Resource Scaling",
+      scalingDesc: "Allow dynamic node allocation bounds.",
+    },
+  },
+  dashboard: {
+    actions: {
+      openMenu: "Open actions menu",
+      viewAccounts: "View accounts",
+      viewBilling: "View billing",
+      viewImports: "View imports",
+      viewLogs: "View request logs",
+    },
+    antigravity: {
+      activeAccounts: "{{count}} active",
+      last24Hours: "Last 24 hours",
+      loading: "Loading dashboard data…",
+      signal: "Operational signal",
+    },
+    alerts: {
+      checkRoutes: "Check Routes",
+      columns: {
+        action: "Suggested Action",
+        message: "Message",
+        severity: "Severity",
+        source: "Source",
+        status: "Status",
+        time: "Time",
+      },
+      empty: "All systems looking good.",
+      emptyDescription:
+        "No active infrastructure or usage-pipeline alerts are visible in the current window.",
+      resolve: "Mark Resolved",
+      searchPlaceholder: "Search alerts…",
+      subtitle: "System states needing review",
+      title: "Requires Attention",
+      usageRepoUnavailable: "Usage analytics storage is unavailable",
+      dataPlaneDisconnected: "Data plane disconnected",
+      now: "Now",
+      severity: {
+        critical: "Critical",
+        warning: "Warning",
+        info: "Info",
+      },
+      source: {
+        data_plane: "Data Plane",
+        usage_repo: "Usage Repo",
+      },
+      status: {
+        open: "Open",
+        resolved: "Resolved",
+      },
+    },
+    currentScope: "Current: {{scope}}",
+    filters: {
+      apiKeyAriaLabel: "API key filter",
+      apiKeyPlaceholder: "Select API key",
+      description:
+        "Start broad, then narrow to one tenant or API key when a spike, alert, or cost change needs explanation.",
+      eyebrow: "Context",
+      range: {
+        last24Hours: "Last 24 hours",
+        last30Days: "Last 30 days",
+        last7Days: "Last 7 days",
+      },
+      rangeAriaLabel: "Time range",
+      scopeAriaLabel: "Scope filter",
+      tenantAriaLabel: "Tenant filter",
+      tenantPlaceholder: "Select tenant",
+      title: "Scope and filters",
+    },
+    hero: {
+      eyebrow: "Operations overview",
+    },
+    meta: {
+      autoRefresh: "Auto-refresh every 30 seconds",
+    },
+    kpi: {
+      activeApiKeysInRange: "Active API keys (selected range)",
+      accounts: "Accounts",
+      accountsDesc: "Admin-only operational metric",
+      apiKeys: "API keys",
+      apiKeysDesc: "Configured keys in system",
+      avgFirstTokenSpeed: "Average first-token speed",
+      avgFirstTokenSpeedDesc: "TTFT (streaming exact / non-stream approximate)",
+      globalScope: "Global scope",
+      rpm: "RPM",
+      rpmDesc: "Requests per minute",
+      requests: {
+        apiKey: "Current API key requests (selected range)",
+        global: "Total account requests (selected range)",
+        tenant: "Current tenant API key requests (selected range)",
+      },
+      tenants: "Tenants",
+      tenantsDesc: "Admin-only operational metric",
+      totalRequests: "Total requests",
+      totalTokens: "Token consumption total",
+      totalTokensDesc: "Input + cached + output + reasoning",
+      tpm: "TPM",
+      tpmDesc: "Tokens per minute",
+      running: "Running",
+      totalConfigured: "Total Configured",
+      uptime: "Uptime 99.99%",
+      reqs: "Total Requests",
+      reqsDesc: "+12.5% from last month",
+      failed: "Failed Requests",
+      failedDesc: "+180 today",
+      avgLatency: "Avg Latency",
+      avgLatencyDesc: "-5ms from last month",
+      activeTokens: "Active Tokens",
+      activeTokensDesc: "+24 new tokens mapped",
+      oauthLabel: "OAuth",
+    },
+    modelDistribution: {
+      a11y: {
+        model: "Model",
+        summary:
+          "Model distribution includes {{count}} rows sorted by {{mode}}. Leading model: {{top}}. Accessible data table follows.",
+        summaryEmpty:
+          "No model distribution data is available for the current selection.",
+        tableLabel: "Model distribution data table",
+      },
+      description: "Top models by request count or token usage.",
+      empty: "No model distribution data yet",
+      modeRequests: "By requests",
+      modeTokens: "By tokens",
+      other: "Other",
+      title: "Model request distribution",
+    },
+    overview: {
+      attentionNeeded: "Action recommended",
+      autoRefresh: "Auto-refresh every 30 seconds",
+      degraded: "Degraded",
+      description:
+        "Read this strip first to see whether alerts, the usage pipeline, or managed inventory needs attention.",
+      eyebrow: "Pulse",
+      inventory: "Available upstream inventory",
+      managedScope: "Managed scope right now",
+      openAlerts: "Open alerts",
+      stable: "No active incidents",
+      title: "Operational pulse",
+      usagePipeline: "Usage pipeline",
+    },
+    poolOverview: {
+      title: "Account pool overview",
+      description:
+        "See how inventory, routable capacity, cooling accounts, and pending delete records are distributed.",
+      totalLabel: "Total",
+      inventory: "Inventory",
+      inventoryDesc: "Stored in the pool but not yet in the routable set.",
+      routable: "Routable",
+      routableDesc: "Currently healthy enough to serve routing traffic.",
+      cooling: "Cooling",
+      coolingDesc:
+        "Waiting for quota recovery or reprobe before routing again.",
+      pendingDelete: "Pending delete",
+      pendingDeleteDesc: "Already moved into the pending delete lifecycle.",
+      shareOfPool: "Share of pool",
+    },
+    healthSignals: {
+      title: "Health signals",
+      description:
+        "Separate healthy capacity from quota, transient, fatal, and admin-driven states.",
+      healthy: "Healthy",
+      healthyDesc: "Accounts currently carrying healthy runtime signals.",
+      quota: "Quota",
+      quotaDesc: "Accounts cooling because of rate limits or quota exhaustion.",
+      fatal: "Fatal",
+      fatalDesc: "Signals that usually require restore or delete decisions.",
+      transient: "Transient",
+      transientDesc: "Temporary failures that can recover after reprobe.",
+      admin: "Admin",
+      adminDesc: "States driven by operator actions or admin decisions.",
+    },
+    scope: {
+      apiKey: "API Key View",
+      global: "Global View",
+      tenant: "Tenant View",
+    },
+    subtitle:
+      "Monitor gateway health, usage shifts, and managed inventory from one operating view.",
+    table: {
+      apiKey: "API Key",
+      requests: "Requests",
+    },
+    tokenComponents: {
+      cached: "Cached",
+      input: "Input",
+      output: "Output",
+      reasoning: "Reasoning",
+    },
+    tokenTrend: {
+      a11y: {
+        summary:
+          "Hourly token trend covering {{count}} time points from {{start}} to {{end}}. Accessible data table follows.",
+        summaryEmpty:
+          "No token trend data is available for the current selection.",
+        tableLabel: "Token usage trend data table",
+        timestamp: "Timestamp",
+      },
+      description:
+        "Compare input, cached, output, and reasoning tokens over time. Turn components on or off to isolate where spend is moving.",
+      empty: "No token trend data yet",
+      title: "Token usage trend",
+    },
+    title: "Overview",
+    topApiKeys: {
+      empty: "No ranking data yet",
+      scopeDescription: "Scope: {{scope}} / selected time window",
+      title: "Top API Keys",
+    },
+    trafficChart: {
+      scope: {
+        apiKey: "Scope: current API key requests",
+        global:
+          "Scope: global account requests + global tenant API key requests",
+        tenant: "Scope: current tenant API key requests",
+      },
+      series: {
+        accountRequests: "Account requests",
+        tenantApiKeyRequests: "Tenant API key requests",
+        tenantApiKeyRequestsSingle: "Tenant API key requests",
+      },
+      title: "Traffic Overview",
+      subtitle: "Hourly proxy volume past 24h",
+      success: "Successful",
+      blocked: "Blocked",
+    },
+  },
+  importJobs: {
+    actions: {
+      cancel: "Cancel",
+      cancelJob: "Cancel job",
+      confirmCancelJob: "Cancel this import job?",
+      exportFailed: "Export failed items",
+      refreshItems: "Refresh items",
+      remove: "Remove",
+      retryFailed: "Retry failed",
+      removeFromList: "Remove from list",
+    },
+    antigravity: {
+      loading: "Loading import jobs…",
+      intakeTitle: "Import intake",
+      intakeDescription:
+        "Choose the credential mode here and launch the next file-import batch.",
+      intakeHint:
+        "After you upload multiple .json/.jsonl files, the backend merges them into one import job and keeps the state visible in the queue on the left.",
+      newImport: "New Import",
+      pause: "Pause",
+      recentHint:
+        "Monitor the latest tracked import jobs, resume paused work, and retry failures from one queue.",
+      resume: "Resume",
+      status: {
+        paused: "Paused",
+      },
+    },
+    admission: {
+      ready: "Ready",
+      readyDesc:
+        "Admission passed and the record is ready to move toward runtime.",
+      needsRefresh: "Needs refresh",
+      needsRefreshDesc:
+        "Accepted, but a refresh is still required before runtime activation.",
+      noQuota: "No quota",
+      noQuotaDesc: "Admission already detected quota or rate-limit blockers.",
+      failed: "Admission failed",
+      failedDesc:
+        "Admission or activation has already ended in terminal failure.",
+      status: {
+        ready: "Ready",
+        needsRefresh: "Needs refresh",
+        noQuota: "No quota",
+        failed: "Failed",
+        queued: "Queued",
+        unknown: "Unknown",
+      },
+      failureStage: {
+        admissionProbe: "Admission probe",
+        activationRefresh: "Activation refresh",
+        activationRateLimits: "Activation rate-limit check",
+        runtimeRefresh: "Runtime refresh",
+      },
+    },
+    detail: {
+      columns: {
+        admission: "Admission",
+        error: "Error",
+        failure: "Failure stage",
+        label: "Label",
+        line: "Line",
+        message: "Outcome",
+        retry: "Retry",
+        source: "Source",
+        status: "Status",
+      },
+      filterLabel: "Status filter",
+      description:
+        "Review admission counts and row-level outcomes from the selected import job.",
+      filters: {
+        admission: "Admission filter",
+        allAdmissions: "All admissions",
+        allStatuses: "All import states",
+        status: "Import status",
+      },
+      itemsEmpty: "No matching job items.",
+      itemsDescription:
+        "Inspect each imported record by admission result, failure stage, and retryability.",
+      itemsLoading: "Loading job items…",
+      itemsTitle: "Imported item audit",
+      jobIdLabel: "Job ID: {{jobId}}",
+      loadMore: "Load more",
+      loadedCount: "Loaded {{count}} records",
+      loadingMore: "Loading…",
+      retryQuery: "Retry query",
+      searchPlaceholderModern: "Search by label / email / error…",
+      selectHint: "Select a job to view details.",
+      summaryLoading: "Loading job summary…",
+      title: "Job Details",
+      unreadable: "This job cannot be read (possibly expired or invalid ID).",
+      searchPlaceholder: "Search by label / email / error",
+    },
+    dropzone: {
+      acceptsNew:
+        "Upload multiple .json/.jsonl files in one batch. The backend will merge them into a single job.",
+      creatingTitle: "Creating import job…",
+      selectFiles: "Select Files",
+      titleNew: "Drop import files here",
+      uploading: "Uploading…",
+      wait: "Please wait while the file is transmitted securely.",
+      title: "Click to Upload or Drag File Here",
+      accepts:
+        "Accepts <code>.csv</code> or line-separated <code>.txt</code> format. Max 50,000 rows per file.",
+      browse: "Browse Files",
+      creatingDesc:
+        "Please wait. The new job will appear in the queue automatically.",
+    },
+    error: "Upload Failed",
+    manual: {
+      add: "Add",
+      placeholderModern: "Paste job_id…",
+      title: "Manual job tracking",
+      placeholder: "Paste job_id",
+    },
+    messages: {
+      jobNotFound: "Job not found or inaccessible",
+      queryFailed: "Query Failed",
+      unknownError: "unknown error",
+      uploadFailedTitle: "Import failed",
+    },
+    errors: {
+      importFailed: "Import failed",
+      invalidRecord: "Invalid record",
+      invalidRefreshToken: "Invalid refresh token",
+      missingAccessToken: "Missing access_token",
+      missingCredentials: "Missing credentials",
+      missingRefreshToken: "Missing refresh_token",
+      oauthProviderNotConfigured: "OAuth provider not configured",
+      rateLimited: "Rate limited",
+      refreshTokenReused: "Refresh token already used",
+      unknown: "Unknown import error",
+      upstreamNetworkError: "Upstream network error",
+      upstreamUnavailable: "Upstream service unavailable",
+    },
+    credentialMode: {
+      title: "Credential Mode",
+      description:
+        "Choose whether this batch imports rotatable refresh_token accounts or one-time access_token accounts. OAuth login import stays unchanged.",
+      refreshToken: "Import RT",
+      refreshTokenHint:
+        "Use refresh_token when you want managed refresh and token rotation.",
+      accessToken: "Import AK",
+      accessTokenHint:
+        "Use access_token when you want one-time imports without refresh rotation.",
+    },
+    metrics: {
+      created: "Created",
+      createdDesc: "New account-pool records created from this batch.",
+      failed: "Failed",
+      failedDesc: "Items that ultimately ended in failed status.",
+      processed: "Processed",
+      status: "Status",
+      throughput: "Throughput",
+      throughputDesc:
+        "Approximate imports per minute while the job is running.",
+      total: "Total",
+      updated: "Existing / Updated",
+      updatedDesc: "Existing records that were refreshed or merged.",
+    },
+    precheck: {
+      createdNotice: "Import job created: {{id}}",
+      defaultReady: "File format and size checks passed.",
+      duplicateBatch: "These files are already in the staging list.",
+      duplicateName:
+        "Duplicate filename detected. Review source before importing.",
+      emptyPreview: "No valid data row found in preview. File may be empty.",
+      firstLineInvalid: "JSONL first line is invalid JSON. Import may fail.",
+      firstLineObject: "First line is not a JSON object. Import may fail.",
+      firstLineValid: "JSONL first-line structure check passed.",
+      jsonEmpty: "JSON file appears empty.",
+      jsonInvalid: "JSON file is invalid. Import may fail.",
+      jsonValid: "JSON structure check passed.",
+      noneImportable: "No importable files. Resolve blocked files first.",
+      skipLargeJson:
+        "Large file detected. Local JSON parse skipped; backend will validate.",
+      status: {
+        invalid: "Blocked",
+        ready: "Ready",
+        warning: "Needs Review",
+      },
+    },
+    progress: {
+      done: "Completed",
+      etaLabel: "Estimated Remaining: ",
+      etaMinutes: "About {{count}} minutes",
+      jobIdLabel: "Job ID: {{jobId}}",
+      lessThanMinute: "Less than 1 minute",
+      noJobSelected:
+        "Create or select an import job to see live progress here.",
+      title: "Live Import Progress",
+      topErrors: "Top Error Breakdown",
+    },
+    queue: {
+      columns: {
+        jobId: "Job ID",
+      },
+      description:
+        "The browser keeps recent tracked jobs here so you can switch between batches quickly.",
+      descRecent:
+        "The queue auto-polls job status. Click a job to inspect items and errors.",
+      emptyRecent:
+        "No tracked jobs yet. Upload files or add a job_id manually.",
+      titleRecent: "Recent import jobs",
+      tracked: "tracked locally",
+      title: "Recent Tracking Jobs",
+      empty: "No jobs uploaded in this session yet.",
+      card: {
+        processed: "processed",
+        new: "new",
+        errors: "errors",
+      },
+    },
+    status: {
+      all: "All",
+      cancelled: "Cancelled",
+      completed: "Completed",
+      created: "Created",
+      failed: "Failed",
+      pending: "Pending",
+      paused: "Paused",
+      processing: "Processing",
+      queued: "Queued",
+      running: "Running",
+      skipped: "Skipped",
+      updated: "Existing / Updated",
+    },
+    subtitleModern:
+      "Add files in bulk, review checks, then import in one click with live progress and error details.",
+    template: {
+      downloadJsonl: "Download Template",
+      title: "Import Template",
+      desc: "Download our recommended template to ensure columns strictly map to system requirements.",
+      download: "Download CSV Template",
+      titleNew: "Import Template",
+      descNew:
+        "Download the JSONL template and fill in refresh_token or access_token based on the selected credential mode.",
+    },
+    title: "Batch Import Jobs",
+    description:
+      "Upload credential files, monitor admission outcomes, and audit every imported record from one workbench.",
+    validation: {
+      fileTooLarge: "File {{name}} exceeds 20MB. Please split and retry.",
+      unsupportedFormat:
+        "File {{name}} is unsupported. Only .json / .jsonl are allowed.",
+      format: "Only .csv or .txt files are allowed.",
+      size: "File is too large. Maximum size is 10MB.",
+    },
+    workspace: {
+      clearQueue: "Clear List",
+      columns: {
+        action: "Action",
+        check: "Precheck",
+        file: "File",
+        size: "Size",
+        status: "Status",
+      },
+      confirmClear: "Clear the current staged file list?",
+      desc: "Drag & drop or select files in bulk, run checks, then click Start Import.",
+      empty: "No staged files yet. Drag files into the area above.",
+      invalidFiles: "Blocked {{count}}",
+      invalidHint:
+        "{{count}} files are blocked and will be excluded when importing.",
+      moreChecks: "more checks",
+      readyFiles: "Ready {{count}}",
+      readyHint: "Precheck complete. Ready to start importing.",
+      startImportWithCount: "Start Import ({{count}} files)",
+      stepCheck: "Run Checks",
+      stepCheckDesc: "Validate format, size, and duplicate names",
+      stepImport: "Start Import",
+      stepImportDesc: "Create a job and watch live progress",
+      stepSelect: "Add Files",
+      title: "File Import Workspace",
+      totalFiles: "{{count}} files",
+      totalSize: "Total {{size}}",
+      warningFiles: "Needs Review {{count}}",
+    },
+    subtitle:
+      "Upload account secrets securely in strictly formatted CSV/TXT files.",
+  },
+  oauthImport: {
+    title: "OAuth Login Import",
+    subtitle:
+      "Sign in with Codex OAuth and import the logged-in account directly into the pool.",
+    wizard: {
+      label: "Import wizard",
+      description:
+        "Walk through OAuth sign-in, callback fallback, and result review so the account lands in the pool cleanly.",
+      progress: "Flow progress",
+      current: "Current",
+      completed: "Done",
+      noSession:
+        "There is no login session yet. Start from step one to open the OAuth flow.",
+      setupHint:
+        "Creating a session immediately opens the OAuth window and starts polling for callback delivery.",
+    },
+    start: {
+      title: "Start Codex OAuth Login",
+      description:
+        "Create a login session, complete OAuth authorization, then auto-import the account.",
+    },
+    authorize: {
+      title: "Complete OAuth authorization",
+      description:
+        "Open the authorization window, finish sign-in, and wait for the callback.",
+      callbackLabel: "Callback URL",
+      helperTitle: "What to watch",
+      helperDescription:
+        "If the popup is blocked or the automatic callback never lands, submit the manual callback URL from the next panel.",
+    },
+    form: {
+      label: "Account Label (Optional)",
+      labelPlaceholder: "Leave empty to auto-generate from email/account ID",
+      baseUrl: "Base URL",
+      priority: "Priority",
+      enabled: "Enable account after import",
+    },
+    monitor: {
+      title: "Watch token exchange and import",
+      description:
+        "The backend is exchanging credentials and importing the account into the pool.",
+      activeLabel: "Import is still running",
+      activeHint:
+        "Stay on this page or check the account pool later. The status card on the left keeps refreshing automatically.",
+    },
+    actions: {
+      startLogin: "Start OAuth Login",
+      reopenAuth: "Open OAuth Window Again",
+      goAccounts: "Go to Accounts",
+      submitCallback: "Submit Callback URL",
+    },
+    status: {
+      label: "Session Status",
+      idle: "Not started",
+      waiting_callback: "Waiting for callback",
+      exchanging: "Exchanging token",
+      importing: "Importing account",
+      completed: "Completed",
+      failed: "Failed",
+      expired: "Expired",
+      sessionId: "Session ID: {{id}}",
+      callbackUrl: "Callback URL: {{url}}",
+      expiresAt: "Expires at: {{time}}",
+    },
+    error: {
+      failed: "OAuth import failed.",
+    },
+    result: {
+      success: "Account imported successfully.",
+      accountId: "Account ID: {{id}}",
+      accountLabel: "Label: {{label}}",
+      email: "Email: {{email}}",
+      reviewTitle: "Review import result",
+      reviewDescription:
+        "Confirm whether the account was created, updated, or needs another import attempt.",
+      chatgptAccountId: "ChatGPT account ID: {{id}}",
+      chatgptPlanType: "Plan type: {{plan}}",
+      pending:
+        "The flow reached the final step, but the backend result payload has not finished arriving yet.",
+      created: "Created",
+      updated: "Already exists",
+    },
+    manual: {
+      title: "Manual Callback Fallback",
+      description:
+        "If automatic callback is unreachable, paste the full redirect URL here.",
+      placeholder: "Paste full callback URL containing code/state…",
+      hint: "Use this only when automatic callback fails.",
+    },
+    notifications: {
+      popupBlockedTitle: "Popup blocked",
+      popupBlockedDescription: "Allow popups and reopen the OAuth window.",
+      sessionCreatedTitle: "Session created",
+      sessionCreatedDescription:
+        "OAuth window opened. Complete sign-in to continue.",
+      sessionCreateFailedTitle: "Failed to create session",
+      manualSubmitTitle: "Callback submitted",
+      manualSubmitSuccess: "Manual callback completed and account imported.",
+      manualSubmitAccepted: "Manual callback accepted. Session is processing.",
+      manualSubmitFailedTitle: "Manual callback failed",
+      unknownError: "Unexpected error. Please try again.",
+    },
+  },
+  login: {
+    brand: {
+      badge: "Admin Workspace Access",
+      points: {
+        audit:
+          "Every sign-in, route change, and high-risk action can be traced later by request ID.",
+        resilience:
+          "Routing stays stable while you review tenants, keys, usage, and billing.",
+        security:
+          "Tenant boundaries and credential controls stay enforced by default.",
+      },
+      subtitle: "A controlled entry point for daily system operations.",
+      title: "Sign in to run Codex Pool with confidence",
+    },
+    messages: {
+      failed: "Sign in failed. Please check username and password.",
+      invalidCredentials: "Incorrect username or password. Please try again.",
+      sessionExpired: "Your session expired. Please sign in again.",
+    },
+    password: "Password",
+    hidePassword: "Hide password",
+    showPassword: "Show password",
+    passwordPlaceholder: "Enter admin password",
+    securityHint:
+      "Repeated sign-in failures are recorded in audit logs for later review.",
+    submit: "Sign In",
+    subtitle: "OpenAI-compatible proxy · account pool management",
+    title: "Sign in",
+    username: "Username",
+    usernamePlaceholder: "Enter admin username",
+  },
+  logs: {
+    audit: {
+      actionValues: {
+        adminOperation: "Admin operation",
+        authOperation: "Auth operation",
+        requestOperation: "Request operation",
+        tenantOperation: "Tenant operation",
+        unknown: "Unknown action",
+      },
+      actorTypes: {
+        adminUser: "Admin user",
+        apiKey: "API key",
+        system: "System",
+        tenantUser: "Tenant user",
+        unknown: "Unknown actor",
+      },
+      columns: {
+        action: "Action",
+        actor: "Actor",
+        createdAt: "Time",
+        reason: "Reason",
+        result: "Result",
+        target: "Target",
+        tenant: "Tenant",
+      },
+      description:
+        "Scope: Control Plane audit events (role / action / result / target / payload).",
+      empty: "No audit log data available",
+      filters: {
+        actionPlaceholder: "Action",
+        actorIdPlaceholder: "Actor ID",
+        actorTypePlaceholder: "Actor type",
+        keywordPlaceholder: "Keyword (reason / payload)",
+        resultStatusPlaceholder: "Result status",
+        actionAriaLabel: "Action filter",
+        actorIdAriaLabel: "Actor ID filter",
+        actorTypeAriaLabel: "Actor type filter",
+        keywordAriaLabel: "Keyword filter",
+        rangeAriaLabel: "Time range",
+        resultStatusAriaLabel: "Result status filter",
+        tenantAriaLabel: "Tenant filter",
+      },
+      resultStatuses: {
+        denied: "Denied",
+        failed: "Failed",
+        ok: "Success",
+        unknown: "Unknown result",
+      },
+      title: "Audit Logs",
+    },
+    columns: {
+      level: "Level",
+      message: "Message",
+      service: "Service Node",
+      timestamp: "Timestamp",
+    },
+    export: "Export logs",
+    filters: {
+      allTenants: "All tenants",
+    },
+    focus: "Focus:",
+    levels: {
+      all: "All Levels",
+      error: "Error",
+      info: "Info",
+      warn: "Warning",
+    },
+    messages: {
+      configUpdated: "Updated runtime config snapshot in memory",
+      empty: "No message details",
+      keyCreated: "Created API key {{keyId}}",
+      keyPatched: "Set API key {{keyId}} enabled={{enabled}}",
+      modelsLoaded: "Loaded models from upstream account {{label}}",
+      modelsProbed:
+        "Model probe ({{trigger}}): tested {{tested}} models via {{label}} (available {{available}}, unavailable {{unavailable}})",
+      proxiesTested: "Tested {{count}} proxy nodes",
+      systemState: "Queried system state: {{count}} accounts",
+      unmappedAction: "{{action}} · {{message}}",
+    },
+    range: {
+      last24Hours: "Last 24 hours",
+      last30Days: "Last 30 days",
+      last7Days: "Last 7 days",
+    },
+    request: {
+      columns: {
+        apiKey: "API Key",
+        createdAt: "Time",
+        errorCode: "Error",
+        latency: "Latency",
+        path: "Path",
+        requestId: "Request ID",
+        serviceTier: "Tier",
+        status: "Status",
+        tenant: "Tenant",
+      },
+      description:
+        "Scope: Raw Data Plane request events (status / latency / path / tenant / API key / request ID).",
+      empty: "No request log data available",
+      filters: {
+        apiKeyIdPlaceholder: "API Key ID",
+        keywordPlaceholder: "Keyword (path / error / model)",
+        requestIdPlaceholder: "Request ID",
+        statusCodePlaceholder: "Status code (e.g. 500)",
+        apiKeyAriaLabel: "API key filter",
+        keywordAriaLabel: "Keyword filter",
+        rangeAriaLabel: "Time range",
+        requestIdAriaLabel: "Request ID filter",
+        statusCodeAriaLabel: "Status code filter",
+        tenantAriaLabel: "Tenant filter",
+      },
+      title: "Request Logs",
+    },
+    events: {
+      title: "Unified Event Stream",
+      description:
+        "Inspect request, account pool, patrol, import, infrastructure, and admin action events from one workbench.",
+      meta: "Start from request_id, then drill into correlated events and raw payloads.",
+      summaryTitle: "Current signal window",
+      summaryDescription:
+        "A quick read on how much operational noise is moving through the control plane right now.",
+      tableTitle: "Event stream",
+      tableDescription:
+        "Filter by category and severity, then inspect payloads and correlation chains.",
+      searchPlaceholder: "Search event, request ID, account, reason…",
+      empty: "No events in the selected window.",
+      categories: {
+        request: "Request",
+        accountPool: "Account pool",
+        patrol: "Patrol",
+        import: "Import",
+        infra: "Infrastructure",
+        adminAction: "Admin action",
+        unknown: "Unknown",
+      },
+      severities: {
+        debug: "Debug",
+        info: "Info",
+        warn: "Warning",
+        error: "Error",
+        unknown: "Unknown",
+      },
+      metrics: {
+        total: "Events",
+        totalDesc:
+          "Unified request, account pool, patrol, import, infrastructure, and admin events.",
+        error: "Errors",
+        errorDesc: "Severity=error entries in the current window.",
+        accountPool: "Account pool",
+        accountPoolDesc:
+          "State transitions, restores, deletes, and operator-side actions.",
+        request: "Requests",
+        requestDesc:
+          "Events currently classified as request within the selected window.",
+      },
+      columns: {
+        time: "Time",
+        category: "Category",
+        severity: "Severity",
+        event: "Event",
+        context: "Context",
+      },
+      actions: {
+        inspect: "Inspect",
+      },
+      filters: {
+        category: "Category",
+        range: "Time range",
+        severity: "Severity",
+        allCategories: "All categories",
+        allSeverities: "All severities",
+      },
+      fields: {
+        requestId: "Request ID",
+        account: "Account",
+        reasonCode: "Reason code",
+        time: "Time",
+        path: "Path",
+        method: "Method",
+        jobId: "Job ID",
+        model: "Model",
+        tenant: "Tenant",
+        authProvider: "Auth provider",
+        reasonClass: "Reason class",
+        routeDecision: "Routing decision",
+        nextActionAt: "Next action",
+        statusCode: "Status code",
+        upstreamStatusCode: "Upstream status code",
+        latency: "Latency",
+      },
+      eventTypes: {
+        requestReceived: "Request received",
+        requestCompleted: "Request completed",
+        requestFailed: "Request failed",
+        routingCandidateSelected: "Routing candidate selected",
+        sameAccountRetry: "Same-account retry",
+        crossAccountFailover: "Cross-account failover",
+        continuationCursorSaved: "Continuation cursor saved",
+        continuationCursorRestored: "Continuation cursor restored",
+        wsHttpFallback: "WebSocket fell back to HTTP",
+        proxySelectionFailed: "Proxy selection failed",
+        probeSucceeded: "Probe succeeded",
+        activePatrolBatchCompleted: "Active patrol batch completed",
+        rateLimitRefreshBatchCompleted: "Rate-limit refresh batch completed",
+        pendingDeleteBatchCompleted: "Pending-delete batch completed",
+        accountPoolStateTransition: "Account pool state changed",
+        accountDeleted: "Account deleted",
+        importJobCreated: "Import job created",
+        importJobCompleted: "Import job completed",
+        importJobFailed: "Import job failed",
+        upstreamEvent: "Upstream event",
+        unknown: "Unknown event",
+      },
+      reasonCodes: {
+        requestReceived: "Request entered the system",
+        routingCandidateSelected: "Routing candidate selected",
+        rateLimited: "Rate limited",
+        transportError: "Transport error",
+        proxyUnavailable: "Proxy unavailable",
+        continuationCursorRestored: "Continuation cursor restored",
+        rateLimitRefreshBatchCompleted: "Rate-limit refresh batch completed",
+        pendingDeleteBatchCompleted: "Pending-delete batch completed",
+        accountDeactivated: "Account deactivated",
+        previousResponseNotFound: "Previous response not found",
+        upstreamRequestFailed: "Upstream request failed",
+        invalidRefreshToken: "Invalid refresh token",
+        refreshTokenReused: "Refresh token reused",
+        upstreamUnavailable: "Upstream unavailable",
+        unknown: "Unknown reason",
+      },
+      reasonClasses: {
+        healthy: "Healthy",
+        quota: "Quota",
+        fatal: "Fatal",
+        transient: "Transient",
+        admin: "Admin",
+        unknown: "Unknown class",
+      },
+      routingDecisions: {
+        recentSuccess: "Prioritize recent success",
+        freshProbe: "Prefer fresh probe results",
+        roundRobin: "Round robin",
+        sameAccountRetry: "Same-account retry",
+        crossAccountFailover: "Cross-account failover",
+        requestReceived: "Request just entered the system",
+        unknown: "Unknown decision",
+      },
+      authProviders: {
+        oauthRefreshToken: "OAuth refresh token",
+        legacyBearer: "Legacy bearer",
+        codexOauth: "Codex OAuth",
+        unknown: "Unknown auth provider",
+      },
+      insightsTitle: "Event focus",
+      insightsDescription:
+        "Start with the most common event types and reason codes, then decide whether to follow request_id or open details directly.",
+      topEventTypes: "Top event types",
+      topReasons: "Top reason codes",
+      noInsights:
+        "There is not enough summarized event data for the current filter yet.",
+      previewTitle: "Preview",
+      detailTitle: "Event detail",
+      detailDescription:
+        "Inspect raw payloads, message previews, and correlation chains.",
+      detailDescriptionWithRequest: "Request ID: {{requestId}}",
+      payloadTitle: "Payload JSON",
+      payloadDescription: "Raw payload stored in the unified event stream.",
+      correlationTitle: "Correlation chain",
+      correlationDescription: "All events sharing the same request_id.",
+    },
+    search: "Search payload or service…",
+    subtitle: "Real-time audit trails and operational context.",
+    time: {
+      displayMode:
+        "Displayed in local time ({{timezone}}). UTC is preserved in tooltips and exports.",
+      tooltip: "Local: {{local}} | UTC: {{utc}}",
+    },
+    tabs: {
+      audit: "Audit Logs",
+      request: "Request Logs",
+      system: "System Logs",
+    },
+    title: "System Logs",
+    waiting: "Waiting for incoming streams…",
+    actions: {
+      systemState: "System State",
+      configUpdate: "Config Update",
+      proxiesTest: "Proxy Health Check",
+      keyCreate: "API Key Created",
+      keyPatch: "API Key Updated",
+      modelsList: "Model List Fetch",
+      modelsProbe: "Model Probe",
+      unknown: "Unknown action ({{action}})",
+    },
+    antigravity: {
+      stream: "Stream",
+    },
+  },
+  models: {
+    actions: {
+      copyModelId: "Copy model ID",
+      createModel: "Create model",
+      syncOpenAiCatalog: "Sync OpenAI catalog",
+      probeAvailability: "Probe availability",
+      openDetails: "Details",
+      deleteModel: "Delete model",
+      deletePricing: "Delete pricing",
+      deleteBillingRule: "Delete rule",
+      editBillingRule: "Edit rule",
+      editModel: "Edit model",
+      probeNow: "Probe Now",
+      saveModelProfile: "Save model profile",
+      savePricing: "Save pricing",
+      saveBillingRule: "Save rule",
+      newBillingRule: "New rule",
+      search: "Search model IDs…",
+      sync: "Sync Status",
+    },
+    availability: {
+      available: "Available",
+      issueHint: "View unavailable reason",
+      neverChecked: "Never checked",
+      noErrorDetail: "No error detail",
+      unavailable: "Unavailable",
+      unknown: "Unknown",
+      viewIssue: "View Issue",
+    },
+    cache: {
+      fresh: "fresh",
+      stale: "stale",
+    },
+    catalog: {
+      customOnly: "Custom model",
+      hidden: "Hidden",
+      listed: "Listed",
+      unlisted: "Unlisted",
+    },
+    columns: {
+      actions: "Details",
+      availability: "Availability",
+      cachedInputPrice: "Cached Input Price",
+      context: "Context / Max output",
+      modalities: "Modalities",
+      syncedAt: "Synced",
+      catalog: "Catalog",
+      checkedAt: "Last Checked",
+      id: "Model Name",
+      inputPrice: "Input Price",
+      outputPrice: "Output Price",
+      pricingStatus: "Pricing Status",
+      provider: "Provider / Hub",
+    },
+    description:
+      "View model availability and manage model profiles and pricing here.",
+    dialog: {
+      description:
+        "Edit profile and pricing in this dialog. Saved pricing will be written back to the model pool list immediately.",
+      officialDescription:
+        "Official OpenAI model metadata is read-only here. Manual override pricing can be edited below.",
+      tabListAriaLabel: "Model profile tabs",
+      titleWithId: "Model profile · {{modelId}}",
+    },
+    empty: "No models mapped or exposed yet.",
+    emptySyncRequired: "No official catalog yet. Sync OpenAI catalog first.",
+    emptyActions: {
+      goAccounts: "Go to Accounts",
+      importAccount: "Import Accounts",
+    },
+    errors: {
+      deleteModelEntityFailed: "Failed to delete model entity.",
+      deleteModelPricingFailed: "Failed to delete model pricing.",
+      openAiCatalogSyncFailed: "Failed to sync OpenAI catalog.",
+      deleteBillingRuleFailed: "Failed to delete tiered pricing rule.",
+      modelIdRequired: "Model ID cannot be empty.",
+      probeFailed: "Model probing failed.",
+      saveBillingRuleFailed: "Failed to save tiered pricing rule.",
+      saveModelPricingFailed: "Failed to save model pricing.",
+      saveModelProfileFailed: "Failed to save model profile.",
+    },
+    filters: {
+      allProviders: "All providers",
+      providerLabel: "Provider filter",
+      availabilityLabel: "Availability filter",
+      allAvailability: "All availability",
+    },
+    antigravity: {
+      notAvailable: "N/A",
+      summaryTitle: "Catalog Overview",
+      summaryDescription:
+        "Quickly assess the current model pool from availability, provider coverage, and catalog breadth.",
+      catalogTitle: "Probe & Sync Status",
+      catalogDescription:
+        "Probe cache freshness and official catalog sync state are collected here.",
+      maintenance: "Catalog maintenance",
+      maintenanceProbeDescription:
+        "Refresh availability probing for the current account pool now.",
+      maintenanceSyncDescription:
+        "Resync the official catalog snapshot and metadata.",
+      cacheFresh: "Probe cache fresh",
+      cacheStale: "Probe cache stale",
+      catalogNeedsSync: "Catalog needs sync",
+      catalogReady: "Catalog synced",
+      cacheUpdatedAt: "Cache updated at",
+      probeSource: "Probe source account",
+      catalogSyncedAt: "Catalog synced at",
+      cacheTtl: "Cache TTL",
+      cacheTtlHours: "{{hours}} hours",
+      catalogLastError: "Latest catalog error",
+      catalogAttentionTitle: "Operator attention needed",
+      catalogAttentionSyncRequired:
+        "The official catalog has not completed a recent sync yet. Run a sync first, then confirm the model directory is complete again.",
+      catalogAttentionRetry:
+        "The most recent catalog sync or availability probe did not complete successfully. This page keeps the readable summary, while deeper technical details should be checked in the unified event stream.",
+      catalogAttentionCacheStale:
+        "The probe cache is stale. Run another availability probe before making decisions from outdated model status.",
+      directoryTitle: "Model Directory",
+      directoryDescription:
+        "Filter models by provider and availability, then inspect pricing and official metadata.",
+      noDescription: "No official description is available.",
+      ungroupedFamily: "Ungrouped models",
+      deprecated: "Deprecated",
+      copyModelIdSuccess: "Copied model ID: {{modelId}}",
+      copyModelIdFailed: "Failed to copy model ID.",
+      effectivePricingSource: "Effective pricing source",
+      officialPageStatus: "Official catalog page",
+      officialPageReady: "Available",
+      officialPageMissing: "Unavailable",
+      emptyFilteredTitle: "No models match the current filters",
+      emptyFilteredDescription:
+        "Adjust the provider, availability, or search keyword to continue exploring the catalog.",
+      noSectionItems: "No structured official metadata is available here yet.",
+      availabilityOutcomeLabel: "Latest probe outcome",
+      availabilityOutcome: {
+        available: "The latest probe marked this model as available.",
+        unavailable:
+          "The latest probe marked this model as temporarily unavailable. Check the event stream for deeper investigation.",
+        unavailableWithStatus:
+          "The latest probe returned HTTP {{status}}, so this model is currently unavailable.",
+        unknown: "A stable probe conclusion is not available yet.",
+      },
+      metrics: {
+        total: "Total models",
+        totalDesc: "Total models currently mapped or exposed by the pool.",
+        available: "Available models",
+        availableDesc: "Models that most recently probed as available.",
+        unavailable: "Unavailable models",
+        unavailableDesc:
+          "Models that still return probe errors or remain unreachable.",
+        providers: "Providers",
+        providersDesc: "Distinct providers or hubs represented in the catalog.",
+      },
+      sections: {
+        operational: "Operational state",
+        pricing: "Pricing snapshot",
+        identity: "Identity",
+        limits: "Limits",
+        modalities: "Modalities",
+        endpoints: "Endpoints",
+        features: "Features",
+        tools: "Tools",
+        snapshots: "Snapshots",
+        pricingNotes: "Pricing notes",
+      },
+    },
+    form: {
+      modelId: "Model ID",
+      modelIdLockedHint:
+        'Existing models cannot change the ID. Use "Create model" to add a new one.',
+      modelIdPlaceholder: "Example: gpt-5.3-codex",
+      provider: "Provider",
+      providerPlaceholder: "Example: openai / custom",
+      source: "Source",
+      sourceValues: {
+        entityOnly: "Entity only",
+        pricingOnly: "Pricing only",
+        upstream: "Upstream",
+      },
+      visibility: "Visibility",
+      visibilityPlaceholder: "Example: list / hide",
+    },
+    hints: {
+      cannotDeleteMissingPricing:
+        "The current model has no local pricing record. Save pricing first before deleting it.",
+      cannotDeleteNonLocalEntity:
+        "The current model is not a local entity model, so its entity cannot be deleted.",
+    },
+    loadingHint:
+      "Checking directory and availability status. The latest model list will appear automatically once complete.",
+    notice: {
+      modelEntityDeleted: "Model entity deleted.",
+      modelPricingDeleted: "Model pricing record deleted.",
+      billingRuleDeleted: "Tiered pricing rule deleted.",
+      modelPricingSaved: "Model pricing saved: {{model}}",
+      openAiCatalogSynced: "OpenAI catalog synced: {{count}} models updated.",
+      billingRuleSaved: "Tiered pricing rule saved: {{model}}",
+      modelProfileSaved: "Model profile saved: {{model}}",
+      probeCompleted:
+        "Model probing completed. The latest model pool has been synced.",
+    },
+    pricing: {
+      cachedInputPrice: "Cached input price",
+      creditsPerMillionTokens: "credits / 1M tokens",
+      disabled: "Disabled",
+      enablePricing: "Enable pricing",
+      enabled: "Enabled",
+      inputPrice: "Input price",
+      notConfigured: "Not configured",
+      outputPrice: "Output price",
+      perMillionTokensMicrocredits: "Per 1M tokens, in microcredits",
+      sectionTitle: "Model pricing",
+      effectiveSectionTitle: "Effective pricing",
+      manualOverride: "Manual override",
+      officialBase: "Official base",
+      overrideSectionTitle: "Manual price override",
+      sourceLabels: {
+        officialSync: "OpenAI official",
+        manualOverride: "Manual override",
+        probeOnly: "Probe only",
+        unknown: "Unknown",
+      },
+    },
+    rules: {
+      cachedInputMultiplierPpm: "Cached input multiplier (ppm)",
+      empty: "No tiered pricing rules are configured for this model yet.",
+      enableRule: "Enable rule",
+      inputMultiplierPpm: "Input multiplier (ppm)",
+      noThreshold: "none",
+      outputMultiplierPpm: "Output multiplier (ppm)",
+      priorityLabel: "Priority",
+      requestKind: "Request kind",
+      requestKinds: {
+        any: "Any",
+        chat: "Chat",
+        compact: "Compact",
+        response: "Responses",
+        unknown: "Unknown",
+      },
+      ruleSummary:
+        "Threshold {{threshold}} · input ×{{inputMultiplier}} · cached ×{{cachedMultiplier}} · output ×{{outputMultiplier}}",
+      scope: "Scope",
+      scopes: {
+        request: "Request",
+        session: "Session",
+        unknown: "Unknown",
+      },
+      sectionDescription:
+        "Configure request/session-based multipliers for long-context or special billing bands.",
+      sectionTitle: "Tiered pricing rules",
+      thresholdInputTokens: "Threshold input tokens",
+    },
+    probeSourceUnknown: "unknown account",
+    probeSummary:
+      "Probe cache: {{stale}}, checked {{checkedAt}}, ttl {{ttlHours}}h, source {{source}}",
+    syncHint: {
+      notSynced: "OpenAI catalog has not been synced yet.",
+      syncedAt: "Catalog synced {{time}}",
+    },
+    profile: {
+      sectionTitle: "Model profile",
+    },
+    syncing: "Mapping endpoint capabilities…",
+    tabs: {
+      pricing: "Pricing",
+      profile: "Profile",
+    },
+    title: "Models",
+    subtitle: "Available endpoints mapped from the accounts pool.",
+    detail: {
+      title: "Model Details",
+      notFound: "Model not found. It may have been removed or filtered out.",
+      httpStatus: "HTTP Status",
+      error: "Error",
+      noError: "No error detail",
+      officialTitle: "Official metadata",
+      officialDescription:
+        "Official OpenAI model metadata is read-only here. Manual override pricing can be edited below.",
+      contextWindow: "Context window",
+      maxOutputTokens: "Max output tokens",
+      knowledgeCutoff: "Knowledge cutoff",
+      reasoningTokenSupport: "Reasoning token support",
+      sourceUrl: "Source URL",
+      openOfficialPage: "Open official page",
+      capabilitiesTitle: "Capabilities",
+      inputModalities: "Input modalities",
+      outputModalities: "Output modalities",
+      endpoints: "Endpoints",
+      maxInputTokens: "Max input tokens",
+      capabilityDetails: {
+        supported: "Supported",
+        notSupported: "Not supported",
+        inputAndOutput: "Input and output",
+        inputOnly: "Input only",
+        outputOnly: "Output only",
+      },
+      rawText: "Official text snapshot",
+    },
+  },
+  costReports: {
+    admin: {
+      title: "Cost Reports",
+      description: "Read-only estimated USD usage for the last 30 days.",
+    },
+    tenant: {
+      title: "Usage Cost Reports",
+      description: "Read-only estimated USD usage for your current tenant.",
+    },
+    summary: {
+      totalCost: "Estimated cost",
+      totalRequests: "Total requests",
+      avgCostPerRequest: "Average cost / request",
+    },
+    chart: {
+      title: "Cost trend",
+      description: "Estimated USD cost aggregated from request logs.",
+      empty: "No cost data is available for the selected scope yet.",
+      series: {
+        cost: "Estimated cost",
+      },
+    },
+    logs: {
+      title: "Request logs",
+      empty: "No request logs are available for this scope.",
+      searchPlaceholder: "Search request ID, model, tenant, or status",
+      columns: {
+        time: "Time",
+        tenant: "Tenant",
+        requestId: "Request ID",
+        model: "Model",
+        status: "Status",
+        cost: "Estimated cost",
+      },
+    },
+    filters: {
+      tenant: "Tenant",
+      allTenants: "All tenants",
+      apiKey: "API key",
+      allApiKeys: "All API keys",
+      day: "By day",
+      month: "By month",
+    },
+  },
+  nav: {
+    accounts: "Accounts Pool",
+    modelRouting: "Model Routing",
+    apiKeyGroups: "Group Management",
+    apiKeys: "Key Pool",
+    billing: "Billing",
+    config: "Configuration",
+    dashboard: "Dashboard",
+    inventory: "Inventory",
+    groups: {
+      analytics: "Analytics",
+      assets: "Pool Assets",
+      operations: "Operations",
+      system: "System",
+    },
+    importJobs: "Import Jobs",
+    oauthImport: "OAuth Login Import",
+    logs: "System Logs",
+    mainNavigation: "Main navigation",
+    models: "Models",
+    online: "Online",
+    openNavigation: "Open navigation",
+    proxies: "Proxies",
+    system: "System Status",
+    tenants: "Tenant Pool",
+    usage: "Usage",
+    cleanup: "Cleanup",
+    closeNavigation: "Close navigation",
+  },
+  accountPool: {
+    title: "Account pool",
+    subtitle:
+      "Use one four-state model to monitor inventory, routable capacity, cooling records, and pending delete accounts.",
+    meta: "The current operating states are inventory / routable / cooling / pending_delete.",
+    empty: "No account pool records match the current filters.",
+    searchPlaceholder: "Search email, label, account ID, reason…",
+    filters: {
+      state: "State",
+      scope: "Scope",
+      reasonClass: "Reason class",
+      allStates: "All states",
+      allScopes: "All scopes",
+      allReasons: "All reason classes",
+    },
+    state: {
+      inventory: "Inventory",
+      routable: "Routable",
+      cooling: "Cooling",
+      pendingDelete: "Pending delete",
+      unknown: "Unknown state",
+    },
+    scope: {
+      runtime: "Runtime",
+      inventory: "Inventory",
+    },
+    reasonClass: {
+      healthy: "Healthy",
+      quota: "Quota",
+      fatal: "Fatal",
+      transient: "Transient",
+      admin: "Admin",
+      unknown: "Unknown reason class",
+    },
+    refreshState: {
+      healthy: "Healthy",
+      degraded: "Degraded",
+      missing: "Missing",
+      invalid: "Invalid",
+      unknown: "Unknown",
+    },
+    healthFreshness: {
+      fresh: "Fresh",
+      stale: "Stale",
+      unknown: "Unknown",
+    },
+    probeOutcome: {
+      ok: "Passed",
+      quota: "Quota",
+      transient: "Transient issue",
+      fatal: "Fatal issue",
+      unknown: "Not probed",
+    },
+    signalSource: {
+      active: "Active patrol",
+      passive: "Request traffic",
+      unknown: "Unknown",
+    },
+    reasonCode: {
+      none: "No blocking reason code",
+      tokenInvalidated: "Token invalidated",
+      accountDeactivated: "Account deactivated",
+      invalidRefreshToken: "Invalid refresh token",
+      refreshTokenRevoked: "Refresh token revoked",
+      refreshTokenReused: "Refresh token reused",
+      rateLimited: "Rate limited",
+      quotaExhausted: "Usage exhausted",
+      upstreamUnavailable: "Upstream unavailable",
+      transportError: "Transport error",
+      overloaded: "Upstream overloaded",
+      operatorRetiredInvalidRefreshToken:
+        "Operator retired the account for an invalid refresh token",
+      unknown: "Unknown blocking reason",
+    },
+    routeEligible: {
+      yes: "Route eligible",
+      no: "Not routable",
+    },
+    actions: {
+      inspect: "Inspect",
+      more: "More actions",
+      reprobe: "Reprobe",
+      restore: "Restore",
+      delete: "Delete",
+    },
+    columns: {
+      account: "Account",
+      state: "State",
+      reason: "Reason",
+      credentials: "Credentials",
+      operationalStatus: "Operational status",
+      quota: "Usage",
+      updatedAt: "Updated at",
+      recentSignal: "Recent signal",
+      actions: "Actions",
+    },
+    metrics: {
+      inventory: "Inventory",
+      routable: "Routable",
+      cooling: "Cooling",
+      pendingDelete: "Pending delete",
+      records: "{{count}} records",
+      totalRecords: "Total records",
+      filteredRecords: "Filtered records",
+      inventoryDesc: "Still in inventory and not yet routable.",
+      routableDesc: "Currently healthy enough to join routing.",
+      coolingDesc: "In a quota or transient cooling window.",
+      pendingDeleteDesc: "Already moved into pending delete cleanup.",
+    },
+    rateLimits: {
+      defaultLabel: "quota",
+      empty: "No quota snapshot available",
+      unavailable: "unavailable",
+      fiveHoursShort: "5h",
+      oneWeekShort: "7d",
+      githubShort: "GitHub",
+    },
+    recentSignal: {
+      updatedFallback: "Last updated",
+      window12h: "Last 12h",
+      window24h: "Last 24h",
+      active: "Active",
+      sparse: "Sparse",
+      silent: "Silent",
+      busy: "Busy",
+      noHeatmap: "No signal heatmap available",
+      summaryWithDetail: "{{relative}} · {{detail}}",
+      bucketTooltip:
+        "{{time}} · {{count}} signals · active {{active}} / passive {{passive}}",
+      legend: {
+        success: "Success",
+        mixed: "Partially failed",
+        error: "All failed",
+        request: "Request traffic",
+        patrol: "Active patrol",
+      },
+    },
+    cooling: {
+      imminent: "Resuming soon",
+      thawIn: "{{hours}}h {{minutes}}m until restore",
+    },
+    sections: {
+      stateOverviewTitle: "State overview",
+      stateOverviewDescription:
+        "Start with the distribution across inventory, routable, cooling, and pending delete.",
+      reasonOverviewTitle: "Reason classes",
+      reasonOverviewDescription:
+        "Then separate healthy, quota, fatal, transient, and admin-driven states.",
+      recordsTitle: "Pool records",
+      recordsDescription:
+        "Filter records by state, scope, and reason class, then run available actions.",
+    },
+    detail: {
+      modalTitle: "Account pool record",
+      description:
+        "Inspect the selected record's operating state, credentials, and usage summary.",
+      empty: "Record details are not available yet.",
+      sections: {
+        status: "Operating state",
+        profile: "Account profile",
+        recentSignal: "Recent signal heatmap",
+        credentials: "Credential posture",
+        quota: "Usage summary",
+        realTest: "Real test",
+      },
+      test: {
+        description:
+          "Send a real Responses conversation against this runtime account. The result counts as request traffic and does not count as active patrol.",
+        runtimeOnly:
+          "The first version of real testing only supports runtime records",
+        modelLabel: "Test model",
+        promptLabel: "Test input",
+        promptPlaceholder: "Enter the prompt to send through this account…",
+        send: "Send test",
+        clearSession: "Clear session",
+        noModels: "No models available",
+        emptyAssistant: "This response did not return any displayable text.",
+        assistantLabel: "Assistant",
+        userLabel: "User",
+        requestId: "Request ID",
+        responseId: "Response ID",
+        latency: "Latency",
+        rawError: "Raw error",
+        statusCode: "Status code",
+        errorCode: "Error code",
+        inputTokens: "Input tokens",
+        cachedInputTokens: "Cached input tokens",
+        outputTokens: "Output tokens",
+        reasoningTokens: "Reasoning tokens",
+      },
+    },
+    fields: {
+      nextAction: "Next action",
+      routeEligible: "Route eligibility",
+      healthFreshness: "Health freshness",
+      lastSignalAt: "Last signal",
+      lastSignalSource: "Signal source",
+      lastProbeAt: "Last probe at",
+      lastProbeOutcome: "Last probe outcome",
+      updatedAt: "Updated at",
+      createdAt: "Created at",
+      email: "Email",
+      chatgptAccountId: "ChatGPT account ID",
+      plan: "Plan",
+      sourceType: "Source type",
+      recordScope: "Record scope",
+      mode: "Mode",
+      authProvider: "Auth provider",
+      credentialKind: "Credential kind",
+      refreshState: "Refresh credential state",
+      reasonCode: "Reason code",
+      hasRefreshCredential: "Has refresh credential",
+      accessTokenFallback: "Has access-token fallback",
+      rateLimitsFetchedAt: "Usage snapshot updated at",
+    },
+    messages: {
+      confirmDeleteTitle: "Delete {{label}}?",
+      confirmDeleteDescription:
+        "The record will be removed from the account pool.",
+      actionSuccessTitle: "{{action}} completed",
+      actionSuccessDescription: "{{label}} has been updated.",
+      actionPartialTitle: "{{action}} partially failed",
+      actionFailedTitle: "{{action}} failed",
+      actionFailed: "Please try again later.",
+    },
+  },
+  notifications: {
+    dismiss: "Dismiss notification",
+    loginFailed: {
+      title: "Sign in failed",
+    },
+    sessionExpired: {
+      title: "Session expired",
+      description: "Please sign in again to continue.",
+    },
+  },
+  errors: {
+    common: {
+      failed: "Failed",
+      network: "Network error. Please check your connection.",
+      timeout: "Request timed out. Please try again.",
+    },
+    api: {
+      unauthorized: "Unauthorized. Please sign in again.",
+      invalidRequest: "Invalid request.",
+      invalidProxyUrl: "The proxy URL is invalid.",
+      notFound: "Resource not found.",
+      serviceUnavailable: "Service unavailable.",
+      internalError: "Internal server error.",
+      oauthProviderNotConfigured: "OAuth provider is not configured.",
+      oauthCallbackListenerUnavailable:
+        "OAuth callback listener is unavailable.",
+      invalidRefreshToken: "Refresh token is invalid or expired.",
+      refreshTokenReused:
+        "Refresh token has been reused. Obtain the latest refresh token.",
+      refreshTokenRevoked: "Refresh token has been revoked.",
+      oauthMissingClientId:
+        "OAuth provider is misconfigured (missing client_id).",
+      oauthUnauthorizedClient: "OAuth client is unauthorized.",
+      upstreamUnavailable: "Upstream service unavailable.",
+      upstreamNetworkError: "Upstream network error.",
+      oauthExchangeFailed: "OAuth exchange failed.",
+    },
+    http: {
+      badRequest: "Bad request",
+      unauthorized: "Unauthorized",
+      forbidden: "Forbidden",
+      notFound: "Not found",
+      conflict: "Conflict",
+      payloadTooLarge: "Payload too large",
+      rateLimited: "Rate limited",
+      internalServerError: "Server error",
+      badGateway: "Bad gateway",
+      serviceUnavailable: "Service unavailable",
+      gatewayTimeout: "Gateway timeout",
+    },
+  },
+  proxies: {
+    actions: {
+      add: "Add Proxy",
+      delete: "Delete",
+      edit: "Edit",
+      test: "Test",
+      testAll: "Test All",
+    },
+    antigravity: {
+      auth: "Auth",
+      authConfigured: "Configured",
+      lastErrorSummary:
+        "The latest probe failed. Continue the investigation in the unified event stream.",
+      authNone: "None",
+      emptyDescription:
+        "Add the first proxy node to start routing traffic through the admin-managed pool.",
+      latency: "Latency",
+      scheme: "Scheme",
+    },
+    badges: {
+      auth: "Auth",
+    },
+    columns: {
+      actions: "Actions",
+      lastTest: "Last Test",
+      latency: "Latency",
+      proxy: "Proxy",
+      status: "Status",
+      weight: "Weight",
+    },
+    deleteDialog: {
+      confirm: "Delete Proxy",
+      description:
+        "Delete {{label}} from the outbound proxy pool? Existing clients will stop using it after the next refresh.",
+      title: "Delete Proxy",
+    },
+    editor: {
+      create: "Create Proxy",
+      createTitle: "Create Outbound Proxy",
+      description:
+        "Configure a global outbound proxy node. Leave the URL blank during edit to keep the current secret unchanged.",
+      editTitle: "Edit Outbound Proxy",
+      enabledHint:
+        "Disabled nodes stay in the list but will not be selected or tested automatically.",
+      errors: {
+        labelRequired: "Please enter a proxy label.",
+        proxyUrlRequired: "Please enter a proxy URL.",
+        weightInvalid: "Weight must be greater than zero.",
+      },
+      fields: {
+        enabled: "Enabled",
+        label: "Label",
+        proxyUrl: "Proxy URL",
+        weight: "Weight",
+      },
+      proxyUrlHint:
+        "Supported schemes: http://, https://, socks5://. Host and port are required; credentials can be embedded in the URL.",
+      proxyUrlPlaceholder: "http://user:password@127.0.0.1:6152",
+      save: "Save Changes",
+    },
+    empty: "No outbound proxies configured yet.",
+    failModeDescriptions: {
+      allowDirectFallback:
+        "If every healthy proxy fails, the platform may fall back to a direct connection.",
+      strictProxy:
+        "If no healthy proxy is available, outbound requests fail immediately instead of bypassing the pool.",
+    },
+    failModes: {
+      allowDirectFallback: "Allow direct fallback",
+      strictProxy: "Strict proxy only",
+    },
+    filters: {
+      all: "All nodes",
+      degraded: "Degraded",
+      disabled: "Disabled",
+      healthy: "Healthy",
+      label: "Status filter",
+      offline: "Offline",
+    },
+    health: {
+      degraded: "Degraded",
+      disabled: "Disabled",
+      healthy: "Healthy",
+      offline: "Offline",
+    },
+    list: {
+      description:
+        "Add, edit, delete, and test weighted proxy nodes. The admin API stores secrets but only returns masked URLs.",
+      title: "Proxy Nodes",
+    },
+    loading: "Loading outbound proxy pool…",
+    meta: {
+      enabled: "{{count}} enabled",
+      healthy: "{{count}} healthy",
+      total: "{{count}} nodes",
+    },
+    notifications: {
+      nodeCreateFailedTitle: "Failed to create proxy",
+      nodeCreatedDescription:
+        "The proxy node has been added to the global pool.",
+      nodeCreatedTitle: "Proxy created",
+      nodeDeleteFailedTitle: "Failed to delete proxy",
+      nodeDeletedDescription:
+        "The proxy node has been removed from the global pool.",
+      nodeDeletedTitle: "Proxy deleted",
+      nodeUpdateFailedTitle: "Failed to update proxy",
+      nodeUpdatedDescription: "The proxy node has been updated.",
+      nodeUpdatedTitle: "Proxy updated",
+      settingsFailedTitle: "Failed to save proxy settings",
+      settingsSavedDescription:
+        "The global outbound proxy pool settings have been saved.",
+      settingsSavedTitle: "Proxy settings saved",
+      singleTestCompletedDescription: "The proxy test has finished.",
+      testCompletedDescription: "Finished testing {{count}} proxy nodes.",
+      testCompletedTitle: "Proxy test finished",
+      testFailedTitle: "Proxy test failed",
+      validationFailedTitle: "Please review the proxy form",
+    },
+    pending: "Not tested yet",
+    searchPlaceholder: "Search label, masked URL, or latest error…",
+    settings: {
+      description:
+        "These settings apply to every outbound HTTP and WebSocket request that goes through the platform.",
+      enabled: "Enable outbound proxy pool",
+      enabledHint:
+        "When disabled, all outbound traffic stays direct. When enabled, traffic is selected from the weighted proxy pool below.",
+      failMode: "Failure mode",
+      save: "Save Settings",
+      title: "Global Proxy Pool",
+    },
+    stats: {
+      enabled: "Enabled Nodes",
+      healthy: "Healthy Nodes",
+      total: "Total Nodes",
+    },
+    subtitle:
+      "Configure a global outbound proxy pool for all upstream traffic. This replaces the old node-health placeholder page.",
+    title: "Outbound Proxy Pool",
+  },
+  system: {
+    antigravity: {
+      billingMode: {
+        costReportOnly: "Cost report only",
+        creditEnforced: "Credit enforced",
+      },
+      capabilitiesDescription:
+        "Review the edition envelope and tenant-facing switches in one place.",
+      capabilitiesTitle: "Capability Envelope",
+      category: {
+        config: "Configuration",
+        diagnostics: "Diagnostics",
+        runtime: "Runtime",
+      },
+      componentsDescription:
+        "Verify that control-plane, data-plane, and usage storage are all responding as expected.",
+      componentsTitle: "Core Components",
+      config: {
+        authValidateUrl: "Auth Validate URL",
+        controlPlaneListen: "Control Plane Listen",
+        dataPlaneUrl: "Data Plane URL",
+        oauthRefresh: "OAuth Refresh",
+        refreshInterval: "Refresh Interval",
+      },
+      counts: {
+        apiKeys: "API Keys",
+        enabledAccounts: "Enabled Accounts",
+        oauthAccounts: "OAuth Accounts",
+        tenants: "Tenants",
+        totalAccounts: "Total Accounts",
+      },
+      dataPlane: {
+        accounts: "Accounts",
+        active: "Active",
+      },
+      dataPlaneIssue: "Runtime diagnostics report issues in the data plane.",
+      debug: {
+        authValidatorEnabled: "Auth validator",
+        billingReconcileAdjust: "Billing reconcile adjustments",
+        billingReconcileFailed: "Billing reconcile failures",
+        billingReconcileReleased: "Billing reconcile releases",
+        billingReconcileScanned: "Billing reconcile scanned",
+        failoverEnabled: "Failover enabled",
+        quickRetryMax: "Quick retry max",
+        requestFailoverWait: "Failover wait",
+        retryPollInterval: "Retry poll interval",
+        sharedRoutingCache: "Shared routing cache",
+        snapshotRevision: "Snapshot revision",
+      },
+      debugSignals: "Debug Signals",
+      debugSignalsDescription:
+        "Keep automatic failover, auth validation, cache, and billing reconcile signals in one compact view.",
+      disabled: "Disabled",
+      edition: {
+        business: "Business",
+        personal: "Personal",
+        team: "Team",
+      },
+      enabled: "Enabled",
+      features: {
+        costReports: "Cost reports",
+        costReportsHint:
+          "A lighter visibility mode suited to personal and team editions.",
+        creditBilling: "Credit billing",
+        creditBillingHint:
+          "Required before strict credit enforcement and preauth flows are active.",
+        multiTenant: "Multi-tenant",
+        multiTenantHint:
+          "Whether the control plane isolates resources and workflows by tenant.",
+        tenantPortal: "Tenant portal",
+        tenantPortalHint: "Whether a self-service tenant workspace is exposed.",
+        tenantRecharge: "Tenant recharge",
+        tenantRechargeHint:
+          "Whether tenants can recharge balances and manage credits themselves.",
+        tenantSelfService: "Tenant self-service",
+        tenantSelfServiceHint:
+          "Whether registration, password reset, and similar tenant flows are enabled.",
+      },
+      generatedAtHint: "Last runtime snapshot timestamp",
+      loading: "Loading system state…",
+      milliseconds: "{{value}}ms",
+      runtimeConfig: "Runtime Config",
+      runtimeConfigDescription:
+        "These values reflect the effective control-plane, data-plane, and OAuth refresh configuration on this instance.",
+      runtimeCounts: "Runtime Counts",
+      runtimeCountsDescription:
+        "Quickly gauge the account, key, and tenant footprint carried by this instance.",
+      seconds: "{{value}} seconds",
+      summary: {
+        billingMode: "Billing mode",
+        billingModeHint: "Current billing contract mode",
+        edition: "Edition",
+        editionHint: "Edition and capability envelope",
+        generatedAt: "Generated at",
+        generatedAtHint: "Last runtime snapshot timestamp",
+        uptimeHint: "Control plane runtime duration",
+      },
+    },
+    columns: {
+      component: "Component",
+      details: "Details",
+      status: "Status",
+      uptime: "Uptime",
+      version: "Version",
+    },
+    components: {
+      controlPlane: "Control Plane",
+      dataPlane: "Data Plane Routes",
+      usageRepo: "Usage Repository",
+    },
+    details: {
+      analyticsUnavailable: "Analytics unavailable",
+      apiActive: "API Gateway Active",
+      checkingAPI: "Checking API…",
+      dbConnected: "Time-series DB connected",
+      endpointsResponding: "Proxy endpoints responding",
+    },
+    labels: {
+      local: "Local",
+      remote: "Remote",
+      storage: "Storage",
+      version: "Version:",
+      uptime: "Uptime",
+    },
+    observability: {
+      badges: {
+        failoverOff: "Failover: OFF",
+        failoverOn: "Failover: ON",
+        failoverWait: "Failover wait {{value}}ms",
+        quickRetry: "Quick retry ≤ {{value}}",
+        retryPoll: "Retry poll {{value}}ms",
+        sharedCacheOff: "Shared cache: OFF",
+        sharedCacheOn: "Shared cache: ON",
+        stickyConflictAvoidOff: "Sticky conflict avoid: OFF",
+        stickyConflictAvoidOn: "Sticky conflict avoid: ON",
+      },
+      hints: {
+        billingPreauthCaptureMissingTotal:
+          "Billing preauth capture missing total",
+        billingPreauthErrorRatioAvg: "Billing preauth error ratio avg",
+        billingPreauthErrorRatioP95: "Billing preauth error ratio p95",
+        billingPreauthTopModelP95: "Billing preauth top model p95",
+        billingReconcileAdjust:
+          "Automatic balance adjustments written by reconcile.",
+        billingReconcileFailed:
+          "Reconcile operations that failed and need inspection.",
+        billingReconcileReleased: "Authorizations auto-closed by reconcile.",
+        billingReconcileScanned:
+          "Reconcile facts scanned from request_log and ledger.",
+        billingReleaseWithoutCaptureRatio:
+          "Billing release without capture ratio",
+        billingSettleCompleteRatio: "Billing settle complete ratio",
+        cacheHitRate:
+          "Combined hit ratio of local + shared sticky cache lookups.",
+        failoverAttempts: "Total number of cross-account failover attempts.",
+        failoverExhausted: "Requests that still failed after retries/failover.",
+        failoverSuccess:
+          "Requests recovered successfully after switching accounts.",
+        failoverSuccessRate: "Success ratio among all failover attempts.",
+        sameAccountRetry: "Quick retries on the same account before switching.",
+        stickyHitRate: "Sticky-session hit ratio across routed requests.",
+      },
+      metrics: {
+        billingPreauthCaptureMissingTotal:
+          "Billing preauth capture missing total",
+        billingPreauthErrorRatioAvg: "Billing preauth error ratio avg",
+        billingPreauthErrorRatioP95: "Billing preauth error ratio p95",
+        billingPreauthTopModelP95: "Billing preauth top model p95",
+        billingReconcileAdjust: "Billing reconcile adjustments",
+        billingReconcileFailed: "Billing reconcile failed",
+        billingReconcileReleased: "Billing reconcile releases",
+        billingReconcileScanned: "Billing reconcile scanned",
+        billingReleaseWithoutCaptureRatio:
+          "Billing release without capture ratio",
+        billingSettleCompleteRatio: "Billing settle complete ratio",
+        cacheHitRate: "Routing cache hit rate",
+        failoverAttempts: "Failover attempts",
+        failoverExhausted: "Failover exhausted",
+        failoverSuccess: "Failover successes",
+        failoverSuccessRate: "Failover success rate",
+        sameAccountRetry: "Same-account quick retries",
+        stickyHitRate: "Sticky hit rate",
+      },
+      na: "N/A",
+      subtitle:
+        "Data-plane automatic failover, sticky routing, and cache effectiveness.",
+      title: "Failover & Cache Observability",
+      unavailableDesc:
+        "Check whether /internal/v1/debug/state is enabled and accessible from control-plane.",
+      unavailableLoading: "Waiting for latest debug snapshot...",
+      unavailableTitle: "Data-plane debug state unavailable",
+    },
+    searchPlaceholder: "Search component, details, version…",
+    status: {
+      checking: "Checking",
+      degraded: "Degraded",
+      healthy: "Healthy",
+      offline: "Offline",
+      unknown: "Unknown",
+    },
+    subtitle: "Infrastructure dependencies and health self-check.",
+    title: "System Status",
+  },
+  tenantApiKeys: {
+    actions: {
+      changeGroup: "Change Group",
+      disable: "Disable",
+      enable: "Enable",
+    },
+    columns: {
+      actions: "Actions",
+      group: "Group",
+      ipAllowlist: "IP Allowlist",
+      modelAllowlist: "Model Allowlist",
+      name: "Name",
+      prefix: "Prefix",
+      status: "Status",
+    },
+    create: {
+      description:
+        "Create an API key for the current tenant, configure IP allowlists, and choose a pricing group.",
+      groupLabel: "API key group",
+      ipAllowlistAriaLabel: "IP allowlist",
+      ipAllowlistPlaceholder: "Optional: comma-separated IP allowlist",
+      modelAllowlistAriaLabel: "Model allowlist",
+      modelAllowlistPlaceholder: "Optional: comma-separated model allowlist",
+      nameAriaLabel: "Key name",
+      namePlaceholder: "Enter key name",
+      submit: "Create Key",
+      title: "Create API Key",
+    },
+    list: {
+      description:
+        "Manage API keys, update their group assignment, and review status.",
+      empty: "No API keys yet.",
+      searchPlaceholder: "Search by name, prefix, group or status",
+      title: "API Key List",
+    },
+    messages: {
+      createFailed: "Failed to create API key",
+      createSuccess: "API key created successfully",
+      plaintextShownOnce: "The plaintext key is shown only once. Save it now.",
+      retryLater: "Please retry later",
+      updateGroupFailed: "Failed to update API key group",
+    },
+    group: {
+      allowAllModels: "All catalog models enabled",
+      invalidHint:
+        "This group was deleted. Choose a new group before making requests.",
+      modelCount: "{{count}} configured models",
+    },
+    preview: {
+      allowAllModels: "All catalog models are available in this group.",
+      columns: {
+        finalPrice: "Final price",
+        formulaPrice: "Formula price",
+        model: "Model",
+      },
+      description:
+        "Current group: {{name}} · in {{input}} · cached {{cached}} · out {{output}}",
+      empty: "No group available yet.",
+      modelCount: "{{count}} models are configured in this group.",
+      title: "Selected group preview",
+    },
+    status: {
+      disabled: "Disabled",
+      enabled: "Enabled",
+      groupInvalid: "Group invalid",
+    },
+    subtitle: "Manage API keys and bind each key to a pricing and model group.",
+  },
+  tenantApp: {
+    appName: "Codex Pool Tenant",
+    auth: {
+      actions: {
+        backToLogin: "Back to Sign In",
+        login: "Sign In",
+        openForgot: "Forgot password?",
+        register: "Register",
+        resetPassword: "Reset Password",
+        sendResetCode: "Send Reset Code",
+        switchToLogin: "Already have an account? Sign in",
+        switchToRegister: "No account yet? Create one",
+        verifyEmail: "Verify Email",
+      },
+      brand: {
+        badge: "Tenant Workspace Access",
+        points: {
+          audit:
+            "Usage, billing, and policy changes stay traceable when your team needs context.",
+          resilience:
+            "Failover-aware routing keeps tenant traffic available during upstream instability.",
+          security:
+            "Keys, sessions, and account access stay isolated per tenant.",
         },
+        subtitle:
+          "Sign in once to manage usage, billing, and API keys from one secure workspace.",
+        title: "Tenant access for everyday operations",
+      },
+      error: {
+        invalidCredentialsOrUnverified:
+          "Sign-in failed. Check your email and password, then verify the account if this is your first login.",
+        loginFailed: "Sign-in failed. Please try again.",
+        passwordMismatch: "Password and confirm password do not match.",
+        passwordResetFailed: "Password reset failed.",
+        registerFailed: "Registration failed.",
+        sendResetCodeFailed: "Failed to send reset code.",
+        verificationFailed: "Verification failed.",
+      },
+      fields: {
+        confirmPassword: "Confirm Password",
+        email: "Email",
+        newPassword: "New Password",
+        password: "Password",
+        passwordMin8: "Password (at least 8 characters)",
+        resetCode: "Reset Code",
+        tenantName: "Tenant Name",
+        verificationCode: "Verification Code",
+      },
+      forgot: {
+        drawerHint:
+          "Send a reset code to this email first. Once it arrives, enter the code and your new password below.",
+        stepResetPassword: "Set New Password",
+        stepSendCode: "Send Code",
+      },
+      notice: {
+        emailVerified:
+          "Email verification successful. Please sign in with this account.",
+        loginSuccess: "Sign-in successful.",
+        passwordResetSuccess:
+          "Password reset successful. Please sign in again.",
+        registerDebugCode:
+          "Registration successful, verification code (debug): {{code}}",
+        registerSuccess:
+          "Registration complete. Enter the verification code from your email to activate the account.",
+        resetCodeDebug: "Password reset code (debug): {{code}}",
+        resetCodeSentIfExists:
+          "If this email exists, we'll send a reset code shortly.",
+        sessionExpired: "Tenant session expired. Please sign in again.",
+        verifyCodeHint: "No code yet? Wait 60 seconds, then request another.",
+      },
+      placeholders: {
+        confirmPassword: "Re-enter password",
+        email: "name@company.com",
+        newPassword: "Enter a new password",
+        password: "Enter your password",
+        resetCode: "Enter reset code",
+        tenantName: "Enter tenant name",
+        verificationCode: "Enter verification code",
+      },
+      sections: {
+        authSubtitle:
+          "Choose sign in or registration, then continue in the same focused workspace.",
+        forgotPasswordTitle: "Reset Password",
+        forgotPasswordSubtitle:
+          "Request a reset code first, then set a new password without leaving this flow.",
+        loginTitle: "Tenant Sign In",
+        registerTitle: "Tenant Registration",
+        verifyEmailSubtitle:
+          "Enter the code from your email to finish activation and return to sign in.",
+        verifyEmailTitle: "Email Verification",
+      },
+      social: {
+        comingSoon: "Third-party sign in (coming soon)",
+        github: "GitHub",
+        google: "Google",
+      },
+      tabs: {
+        login: "Sign In",
+        register: "Register",
+      },
+    },
+    loadingPortal: "Loading tenant portal…",
+    menu: {
+      analytics: "Analytics",
+      apiKeys: "API Keys",
+      assets: "Assets",
+      billing: "Billing Center",
+      dashboard: "Dashboard",
+      logs: "Logs",
+      usage: "Usage",
+    },
+  },
+  tenantBilling: {
+    actions: {
+      dailyCheckin: "Daily Checkin",
+      exportCsv: "Export Csv",
+    },
+    failoverAction: {
+      crossAccountFailover: "Cross Account Failover",
+      retrySameAccount: "Retry Same Account",
+      returnFailure: "Return Failure",
+      unknown: "Unknown",
+    },
+    failureReason: {
+      accountDeactivated: "Account Deactivated",
+      billingUsageMissing: "Billing Usage Missing",
+      failoverExhausted: "Failover Exhausted",
+      noUpstreamAccount: "No Upstream Account",
+      streamPreludeError: "Stream Prelude Error",
+      tokenInvalidated: "Token Invalidated",
+      transportError: "Transport Error",
+      upstreamRequestFailed: "Upstream Request Failed",
+      unknown: "Unknown",
+    },
+    filters: {
+      day: "Day",
+      dayShort: "D",
+      granularityAriaLabel: "Billing granularity",
+      month: "Month",
+      monthShort: "M",
+    },
+    groupPricing: {
+      allKeys: "All API keys",
+      apiKeyAriaLabel: "API key selector",
+      columns: {
+        apiKey: "API key",
+        finalPrice: "Final price",
+        formulaPrice: "Formula price",
+        group: "Group",
+        model: "Model",
+        state: "State",
+      },
+      description:
+        "Review which pricing group each API key uses, and inspect effective model prices for a selected key.",
+      groupSummary: "Configured models: {{count}} · allow-all: {{allowAll}}",
+      invalidGroup:
+        "This API key is bound to a deleted group. Requests will fail until you change the group.",
+      state: {
+        active: "Active",
+        invalid: "Invalid (deleted group)",
+      },
+      title: "API key group pricing",
+    },
+    ledger: {
+      columns: {
+        balanceAfter: "Balance After",
+        delta: "Delta",
+        detail: "Detail",
+        event: "Event",
+        model: "Model",
+        requestType: "Request Type",
+        time: "Time",
+      },
+      description: "Tenant-filtered ledger entries.",
+      detail: {
+        charged: "Charged",
+        extraCharge: "Extra Charge",
+        failoverAction: "Failover Action",
+        failure: "Failure",
+        failureKeyword: "Failure Keyword",
+        failureSummary: "{{failure}}（{{reason}}）",
+        reconcileAdjust: "Reconcile Adjust",
+        serviceTier: "Service Tier: {{tier}}",
+        source: "Source",
+        tokenSettle: "Token Settle",
+        unitPrice: {
+          cached: "Cached",
+          input: "Input",
+          output: "Output",
+          summary: "Summary",
+        },
+        upstreamStatus: "Upstream {{status}}",
+      },
+      empty: "No ledger entries yet.",
+      requestTypes: {
+        nonStream: "Non-stream",
+        stream: "Stream",
+        unknown: "-",
+      },
+      showRaw: "Show Raw",
+      title: "Ledger Entries",
+    },
+    messages: {
+      checkinFailed: "Checkin Failed",
+      checkinReward: "Checkin Reward",
+      checkinSuccess: "Checkin Success",
+      retryLater: "Retry Later",
+    },
+    releaseReason: {
+      billingSettleFailed: "Billing Settle Failed",
+      failoverExhausted: "Failover Exhausted",
+      invalidUpstreamUrl: "Invalid Upstream Url",
+      noUpstreamAccount: "No Upstream Account",
+      streamPreludeError: "Stream Prelude Error",
+      streamUsageMissing: "Stream Usage Missing",
+      transportError: "Transport Error",
+      upstreamRequestFailed: "Upstream Request Failed",
+      unknown: "Unknown",
+    },
+    snapshot: {
+      columns: {
+        consumed: "Consumed",
+        date: "Date",
+        eventCount: "Event Count",
+        month: "Month",
+      },
+      description:
+        "Aggregate deduction events for settlement and reconciliation.",
+      empty: "No settlement snapshots yet.",
+      title: "Settlement Snapshot",
+    },
+    subtitle: "View tenant balance, consumption trend, and ledger details.",
+    summary: {
+      balance: "Current Balance",
+      monthConsumed: "This Month Consumed",
+      negativeOnly: "Negative deductions only",
+      todayConsumed: "Today Consumed",
+      unitCredits: "Unit: credits",
+    },
+    title: "Billing Center",
+    tokenSegment: {
+      cached: "Cached",
+      input: "Input",
+      output: "Output",
+    },
+    trend: {
+      description: "Consumption trend aggregated by selected granularity.",
+      empty: "No trend data yet.",
+      series: {
+        consumed: "Consumed",
+      },
+      title: "Consumption Trend",
+    },
+  },
+  modelRouting: {
+    actions: {
+      add: "Add Rule",
+      delete: "Delete",
+      edit: "Edit Rule",
+    },
+    columns: {
+      actions: "Actions",
+      exactModels: "Exact Models",
+      fallbackProfiles: "Fallback Profiles",
+      family: "Family",
+      modelPrefixes: "Prefixes",
+      name: "Policy",
+      priority: "Priority",
+      status: "Status",
+    },
+    empty: "No routing policies returned by the backend",
+    loading: "Loading routing policies…",
+    searchPlaceholder: "Search policies…",
+    status: {
+      disabled: "Disabled",
+      enabled: "Enabled",
+    },
+    subtitle:
+      "Profiles and policies now follow the real admin model routing contract",
+    summary: {
+      enabledProfiles: "Enabled Profiles",
+      enabledProfilesHint: "Profiles currently eligible for routing",
+      profiles: "Profiles",
+      profilesHint: "Routing profiles returned by the backend",
+      selectedAccounts: "Selected Accounts",
+      selectedAccountsHint: "Explicit account bindings across all profiles",
+    },
+    title: "Model Routing",
+  },
+  groupsPage: {
+    actions: {
+      create: "Create group",
+      deleteGroup: "Delete group",
+      deletePolicy: "Delete policy",
+      saveGroup: "Save group",
+      savePolicy: "Save model policy",
+    },
+    columns: {
+      actions: "Actions",
+      apiKeysCount: "API Keys {{count}}",
+      modelsCount: "Models {{count}}",
+      multipliers: "Multipliers",
+      name: "Group",
+      status: "Status",
+      updated: "Updated",
+      usage: "Usage",
+    },
+    editor: {
+      createTitle: "Create group",
+      description:
+        "Configure group-wide multipliers and per-model pricing overrides.",
+      editTitle: "Edit group",
+      groupSettingsTitle: "Group settings",
+      groupSettingsDescription:
+        "Maintain the group name, multipliers, and default behavior.",
+    },
+    empty: "No groups yet",
+    antigravity: {
+      allowAllModels: "Allow all catalog models",
+      catalogCount: "Catalog {{count}}",
+      coverage: "Coverage {{coverage}}",
+      listTitle: "Group directory",
+      listDescription:
+        "Organize API keys, model coverage, and billing multipliers with unified group policies.",
+      metrics: {
+        total: "Total groups",
+        totalDesc:
+          "All API key groups currently available to manage in this workspace.",
+        enabled: "Enabled groups",
+        enabledDesc: "Groups that are still active for operator use.",
+        defaults: "Default groups",
+        defaultsDesc:
+          "Groups currently acting as default routing and pricing fallbacks.",
+        catalog: "Catalog models",
+        catalogDesc:
+          "Unified catalog entries currently available for group policy selection.",
+      },
+      scopedPolicy: "Scoped model policy",
+      serviceUnavailableDescription:
+        "The current runtime does not provide API key group storage, so this page is unavailable right now.",
+      updatedAt: "Updated {{value}}",
+    },
+    filters: {
+      statusLabel: "Status filter",
+      all: "All groups",
+      enabled: "Enabled",
+      disabled: "Disabled",
+      deleted: "Deleted",
+    },
+    form: {
+      allowAllModels: "Allow all catalog models",
+      cachedInputMultiplier: "Cached input multiplier (ppm)",
+      default: "Default group",
+      description: "Description",
+      enabled: "Enabled",
+      inputMultiplier: "Input multiplier (ppm)",
+      name: "Group name",
+      outputMultiplier: "Output multiplier (ppm)",
+    },
+    messages: {
+      groupDeleted: "Group deleted.",
+      groupDeleteFailed: "Failed to delete group.",
+      groupSaved: "Group saved: {{name}}",
+      groupSaveFailed: "Failed to save group.",
+      policyDeleted: "Model policy deleted.",
+      policyDeleteFailed: "Failed to delete model policy.",
+      policySaved: "Model policy saved.",
+      policySaveFailed: "Failed to save model policy.",
+    },
+    policy: {
+      cachedInputAbsolutePrice: "Cached input absolute price",
+      cachedInputMultiplier: "Cached input multiplier (ppm)",
+      description:
+        "Select a model from the unified catalog, then configure multipliers or absolute pricing.",
+      enabled: "Policy enabled",
+      inputAbsolutePrice: "Input absolute price",
+      inputMultiplier: "Input multiplier (ppm)",
+      model: "Model",
+      outputAbsolutePrice: "Output absolute price",
+      outputMultiplier: "Output multiplier (ppm)",
+      title: "Model policy",
+    },
+    preview: {
+      basePricingSummary:
+        "{{provider}} · {{title}} · Base price: Input {{input}} · Cached {{cached}} · Output {{output}}",
+      columns: {
+        finalPrice: "Final price",
+        formulaPrice: "Formula price",
+        mode: "Mode",
+        model: "Model",
+      },
+      description: "Shows the final displayed price for the selected group.",
+      empty: "No models configured yet.",
+      moreHidden: "{{count}} more models are collapsed",
+      mode: {
+        absolute: "Absolute override",
+        formula: "Multiplier formula",
+      },
+      title: "Effective model preview",
+    },
+    searchPlaceholder: "Search groups by name, description or status",
+    status: {
+      default: "Default",
+      deleted: "Deleted",
+      disabled: "Disabled",
+      enabled: "Enabled",
+    },
+    subtitle:
+      "Manage API key groups, model allowlists, multipliers, and group-level absolute prices.",
+    title: "Group Management",
+  },
+  modelRoutingPage: {
+    title: "Model Routing",
+    subtitle:
+      "Configure routing profiles, model-aware fallback chains, and planner model chain settings for model dispatching.",
+    actions: {
+      refresh: "Refresh",
+      createProfile: "Create profile",
+      createPolicy: "Create policy",
+      edit: "Edit",
+      delete: "Delete",
+      deleteProfile: "Delete profile",
+      deletePolicy: "Delete policy",
+      saveSettings: "Save settings",
+      saveClaudeCode: "Save Claude Code routing",
+      resetClaudeCode: "Reset Claude Code changes",
+      saveProfile: "Save profile",
+      savePolicy: "Save policy",
+    },
+    settings: {
+      title: "Model Routing Settings",
+      description:
+        "Control model routing publish behavior, safety switches, and planner model chain settings.",
+      enabled: "Enable model routing",
+      enabledHint: "If disabled, compiled routing plans remain manual-only.",
+      autoPublish: "Auto publish",
+      autoPublishHint:
+        "Automatically publish refreshed plans after a recompute cycle completes.",
+      killSwitch: "Kill switch",
+      killSwitchHint:
+        "Immediately stop planner-driven changes without removing saved policies.",
+      triggerMode: "Trigger mode",
+      plannerModelChain: "Planner model chain",
+      plannerModelChainPlaceholder: "gpt-5.2-codex, gpt-4.1-mini",
+      plannerModelChainHint:
+        "Select planner fallbacks from the model pool and keep them ordered from highest to lowest priority.",
+      updatedAt: "Updated at {{value}}",
+    },
+    claudeCode: {
+      title: "Claude Code",
+      description:
+        "Map each Claude Code family onto exactly one internal target model. Leave a family empty if you want it to stay unmapped.",
+      enabled: "Enable Claude Code routing",
+      enabledHint:
+        "When disabled, Claude Code family mappings stay saved but are not applied at runtime.",
+      updatedAt: "Updated at {{value}}",
+      emptySelection: "No target model selected for this family.",
+      unmapped: "Unmapped",
+      familyHint:
+        "Select exactly one internal target model for {{family}}. Leave it empty to keep requests for this family unmapped.",
+      families: {
+        opus: "Opus",
+        sonnet: "Sonnet",
+        haiku: "Haiku",
+      },
+    },
+    versions: {
+      title: "Published Versions",
+      description:
+        "Latest compiled routing plans ready for data-plane consumption.",
+      empty: "No published plan versions yet.",
+      noReason: "No publish reason recorded.",
+      defaultSegments: "Default segments {{count}}",
+      policyCount: "Policies {{count}}",
+      showMore: "Show {{count}} older versions",
+      showLess: "Show fewer versions",
+    },
+    profiles: {
+      title: "Routing Profiles",
+      description:
+        "Reusable account selectors that describe which plans, modes, and auth types can serve a request.",
+      empty: "No routing profiles yet.",
+      summary:
+        "Plans {{plans}} · modes {{modes}} · auth filters {{authProviders}} · include {{include}} · exclude {{exclude}}",
+      anyMode: "All account modes",
+    },
+    policies: {
+      title: "Model Policies",
+      description:
+        "Match model families or exact model IDs to an explicit fallback chain of routing profiles.",
+      empty: "No model routing policies yet.",
+      summary:
+        "Exact models {{exact}} · prefixes {{prefixes}} · fallback profiles {{fallbacks}}",
+      fallbackChain: "Fallback chain: {{value}}",
+      moreExactModels: "+{{count}} more",
+    },
+    dialogs: {
+      createProfile: "Create routing profile",
+      editProfile: "Edit routing profile",
+      profileDescription:
+        "Compose a reusable selector for a class of upstream accounts.",
+      createPolicy: "Create model policy",
+      editPolicy: "Edit model policy",
+      policyDescription:
+        "Define how a model family maps onto ordered routing profiles.",
+    },
+    form: {
+      name: "Name",
+      description: "Description",
+      priority: "Priority",
+      enabled: "Enabled",
+      enabledHint:
+        "Only enabled profiles can appear in compiled routing plans.",
+      policyEnabledHint:
+        "Disabled policies stay saved but will not participate in routing.",
+      planTypes: "Plan types",
+      planTypesPlaceholder: "free, plus, team",
+      modes: "Account modes",
+      authProviders: "Auth providers",
+      includeAccounts: "Include account IDs",
+      includeAccountsPlaceholder: "uuid-1, uuid-2",
+      excludeAccounts: "Exclude account IDs",
+      excludeAccountsPlaceholder: "uuid-3, uuid-4",
+      family: "Model family",
+      familyPlaceholder: "gpt-5",
+      exactModels: "Exact models",
+      exactModelsPlaceholder: "gpt-5.4, gpt-5.2-codex",
+      exactModelsHint:
+        "Choose exact model IDs from the model pool so availability and pricing are visible while you configure the rule.",
+      modelPrefixes: "Model prefixes",
+      modelPrefixesPlaceholder: "gpt-5, o3",
+      modelPrefixesHint:
+        "Keep wildcard prefix rules here as free-form text, such as gpt-5 or o3.",
+      fallbackProfiles: "Fallback profiles",
+      noProfilesAvailable:
+        "Create a routing profile first so policies have somewhere to point.",
+    },
+    messages: {
+      settingsSaved: "Model routing settings saved.",
+      settingsSaveFailed: "Failed to save model routing settings.",
+      claudeCodeSettingsSaved: "Claude Code routing settings saved.",
+      claudeCodeSettingsSaveFailed:
+        "Failed to save Claude Code routing settings.",
+      errorLearningSettingsSaved: "Upstream error learning settings saved.",
+      errorLearningSettingsSaveFailed:
+        "Failed to save upstream error learning settings.",
+      profileSaved: "Routing profile saved: {{name}}",
+      profileSaveFailed: "Failed to save routing profile.",
+      profileDeleted: "Routing profile deleted.",
+      profileDeleteFailed: "Failed to delete routing profile.",
+      policySaved: "Model routing policy saved: {{name}}",
+      policySaveFailed: "Failed to save model routing policy.",
+      policyDeleted: "Model routing policy deleted.",
+      policyDeleteFailed: "Failed to delete model routing policy.",
+      templateSaved: "Upstream error template saved.",
+      templateSaveFailed: "Failed to save upstream error template.",
+      templateApproved: "Upstream error template approved.",
+      templateApproveFailed: "Failed to approve upstream error template.",
+      templateRejected: "Upstream error template rejected.",
+      templateRejectFailed: "Failed to reject upstream error template.",
+      templateRewritten: "Upstream error template rewritten by AI.",
+      templateRewriteFailed: "Failed to rewrite upstream error template.",
+      builtinTemplateSaved: "Built-in error template saved.",
+      builtinTemplateSaveFailed: "Failed to save built-in error template.",
+      builtinTemplateRewritten: "Built-in error template rewritten by AI.",
+      builtinTemplateRewriteFailed:
+        "Failed to rewrite built-in error template.",
+      builtinTemplateReset: "Built-in error template restored to default.",
+      builtinTemplateResetFailed:
+        "Failed to restore the built-in error template.",
+    },
+    status: {
+      enabled: "Enabled",
+      disabled: "Disabled",
+      killSwitchOn: "Kill switch on",
+      autoPublishOn: "Auto publish on",
+      autoPublishOff: "Auto publish off",
+    },
+    triggerModes: {
+      hybrid: "Hybrid",
+      scheduledOnly: "Scheduled only",
+      eventOnly: "Event only",
+    },
+    modes: {
+      apiKey: "API key",
+      chatGptSession: "ChatGPT session",
+      codexOauth: "Codex OAuth",
+    },
+    authProviders: {
+      legacyBearer: "Legacy bearer",
+      oauthRefreshToken: "OAuth refresh token",
+    },
+    modelSelector: {
+      addModel: "Add model",
+      searchPlaceholder: "Search models by ID or title",
+      emptyCatalog: "No models are available from the model pool yet.",
+      emptySelection: "No models selected yet.",
+      noMatches: "No matching models found.",
+      unknownModel: "Saved model not in pool",
+      moveUp: "Move up",
+      moveDown: "Move down",
+      remove: "Remove model",
+    },
+    errorLearning: {
+      settings: {
+        title: "Upstream Error Learning",
+        description:
+          "Review first-seen upstream failures before they are promoted into deterministic error rules.",
+        enabled: "Enable upstream error learning",
+        enabledHint:
+          "When disabled, unknown upstream errors fall back to the generic localized error response.",
+        firstSeenTimeoutMs: "First-seen timeout (ms)",
+        firstSeenTimeoutMsHint:
+          "Maximum synchronous wait budget for generating the first provisional template.",
+        reviewHitThreshold: "Review threshold",
+        reviewHitThresholdHint:
+          "Move a provisional template into review after this many repeated hits.",
+        updatedAt: "Updated at {{value}}",
+      },
+      templates: {
+        title: "Template Review Queue",
+        description:
+          "Inspect provisional and pending templates, then approve, reject, edit, or rewrite them.",
+        empty: "No upstream error templates yet.",
+        fingerprint: "Fingerprint",
+        normalizedStatusCode: "Status {{value}}",
+        hitCount: "{{count}} hits",
+        semanticErrorCode: "Semantic error code",
+        action: "Action",
+        retryScope: "Retry scope",
+        firstSeenAt: "First seen",
+        lastSeenAt: "Last seen",
+        updatedAt: "Updated",
+        representativeSamples: "Representative samples",
+        samplesEmpty: "No normalized samples captured yet.",
+        localizedTemplates: "Localized templates",
+        localeEmpty: "No template yet for this locale.",
+      },
+      builtinTemplates: {
+        title: "Built-in Templates",
+        description:
+          "Review default algorithm and gateway error copy, then edit, rewrite, or restore it to the system default.",
+        empty: "No built-in templates available.",
+        kind: "Template kind",
+        code: "Template code",
+        scope: "Scope",
+        gatewayOnly: "Gateway-local response",
+        overridden: "Overridden",
+        defaultState: "Default",
+        updatedAt: "Override updated at {{value}}",
+        localizedTemplates: "Effective templates",
+        defaultTemplates: "Default templates",
+        save: "Save built-in template",
+        reset: "Restore default",
+        kinds: {
+          gatewayError: "Gateway error",
+          heuristicUpstream: "Heuristic upstream",
+        },
+      },
+      actions: {
+        saveSettings: "Save error-learning settings",
+        approve: "Approve",
+        reject: "Reject",
+        rewrite: "AI rewrite",
+        saveTemplate: "Save template",
+        cancel: "Cancel",
+      },
+      statuses: {
+        provisionalLive: "Provisional live",
+        reviewPending: "Review pending",
+        approved: "Approved",
+        rejected: "Rejected",
+      },
+      actionValues: {
+        returnFailure: "Return failure",
+        retrySameAccount: "Retry same account",
+        retryCrossAccount: "Retry another account",
+      },
+      retryScopes: {
+        none: "Do not retry",
+        sameAccount: "Same account",
+        crossAccount: "Cross-account",
+      },
+      locales: {
+        en: "English",
+        zhCN: "Chinese (Simplified)",
+      },
+    },
+    common: {
+      none: "None",
+      deletedProfile: "Deleted profile",
+      priority: "Priority {{value}}",
+    },
+  },
+  tenantDashboard: {
+    actions: {
+      manageApiKeys: "Manage API keys",
+      refresh: "Refresh",
+      viewBilling: "View billing",
+      viewRequestLogs: "View request logs",
+    },
+    kpi: {
+      avgFirstTokenSpeed: "Average first-token speed",
+      avgFirstTokenSpeedDesc: "TTFT (streaming exact / non-stream approximate)",
+      rpm: "RPM",
+      rpmDesc: "Requests per minute",
+      totalRequests: "Total requests",
+      totalRequestsDesc: "Selected time range",
+      totalTokens: "Token consumption total",
+      totalTokensDesc: "Input + cached + output + reasoning",
+      tpm: "TPM",
+      tpmDesc: "Tokens per minute",
+    },
+    cards: {
+      activeKeys: {
+        description: "Note: only keys with requests are counted",
+        title: "Active API key count (selected period)",
+      },
+      availableKeys: {
+        description: "Based on tenant key management settings",
+        title: "Currently available API keys",
+      },
+      keyEnableRate: {
+        description: "Enabled ratio: {{rate}}% ({{enabled}} / {{total}} keys)",
+        title: "Enabled key ratio",
+      },
+      peakHour: {
+        description: "Highest request volume window",
+        empty: "No data",
+        title: "Peak hour",
+      },
+      requestVelocity: {
+        description: "Average requests per hour in selected range",
+        title: "Request velocity (per hour)",
+      },
+      totalRequests: {
+        scopeAllKeys: " / all keys",
+        scopePrefix: "Scope: current tenant",
+        scopeSingleKey: " / single key",
+        title: "Total tenant API key requests (selected period)",
+      },
+    },
+    filters: {
+      apiKeyAll: "All API keys",
+      apiKeyAriaLabel: "API key filter",
+      apiKeyHint: "Tip: use API key filter to isolate hotspots quickly.",
+      range: {
+        last24Hours: "Last 24 hours",
+        last30Days: "Last 30 days",
+        last7Days: "Last 7 days",
+      },
+      rangeAriaLabel: "Time range",
+    },
+    groupOverview: {
+      allDescription:
+        "How your current API keys are distributed across pricing groups.",
+      empty: "No API key groups to show yet.",
+      invalid: "Invalid",
+      keysBound: "{{count}} API keys bound",
+      singleDescription: "Current API key group binding and validity state.",
+      title: "API key group overview",
+      valid: "Valid",
+    },
+    hero: {
+      badge: "Tenant Workspace Overview",
+      summaryAllApiKeys: "(all API keys)",
+      summaryPrefix: "Scope: current tenant ",
+      summarySingleApiKey: "(single API key)",
+    },
+    subtitle: {
+      allApiKeys: "(all API keys)",
+      metricsFocus:
+        "Focus metrics: TPM, RPM, total token consumption, total requests, and first-token speed.",
+      scopePrefix: "Scope: current tenant ",
+      singleApiKey: "(single API key)",
+      timeWindow: ", time window: ",
+    },
+    modelDistribution: {
+      a11y: {
+        model: "Model",
+        summary:
+          "Model distribution includes {{count}} rows sorted by {{mode}}. Leading model: {{top}}. Accessible data table follows.",
+        summaryEmpty:
+          "No model distribution data is available for the current selection.",
+        tableLabel: "Model distribution data table",
+      },
+      description: "Top models by request count or token usage.",
+      empty: "No model distribution data yet",
+      modeRequests: "By requests",
+      modeTokens: "By tokens",
+      other: "Other",
+      title: "Model request distribution",
+    },
+    tokenComponents: {
+      cached: "Cached",
+      input: "Input",
+      output: "Output",
+      reasoning: "Reasoning",
+    },
+    tokenSummary: {
+      title: "Token component summary",
+    },
+    tokenTrend: {
+      a11y: {
+        summary:
+          "Hourly token trend covering {{count}} time points from {{start}} to {{end}}. Accessible data table follows.",
+        summaryEmpty:
+          "No token trend data is available for the current selection.",
+        tableLabel: "Token usage trend data table",
+        timestamp: "Timestamp",
+      },
+      description:
+        "Hourly token trend by component. Toggle components to focus specific consumption.",
+      empty: "No token trend data yet",
+      title: "Token usage trend",
+    },
+    topKeys: {
+      description: "Based on request volume in selected period",
+      empty: "No API key usage rankings yet",
+      requests: "{{count}} requests",
+      share: "Share {{percent}}%",
+      title: "Top API keys",
+      unknownKey: "Unnamed key",
+    },
+    title: "Tenant Dashboard",
+    trend: {
+      description: "Scope: tenant API key request volume (hourly granularity)",
+      empty: "No request data yet",
+      series: {
+        requests: "Requests",
+      },
+      title: "Request trend",
+    },
+  },
+  tenantLogs: {
+    audit: {
+      actionValues: {
+        adminOperation: "Admin operation",
+        authOperation: "Auth operation",
+        requestOperation: "Request operation",
+        tenantOperation: "Tenant operation",
+        unknown: "Unknown action",
+      },
+      actorTypes: {
+        adminUser: "Admin user",
+        apiKey: "API key",
+        system: "System",
+        tenantUser: "Tenant user",
+        unknown: "Unknown actor",
+      },
+      payloadSummary: {
+        empty: "No extra context",
+        present: "Contains extra context",
+      },
+      reasonValues: {
+        none: "No extra notes",
+        present: "Contains operator notes",
+      },
+      targetTypes: {
+        requestLogs: "Request logs",
+        requestCorrelation: "Request correlation",
+        auditLogs: "Audit logs",
+        usageSummary: "Usage summary",
+        usageTrendsHourly: "Hourly usage trends",
+        upstreamErrorTemplate: "Upstream error template",
+        builtinErrorTemplate: "Built-in error template",
+        upstreamErrorLearningSettings: "Error learning settings",
+        unknown: "Unknown target",
+      },
+      columns: {
+        action: "Action",
+        actor: "Actor",
+        reason: "Details",
+        result: "Result",
+        target: "Target",
+        time: "Time",
+      },
+      description:
+        "Definition: Control Plane audit events (current tenant only)",
+      empty: "No audit log data",
+      filters: {
+        actionPlaceholder: "Action",
+        actorIdPlaceholder: "Actor ID",
+        actorTypePlaceholder: "Actor type",
+        keywordPlaceholder: "Keyword (reason/payload)",
+        resultStatusPlaceholder: "Result status",
+        actionAriaLabel: "Action filter",
+        actorIdAriaLabel: "Actor ID filter",
+        actorTypeAriaLabel: "Actor type filter",
+        keywordAriaLabel: "Keyword filter",
+        rangeAriaLabel: "Time range",
+        resultStatusAriaLabel: "Result status filter",
+      },
+      resultStatuses: {
+        denied: "Denied",
+        failed: "Failed",
+        ok: "Success",
+        unknown: "Unknown result",
+      },
+      title: "Audit Logs",
+    },
+    filters: {
+      range: {
+        last24Hours: "Last 24 hours",
+        last30Days: "Last 30 days",
+        last7Days: "Last 7 days",
+      },
+    },
+    request: {
+      columns: {
+        apiKey: "API Key",
+        error: "Error",
+        latency: "Latency",
+        path: "Path",
+        requestId: "Request ID",
+        serviceTier: "Tier",
+        status: "Status",
+        time: "Time",
+      },
+      description:
+        "Definition: Data Plane raw request events (current tenant only)",
+      empty: "No log data",
+      filters: {
+        apiKeyIdPlaceholder: "API Key ID",
+        keywordPlaceholder: "Keyword (path/error/model)",
+        requestIdPlaceholder: "Request ID",
+        statusCodePlaceholder: "Status code (e.g. 429)",
+        apiKeyAriaLabel: "API key filter",
+        keywordAriaLabel: "Keyword filter",
+        rangeAriaLabel: "Time range",
+        requestIdAriaLabel: "Request ID filter",
+        statusCodeAriaLabel: "Status code filter",
+      },
+      title: "Request Logs",
+    },
+    scope: "Scope: current tenant only",
+    time: {
+      displayMode:
+        "Displayed in local time ({{timezone}}). UTC is preserved in tooltips.",
+      tooltip: "Local: {{local}} | UTC: {{utc}}",
+    },
+    tabs: {
+      audit: "Audit Logs",
+      request: "Request Logs",
+    },
+    title: "Logs",
+  },
+  tenantUsage: {
+    columns: {
+      apiKey: "API Key",
+      requests: "Requests",
+      tenantLabel: "Tenant: {{tenantId}}",
+      time: "Time",
+    },
+    filters: {
+      apiKeyAll: "All API Keys",
+      apiKeyAriaLabel: "API key filter",
+      range: {
+        last24Hours: "Last 24 Hours",
+        last30Days: "Last 30 Days",
+        last7Days: "Last 7 Days",
+      },
+      rangeAriaLabel: "Time range",
+    },
+    hourly: {
+      description: "Auditable request counts for each sampled hour.",
+      empty: "No data yet",
+      title: "Hourly Detail",
+    },
+    leaderboard: {
+      description:
+        "API keys ranked by request volume for the current selection.",
+      empty: "No ranking data yet",
+      title: "API Key Ranking",
+    },
+    subtitle:
+      "Track request trends, filter by API key, and inspect hourly detail.",
+    title: "Usage Analysis",
+    trend: {
+      description: "Hourly request volume for the selected time range.",
+      empty: "No trend data yet",
+      title: "Request Trend",
+    },
+  },
+  tenants: {
+    create: {
+      fields: {
+        expiresAt: "Expires At",
+        name: "Tenant Name",
+        plan: "Plan (credit)",
+        status: "Status (active/inactive)",
+      },
+      submit: "Create Tenant",
+      title: "Create Tenant",
+    },
+    impersonation: {
+      copyToken: "Copy Token",
+      create: "Create Impersonation",
+      fields: {
+        reason: "Reason (required)",
+      },
+      revoke: "Revoke Session",
+      sessionIdLabel: "Session ID:",
+      tokenLabel: "Token:",
+      title: "Admin Impersonation",
+    },
+    notifications: {
+      copyPlaintextFailed: "Failed to copy plaintext key.",
+      copyPlaintextSuccess: "Copied plaintext key.",
+      copyPrefixFailed: "Failed to copy key prefix.",
+      copyPrefixSuccess: "Copied key prefix.",
+      copyTokenFailed: "Failed to copy token.",
+      copyTokenSuccess: "Copied token.",
+    },
+    keys: {
+      create: {
+        fields: {
+          name: "Key Name",
+          namePlaceholder: "e.g. admin-main-key",
+        },
+        submit: "Create Key",
+        title: "Create API Key",
+      },
+      created: {
+        copyPlaintext: "Copy Plaintext Key",
+        notice: "The plaintext key is shown only once. Save it now.",
+      },
+      list: {
+        caption: "Tenant API key list",
         columns: {
-            component: "Component",
-            details: "Details",
-            status: "Status",
-            uptime: "Uptime",
-            version: "Version"
+          actions: "Actions",
+          createdAt: "Created At",
+          name: "Name",
+          prefix: "Prefix",
+          status: "Status",
         },
-        components: {
-            controlPlane: "Control Plane",
-            dataPlane: "Data Plane Routes",
-            usageRepo: "Usage Repository"
-        },
-        details: {
-            analyticsUnavailable: "Analytics unavailable",
-            apiActive: "API Gateway Active",
-            checkingAPI: "Checking API…",
-            dbConnected: "Time-series DB connected",
-            endpointsResponding: "Proxy endpoints responding"
-        },
-        labels: {
-            local: "Local",
-            remote: "Remote",
-            storage: "Storage",
-            version: "Version:",
-            uptime: "Uptime"
-        },
-        observability: {
-            badges: {
-                failoverOff: "Failover: OFF",
-                failoverOn: "Failover: ON",
-                failoverWait: "Failover wait {{value}}ms",
-                quickRetry: "Quick retry ≤ {{value}}",
-                retryPoll: "Retry poll {{value}}ms",
-                sharedCacheOff: "Shared cache: OFF",
-                sharedCacheOn: "Shared cache: ON",
-                stickyConflictAvoidOff: "Sticky conflict avoid: OFF",
-                stickyConflictAvoidOn: "Sticky conflict avoid: ON"
-            },
-            hints: {
-                billingPreauthCaptureMissingTotal: "Billing preauth capture missing total",
-                billingPreauthErrorRatioAvg: "Billing preauth error ratio avg",
-                billingPreauthErrorRatioP95: "Billing preauth error ratio p95",
-                billingPreauthTopModelP95: "Billing preauth top model p95",
-                billingReconcileAdjust: "Automatic balance adjustments written by reconcile.",
-                billingReconcileFailed: "Reconcile operations that failed and need inspection.",
-                billingReconcileReleased: "Authorizations auto-closed by reconcile.",
-                billingReconcileScanned: "Reconcile facts scanned from request_log and ledger.",
-                billingReleaseWithoutCaptureRatio: "Billing release without capture ratio",
-                billingSettleCompleteRatio: "Billing settle complete ratio",
-                cacheHitRate: "Combined hit ratio of local + shared sticky cache lookups.",
-                failoverAttempts: "Total number of cross-account failover attempts.",
-                failoverExhausted: "Requests that still failed after retries/failover.",
-                failoverSuccess: "Requests recovered successfully after switching accounts.",
-                failoverSuccessRate: "Success ratio among all failover attempts.",
-                sameAccountRetry: "Quick retries on the same account before switching.",
-                stickyHitRate: "Sticky-session hit ratio across routed requests."
-            },
-            metrics: {
-                billingPreauthCaptureMissingTotal: "Billing preauth capture missing total",
-                billingPreauthErrorRatioAvg: "Billing preauth error ratio avg",
-                billingPreauthErrorRatioP95: "Billing preauth error ratio p95",
-                billingPreauthTopModelP95: "Billing preauth top model p95",
-                billingReconcileAdjust: "Billing reconcile adjustments",
-                billingReconcileFailed: "Billing reconcile failed",
-                billingReconcileReleased: "Billing reconcile releases",
-                billingReconcileScanned: "Billing reconcile scanned",
-                billingReleaseWithoutCaptureRatio: "Billing release without capture ratio",
-                billingSettleCompleteRatio: "Billing settle complete ratio",
-                cacheHitRate: "Routing cache hit rate",
-                failoverAttempts: "Failover attempts",
-                failoverExhausted: "Failover exhausted",
-                failoverSuccess: "Failover successes",
-                failoverSuccessRate: "Failover success rate",
-                sameAccountRetry: "Same-account quick retries",
-                stickyHitRate: "Sticky hit rate"
-            },
-            na: "N/A",
-            subtitle: "Data-plane automatic failover, sticky routing, and cache effectiveness.",
-            title: "Failover & Cache Observability",
-            unavailableDesc: "Check whether /internal/v1/debug/state is enabled and accessible from control-plane.",
-            unavailableLoading: "Waiting for latest debug snapshot...",
-            unavailableTitle: "Data-plane debug state unavailable"
-        },
-        searchPlaceholder: "Search component, details, version…",
+        copyPrefix: "Copy key prefix",
+        disable: "Disable",
+        empty: "No API keys for this tenant",
+        enable: "Enable",
         status: {
-            checking: "Checking",
-            degraded: "Degraded",
-            healthy: "Healthy",
-            offline: "Offline",
-            unknown: "Unknown"
+          active: "Active",
+          revoked: "Revoked",
         },
-        subtitle: "Infrastructure dependencies and health self-check.",
-        title: "System Status"
+        title: "API Key List",
+      },
     },
-    tenantApiKeys: {
-        actions: {
-            changeGroup: "Change Group",
-            disable: "Disable",
-            enable: "Enable"
-        },
-        columns: {
-            actions: "Actions",
-            group: "Group",
-            ipAllowlist: "IP Allowlist",
-            modelAllowlist: "Model Allowlist",
-            name: "Name",
-            prefix: "Prefix",
-            status: "Status"
-        },
-        create: {
-            description: "Create an API key for the current tenant, configure IP allowlists, and choose a pricing group.",
-            groupLabel: "API key group",
-            ipAllowlistAriaLabel: "IP allowlist",
-            ipAllowlistPlaceholder: "Optional: comma-separated IP allowlist",
-            modelAllowlistAriaLabel: "Model allowlist",
-            modelAllowlistPlaceholder: "Optional: comma-separated model allowlist",
-            nameAriaLabel: "Key name",
-            namePlaceholder: "Enter key name",
-            submit: "Create Key",
-            title: "Create API Key"
-        },
-        list: {
-            description: "Manage API keys, update their group assignment, and review status.",
-            empty: "No API keys yet.",
-            searchPlaceholder: "Search by name, prefix, group or status",
-            title: "API Key List"
-        },
-        messages: {
-            createFailed: "Failed to create API key",
-            createSuccess: "API key created successfully",
-            plaintextShownOnce: "The plaintext key is shown only once. Save it now.",
-            retryLater: "Please retry later",
-            updateGroupFailed: "Failed to update API key group"
-        },
-        group: {
-            allowAllModels: "All catalog models enabled",
-            invalidHint: "This group was deleted. Choose a new group before making requests.",
-            modelCount: "{{count}} configured models"
-        },
-        preview: {
-            allowAllModels: "All catalog models are available in this group.",
-            columns: {
-                finalPrice: "Final price",
-                formulaPrice: "Formula price",
-                model: "Model"
-            },
-            description: "Current group: {{name}} · in {{input}} · cached {{cached}} · out {{output}}",
-            empty: "No group available yet.",
-            modelCount: "{{count}} models are configured in this group.",
-            title: "Selected group preview"
-        },
-        status: {
-            disabled: "Disabled",
-            enabled: "Enabled",
-            groupInvalid: "Group invalid"
-        },
-        subtitle: "Manage API keys and bind each key to a pricing and model group."
+    list: {
+      caption: "Tenant pool list",
+      columns: {
+        actions: "Actions",
+        apiKeys: "API Keys",
+        expiresAt: "Expires At",
+        plan: "Plan",
+        status: "Status",
+        tenant: "Tenant",
+        tenantId: "Tenant ID",
+        updatedAt: "Updated At",
+      },
+      planValues: {
+        credit: "Credit",
+        standard: "Standard",
+        unknown: "Unknown plan",
+      },
+      statusValues: {
+        active: "Active",
+        inactive: "Inactive",
+        suspended: "Suspended",
+        disabled: "Disabled",
+        unknown: "Unknown",
+      },
+      defaultBadge: "Default",
+      empty: "No tenant data",
+      openProfile: "Open Tenant Profile",
+      searchPlaceholder: "Search tenants by name or ID",
+      title: "Tenant Pool",
     },
-    tenantApp: {
-        appName: "Codex Pool Tenant",
-        auth: {
-            actions: {
-                backToLogin: "Back to Sign In",
-                login: "Sign In",
-                openForgot: "Forgot password?",
-                register: "Register",
-                resetPassword: "Reset Password",
-                sendResetCode: "Send Reset Code",
-                switchToLogin: "Already have an account? Sign in",
-                switchToRegister: "No account yet? Create one",
-                verifyEmail: "Verify Email"
-            },
-            brand: {
-                badge: "Tenant Workspace Access",
-                points: {
-                    audit: "Usage, billing, and policy changes stay traceable when your team needs context.",
-                    resilience: "Failover-aware routing keeps tenant traffic available during upstream instability.",
-                    security: "Keys, sessions, and account access stay isolated per tenant."
-                },
-                subtitle: "Sign in once to manage usage, billing, and API keys from one secure workspace.",
-                title: "Tenant access for everyday operations"
-            },
-            error: {
-                invalidCredentialsOrUnverified: "Sign-in failed. Check your email and password, then verify the account if this is your first login.",
-                loginFailed: "Sign-in failed. Please try again.",
-                passwordMismatch: "Password and confirm password do not match.",
-                passwordResetFailed: "Password reset failed.",
-                registerFailed: "Registration failed.",
-                sendResetCodeFailed: "Failed to send reset code.",
-                verificationFailed: "Verification failed."
-            },
-            fields: {
-                confirmPassword: "Confirm Password",
-                email: "Email",
-                newPassword: "New Password",
-                password: "Password",
-                passwordMin8: "Password (at least 8 characters)",
-                resetCode: "Reset Code",
-                tenantName: "Tenant Name",
-                verificationCode: "Verification Code"
-            },
-            forgot: {
-                drawerHint: "Send a reset code to this email first. Once it arrives, enter the code and your new password below.",
-                stepResetPassword: "Set New Password",
-                stepSendCode: "Send Code"
-            },
-            notice: {
-                emailVerified: "Email verification successful. Please sign in with this account.",
-                loginSuccess: "Sign-in successful.",
-                passwordResetSuccess: "Password reset successful. Please sign in again.",
-                registerDebugCode: "Registration successful, verification code (debug): {{code}}",
-                registerSuccess: "Registration complete. Enter the verification code from your email to activate the account.",
-                resetCodeDebug: "Password reset code (debug): {{code}}",
-                resetCodeSentIfExists: "If this email exists, we'll send a reset code shortly.",
-                sessionExpired: "Tenant session expired. Please sign in again.",
-                verifyCodeHint: "No code yet? Wait 60 seconds, then request another."
-            },
-            placeholders: {
-                confirmPassword: "Re-enter password",
-                email: "name@company.com",
-                newPassword: "Enter a new password",
-                password: "Enter your password",
-                resetCode: "Enter reset code",
-                tenantName: "Enter tenant name",
-                verificationCode: "Enter verification code"
-            },
-            sections: {
-                authSubtitle: "Choose sign in or registration, then continue in the same focused workspace.",
-                forgotPasswordTitle: "Reset Password",
-                forgotPasswordSubtitle: "Request a reset code first, then set a new password without leaving this flow.",
-                loginTitle: "Tenant Sign In",
-                registerTitle: "Tenant Registration",
-                verifyEmailSubtitle: "Enter the code from your email to finish activation and return to sign in.",
-                verifyEmailTitle: "Email Verification"
-            },
-            social: {
-                comingSoon: "Third-party sign in (coming soon)",
-                github: "GitHub",
-                google: "Google"
-            },
-            tabs: {
-                login: "Sign In",
-                register: "Register"
-            }
-        },
-        loadingPortal: "Loading tenant portal…",
-        menu: {
-            analytics: "Analytics",
-            apiKeys: "API Keys",
-            assets: "Assets",
-            billing: "Billing Center",
-            dashboard: "Dashboard",
-            logs: "Logs",
-            usage: "Usage"
-        }
+    messages: {
+      apiKeyCreateFailed: "Failed to create API key",
+      apiKeyCreateSuccess:
+        "Created API key for tenant {{tenantName}}: {{keyName}}",
+      apiKeyNameRequired: "Please enter an API key name",
+      apiKeyToggleFailed: "Failed to update API key status",
+      createFailed: "Failed to create tenant",
+      createSuccess: "Tenant created: {{name}} ({{id}})",
+      impersonationCreateFailed: "Failed to create impersonation",
+      impersonationCreated: "Impersonation session created (token returned)",
+      impersonationRevokeFailed: "Failed to revoke impersonation",
+      impersonationRevoked: "Impersonation session revoked",
+      rechargeFailed: "Failed to recharge tenant",
+      rechargeSuccess:
+        "Recharge successful: +{{amount}}, current balance {{balance}}",
+      updateFailed: "Failed to update tenant",
+      updateSuccess: "Tenant updated: {{name}}",
     },
-    tenantBilling: {
-        actions: {
-            dailyCheckin: "Daily Checkin",
-            exportCsv: "Export Csv"
-        },
-        failoverAction: {
-            crossAccountFailover: "Cross Account Failover",
-            retrySameAccount: "Retry Same Account",
-            returnFailure: "Return Failure",
-            unknown: "Unknown"
-        },
-        failureReason: {
-            accountDeactivated: "Account Deactivated",
-            billingUsageMissing: "Billing Usage Missing",
-            failoverExhausted: "Failover Exhausted",
-            noUpstreamAccount: "No Upstream Account",
-            streamPreludeError: "Stream Prelude Error",
-            tokenInvalidated: "Token Invalidated",
-            transportError: "Transport Error",
-            upstreamRequestFailed: "Upstream Request Failed",
-            unknown: "Unknown"
-        },
-        filters: {
-            day: "Day",
-            dayShort: "D",
-            granularityAriaLabel: "Billing granularity",
-            month: "Month",
-            monthShort: "M"
-        },
-        groupPricing: {
-            allKeys: "All API keys",
-            apiKeyAriaLabel: "API key selector",
-            columns: {
-                apiKey: "API key",
-                finalPrice: "Final price",
-                formulaPrice: "Formula price",
-                group: "Group",
-                model: "Model",
-                state: "State"
-            },
-            description: "Review which pricing group each API key uses, and inspect effective model prices for a selected key.",
-            groupSummary: "Configured models: {{count}} · allow-all: {{allowAll}}",
-            invalidGroup: "This API key is bound to a deleted group. Requests will fail until you change the group.",
-            state: {
-                active: "Active",
-                invalid: "Invalid (deleted group)"
-            },
-            title: "API key group pricing"
-        },
-        ledger: {
-            columns: {
-                balanceAfter: "Balance After",
-                delta: "Delta",
-                detail: "Detail",
-                event: "Event",
-                model: "Model",
-                requestType: "Request Type",
-                time: "Time"
-            },
-            description: "Tenant-filtered ledger entries.",
-            detail: {
-                charged: "Charged",
-                extraCharge: "Extra Charge",
-                failoverAction: "Failover Action",
-                failure: "Failure",
-                failureKeyword: "Failure Keyword",
-                failureSummary: "{{failure}}（{{reason}}）",
-                reconcileAdjust: "Reconcile Adjust",
-                serviceTier: "Service Tier: {{tier}}",
-                source: "Source",
-                tokenSettle: "Token Settle",
-                unitPrice: {
-                    cached: "Cached",
-                    input: "Input",
-                    output: "Output",
-                    summary: "Summary"
-                },
-                upstreamStatus: "Upstream {{status}}"
-            },
-            empty: "No ledger entries yet.",
-            requestTypes: {
-                nonStream: "Non-stream",
-                stream: "Stream",
-                unknown: "-"
-            },
-            showRaw: "Show Raw",
-            title: "Ledger Entries"
-        },
-        messages: {
-            checkinFailed: "Checkin Failed",
-            checkinReward: "Checkin Reward",
-            checkinSuccess: "Checkin Success",
-            retryLater: "Retry Later"
-        },
-        releaseReason: {
-            billingSettleFailed: "Billing Settle Failed",
-            failoverExhausted: "Failover Exhausted",
-            invalidUpstreamUrl: "Invalid Upstream Url",
-            noUpstreamAccount: "No Upstream Account",
-            streamPreludeError: "Stream Prelude Error",
-            streamUsageMissing: "Stream Usage Missing",
-            transportError: "Transport Error",
-            upstreamRequestFailed: "Upstream Request Failed",
-            unknown: "Unknown"
-        },
-        snapshot: {
-            columns: {
-                consumed: "Consumed",
-                date: "Date",
-                eventCount: "Event Count",
-                month: "Month"
-            },
-            description: "Aggregate deduction events for settlement and reconciliation.",
-            empty: "No settlement snapshots yet.",
-            title: "Settlement Snapshot"
-        },
-        subtitle: "View tenant balance, consumption trend, and ledger details.",
-        summary: {
-            balance: "Current Balance",
-            monthConsumed: "This Month Consumed",
-            negativeOnly: "Negative deductions only",
-            todayConsumed: "Today Consumed",
-            unitCredits: "Unit: credits"
-        },
-        title: "Billing Center",
-        tokenSegment: {
-            cached: "Cached",
-            input: "Input",
-            output: "Output"
-        },
-        trend: {
-            description: "Consumption trend aggregated by selected granularity.",
-            empty: "No trend data yet.",
-            series: {
-                consumed: "Consumed"
-            },
-            title: "Consumption Trend"
-        }
+    profile: {
+      dialogDescription:
+        "Manage profile, API keys, and usage in one dialog with tabs.",
+      dialogTitle: "Tenant Profile",
+      dialogTitleWithName: "Tenant Profile · {{name}}",
+      fields: {
+        expiresAt: "Expires At",
+        plan: "Plan",
+        status: "Status",
+      },
+      meta: {
+        createdAt: "Created At",
+        tenantId: "Tenant ID",
+        updatedAt: "Updated At",
+      },
+      save: "Save Profile",
+      section: {
+        title: "Tenant Profile",
+      },
+      tabs: {
+        ariaLabel: "Tenant profile tabs",
+        keys: "API Keys",
+        profile: "Profile",
+        usage: "Usage",
+      },
     },
-    modelRouting: {
-        actions: {
-            add: "Add Rule",
-            delete: "Delete",
-            edit: "Edit Rule"
-        },
-        columns: {
-            actions: "Actions",
-            exactModels: "Exact Models",
-            fallbackProfiles: "Fallback Profiles",
-            family: "Family",
-            modelPrefixes: "Prefixes",
-            name: "Policy",
-            priority: "Priority",
-            status: "Status"
-        },
-        empty: "No routing policies returned by the backend",
-        loading: "Loading routing policies…",
-        searchPlaceholder: "Search policies…",
-        status: {
-            disabled: "Disabled",
-            enabled: "Enabled"
-        },
-        subtitle: "Profiles and policies now follow the real admin model routing contract",
-        summary: {
-            enabledProfiles: "Enabled Profiles",
-            enabledProfilesHint: "Profiles currently eligible for routing",
-            profiles: "Profiles",
-            profilesHint: "Routing profiles returned by the backend",
-            selectedAccounts: "Selected Accounts",
-            selectedAccountsHint: "Explicit account bindings across all profiles"
-        },
-        title: "Model Routing"
+    recharge: {
+      fields: {
+        amount: "Microcredits (integer)",
+        reason: "Reason",
+      },
+      submit: "Apply Recharge",
+      title: "Tenant Recharge",
     },
-    groupsPage: {
-        actions: {
-            create: "Create group",
-            deleteGroup: "Delete group",
-            deletePolicy: "Delete policy",
-            saveGroup: "Save group",
-            savePolicy: "Save model policy"
-        },
-        columns: {
-            actions: "Actions",
-            apiKeysCount: "API Keys {{count}}",
-            modelsCount: "Models {{count}}",
-            multipliers: "Multipliers",
-            name: "Group",
-            status: "Status",
-            updated: "Updated",
-            usage: "Usage"
-        },
-        editor: {
-            createTitle: "Create group",
-            description: "Configure group-wide multipliers and per-model pricing overrides.",
-            editTitle: "Edit group",
-            groupSettingsTitle: "Group settings",
-            groupSettingsDescription: "Maintain the group name, multipliers, and default behavior."
-        },
-        empty: "No groups yet",
-        antigravity: {
-            allowAllModels: "Allow all catalog models",
-            catalogCount: "Catalog {{count}}",
-            coverage: "Coverage {{coverage}}",
-            listTitle: "Group directory",
-            listDescription: "Organize API keys, model coverage, and billing multipliers with unified group policies.",
-            metrics: {
-                total: "Total groups",
-                totalDesc: "All API key groups currently available to manage in this workspace.",
-                enabled: "Enabled groups",
-                enabledDesc: "Groups that are still active for operator use.",
-                defaults: "Default groups",
-                defaultsDesc: "Groups currently acting as default routing and pricing fallbacks.",
-                catalog: "Catalog models",
-                catalogDesc: "Unified catalog entries currently available for group policy selection."
-            },
-            scopedPolicy: "Scoped model policy",
-            serviceUnavailableDescription: "The current runtime does not provide API key group storage, so this page is unavailable right now.",
-            updatedAt: "Updated {{value}}"
-        },
-        filters: {
-            statusLabel: "Status filter",
-            all: "All groups",
-            enabled: "Enabled",
-            disabled: "Disabled",
-            deleted: "Deleted"
-        },
-        form: {
-            allowAllModels: "Allow all catalog models",
-            cachedInputMultiplier: "Cached input multiplier (ppm)",
-            default: "Default group",
-            description: "Description",
-            enabled: "Enabled",
-            inputMultiplier: "Input multiplier (ppm)",
-            name: "Group name",
-            outputMultiplier: "Output multiplier (ppm)"
-        },
-        messages: {
-            groupDeleted: "Group deleted.",
-            groupDeleteFailed: "Failed to delete group.",
-            groupSaved: "Group saved: {{name}}",
-            groupSaveFailed: "Failed to save group.",
-            policyDeleted: "Model policy deleted.",
-            policyDeleteFailed: "Failed to delete model policy.",
-            policySaved: "Model policy saved.",
-            policySaveFailed: "Failed to save model policy."
-        },
-        policy: {
-            cachedInputAbsolutePrice: "Cached input absolute price",
-            cachedInputMultiplier: "Cached input multiplier (ppm)",
-            description: "Select a model from the unified catalog, then configure multipliers or absolute pricing.",
-            enabled: "Policy enabled",
-            inputAbsolutePrice: "Input absolute price",
-            inputMultiplier: "Input multiplier (ppm)",
-            model: "Model",
-            outputAbsolutePrice: "Output absolute price",
-            outputMultiplier: "Output multiplier (ppm)",
-            title: "Model policy"
-        },
-        preview: {
-            basePricingSummary: "{{provider}} · {{title}} · Base price: Input {{input}} · Cached {{cached}} · Output {{output}}",
-            columns: {
-                finalPrice: "Final price",
-                formulaPrice: "Formula price",
-                mode: "Mode",
-                model: "Model"
-            },
-            description: "Shows the final displayed price for the selected group.",
-            empty: "No models configured yet.",
-            moreHidden: "{{count}} more models are collapsed",
-            mode: {
-                absolute: "Absolute override",
-                formula: "Multiplier formula"
-            },
-            title: "Effective model preview"
-        },
-        searchPlaceholder: "Search groups by name, description or status",
-        status: {
-            default: "Default",
-            deleted: "Deleted",
-            disabled: "Disabled",
-            enabled: "Enabled"
-        },
-        subtitle: "Manage API key groups, model allowlists, multipliers, and group-level absolute prices.",
-        title: "Group Management"
-    },
-    modelRoutingPage: {
-        title: "Model Routing",
-        subtitle: "Configure routing profiles, model-aware fallback chains, and planner model chain settings for model dispatching.",
-        actions: {
-            refresh: "Refresh",
-            createProfile: "Create profile",
-            createPolicy: "Create policy",
-            edit: "Edit",
-            delete: "Delete",
-            deleteProfile: "Delete profile",
-            deletePolicy: "Delete policy",
-            saveSettings: "Save settings",
-            saveProfile: "Save profile",
-            savePolicy: "Save policy"
-        },
-        settings: {
-            title: "Model Routing Settings",
-            description: "Control model routing publish behavior, safety switches, and planner model chain settings.",
-            enabled: "Enable model routing",
-            enabledHint: "If disabled, compiled routing plans remain manual-only.",
-            autoPublish: "Auto publish",
-            autoPublishHint: "Automatically publish refreshed plans after a recompute cycle completes.",
-            killSwitch: "Kill switch",
-            killSwitchHint: "Immediately stop planner-driven changes without removing saved policies.",
-            triggerMode: "Trigger mode",
-            plannerModelChain: "Planner model chain",
-            plannerModelChainPlaceholder: "gpt-5.2-codex, gpt-4.1-mini",
-            plannerModelChainHint: "Select planner fallbacks from the model pool and keep them ordered from highest to lowest priority.",
-            updatedAt: "Updated at {{value}}"
-        },
-        versions: {
-            title: "Published Versions",
-            description: "Latest compiled routing plans ready for data-plane consumption.",
-            empty: "No published plan versions yet.",
-            noReason: "No publish reason recorded.",
-            defaultSegments: "Default segments {{count}}",
-            policyCount: "Policies {{count}}",
-            showMore: "Show {{count}} older versions",
-            showLess: "Show fewer versions"
-        },
-        profiles: {
-            title: "Routing Profiles",
-            description: "Reusable account selectors that describe which plans, modes, and auth types can serve a request.",
-            empty: "No routing profiles yet.",
-            summary: "Plans {{plans}} · modes {{modes}} · auth filters {{authProviders}} · include {{include}} · exclude {{exclude}}",
-            anyMode: "All account modes"
-        },
-        policies: {
-            title: "Model Policies",
-            description: "Match model families or exact model IDs to an explicit fallback chain of routing profiles.",
-            empty: "No model routing policies yet.",
-            summary: "Exact models {{exact}} · prefixes {{prefixes}} · fallback profiles {{fallbacks}}",
-            fallbackChain: "Fallback chain: {{value}}",
-            moreExactModels: "+{{count}} more"
-        },
-        dialogs: {
-            createProfile: "Create routing profile",
-            editProfile: "Edit routing profile",
-            profileDescription: "Compose a reusable selector for a class of upstream accounts.",
-            createPolicy: "Create model policy",
-            editPolicy: "Edit model policy",
-            policyDescription: "Define how a model family maps onto ordered routing profiles."
-        },
-        form: {
-            name: "Name",
-            description: "Description",
-            priority: "Priority",
-            enabled: "Enabled",
-            enabledHint: "Only enabled profiles can appear in compiled routing plans.",
-            policyEnabledHint: "Disabled policies stay saved but will not participate in routing.",
-            planTypes: "Plan types",
-            planTypesPlaceholder: "free, plus, team",
-            modes: "Account modes",
-            authProviders: "Auth providers",
-            includeAccounts: "Include account IDs",
-            includeAccountsPlaceholder: "uuid-1, uuid-2",
-            excludeAccounts: "Exclude account IDs",
-            excludeAccountsPlaceholder: "uuid-3, uuid-4",
-            family: "Model family",
-            familyPlaceholder: "gpt-5",
-            exactModels: "Exact models",
-            exactModelsPlaceholder: "gpt-5.4, gpt-5.2-codex",
-            exactModelsHint: "Choose exact model IDs from the model pool so availability and pricing are visible while you configure the rule.",
-            modelPrefixes: "Model prefixes",
-            modelPrefixesPlaceholder: "gpt-5, o3",
-            modelPrefixesHint: "Keep wildcard prefix rules here as free-form text, such as gpt-5 or o3.",
-            fallbackProfiles: "Fallback profiles",
-            noProfilesAvailable: "Create a routing profile first so policies have somewhere to point."
-        },
-        messages: {
-            settingsSaved: "Model routing settings saved.",
-            settingsSaveFailed: "Failed to save model routing settings.",
-            errorLearningSettingsSaved: "Upstream error learning settings saved.",
-            errorLearningSettingsSaveFailed: "Failed to save upstream error learning settings.",
-            profileSaved: "Routing profile saved: {{name}}",
-            profileSaveFailed: "Failed to save routing profile.",
-            profileDeleted: "Routing profile deleted.",
-            profileDeleteFailed: "Failed to delete routing profile.",
-            policySaved: "Model routing policy saved: {{name}}",
-            policySaveFailed: "Failed to save model routing policy.",
-            policyDeleted: "Model routing policy deleted.",
-            policyDeleteFailed: "Failed to delete model routing policy.",
-            templateSaved: "Upstream error template saved.",
-            templateSaveFailed: "Failed to save upstream error template.",
-            templateApproved: "Upstream error template approved.",
-            templateApproveFailed: "Failed to approve upstream error template.",
-            templateRejected: "Upstream error template rejected.",
-            templateRejectFailed: "Failed to reject upstream error template.",
-            templateRewritten: "Upstream error template rewritten by AI.",
-            templateRewriteFailed: "Failed to rewrite upstream error template.",
-            builtinTemplateSaved: "Built-in error template saved.",
-            builtinTemplateSaveFailed: "Failed to save built-in error template.",
-            builtinTemplateRewritten: "Built-in error template rewritten by AI.",
-            builtinTemplateRewriteFailed: "Failed to rewrite built-in error template.",
-            builtinTemplateReset: "Built-in error template restored to default.",
-            builtinTemplateResetFailed: "Failed to restore the built-in error template."
-        },
-        status: {
-            enabled: "Enabled",
-            disabled: "Disabled",
-            killSwitchOn: "Kill switch on",
-            autoPublishOn: "Auto publish on",
-            autoPublishOff: "Auto publish off"
-        },
-        triggerModes: {
-            hybrid: "Hybrid",
-            scheduledOnly: "Scheduled only",
-            eventOnly: "Event only"
-        },
-        modes: {
-            apiKey: "API key",
-            chatGptSession: "ChatGPT session",
-            codexOauth: "Codex OAuth"
-        },
-        authProviders: {
-            legacyBearer: "Legacy bearer",
-            oauthRefreshToken: "OAuth refresh token"
-        },
-        modelSelector: {
-            addModel: "Add model",
-            searchPlaceholder: "Search models by ID or title",
-            emptyCatalog: "No models are available from the model pool yet.",
-            emptySelection: "No models selected yet.",
-            noMatches: "No matching models found.",
-            unknownModel: "Saved model not in pool",
-            moveUp: "Move up",
-            moveDown: "Move down",
-            remove: "Remove model"
-        },
-        errorLearning: {
-            settings: {
-                title: "Upstream Error Learning",
-                description: "Review first-seen upstream failures before they are promoted into deterministic error rules.",
-                enabled: "Enable upstream error learning",
-                enabledHint: "When disabled, unknown upstream errors fall back to the generic localized error response.",
-                firstSeenTimeoutMs: "First-seen timeout (ms)",
-                firstSeenTimeoutMsHint: "Maximum synchronous wait budget for generating the first provisional template.",
-                reviewHitThreshold: "Review threshold",
-                reviewHitThresholdHint: "Move a provisional template into review after this many repeated hits.",
-                updatedAt: "Updated at {{value}}"
-            },
-            templates: {
-                title: "Template Review Queue",
-                description: "Inspect provisional and pending templates, then approve, reject, edit, or rewrite them.",
-                empty: "No upstream error templates yet.",
-                fingerprint: "Fingerprint",
-                normalizedStatusCode: "Status {{value}}",
-                hitCount: "{{count}} hits",
-                semanticErrorCode: "Semantic error code",
-                action: "Action",
-                retryScope: "Retry scope",
-                firstSeenAt: "First seen",
-                lastSeenAt: "Last seen",
-                updatedAt: "Updated",
-                representativeSamples: "Representative samples",
-                samplesEmpty: "No normalized samples captured yet.",
-                localizedTemplates: "Localized templates",
-                localeEmpty: "No template yet for this locale."
-            },
-            builtinTemplates: {
-                title: "Built-in Templates",
-                description: "Review default algorithm and gateway error copy, then edit, rewrite, or restore it to the system default.",
-                empty: "No built-in templates available.",
-                kind: "Template kind",
-                code: "Template code",
-                scope: "Scope",
-                gatewayOnly: "Gateway-local response",
-                overridden: "Overridden",
-                defaultState: "Default",
-                updatedAt: "Override updated at {{value}}",
-                localizedTemplates: "Effective templates",
-                defaultTemplates: "Default templates",
-                save: "Save built-in template",
-                reset: "Restore default",
-                kinds: {
-                    gatewayError: "Gateway error",
-                    heuristicUpstream: "Heuristic upstream"
-                }
-            },
-            actions: {
-                saveSettings: "Save error-learning settings",
-                approve: "Approve",
-                reject: "Reject",
-                rewrite: "AI rewrite",
-                saveTemplate: "Save template",
-                cancel: "Cancel"
-            },
-            statuses: {
-                provisionalLive: "Provisional live",
-                reviewPending: "Review pending",
-                approved: "Approved",
-                rejected: "Rejected"
-            },
-            actionValues: {
-                returnFailure: "Return failure",
-                retrySameAccount: "Retry same account",
-                retryCrossAccount: "Retry another account"
-            },
-            retryScopes: {
-                none: "Do not retry",
-                sameAccount: "Same account",
-                crossAccount: "Cross-account"
-            },
-            locales: {
-                en: "English",
-                zhCN: "Chinese (Simplified)"
-            }
-        },
-        common: {
-            none: "None",
-            deletedProfile: "Deleted profile",
-            priority: "Priority {{value}}"
-        }
-    },
-    tenantDashboard: {
-        actions: {
-            manageApiKeys: "Manage API keys",
-            refresh: "Refresh",
-            viewBilling: "View billing",
-            viewRequestLogs: "View request logs"
-        },
-        kpi: {
-            avgFirstTokenSpeed: "Average first-token speed",
-            avgFirstTokenSpeedDesc: "TTFT (streaming exact / non-stream approximate)",
-            rpm: "RPM",
-            rpmDesc: "Requests per minute",
-            totalRequests: "Total requests",
-            totalRequestsDesc: "Selected time range",
-            totalTokens: "Token consumption total",
-            totalTokensDesc: "Input + cached + output + reasoning",
-            tpm: "TPM",
-            tpmDesc: "Tokens per minute"
-        },
-        cards: {
-            activeKeys: {
-                description: "Note: only keys with requests are counted",
-                title: "Active API key count (selected period)"
-            },
-            availableKeys: {
-                description: "Based on tenant key management settings",
-                title: "Currently available API keys"
-            },
-            keyEnableRate: {
-                description: "Enabled ratio: {{rate}}% ({{enabled}} / {{total}} keys)",
-                title: "Enabled key ratio"
-            },
-            peakHour: {
-                description: "Highest request volume window",
-                empty: "No data",
-                title: "Peak hour"
-            },
-            requestVelocity: {
-                description: "Average requests per hour in selected range",
-                title: "Request velocity (per hour)"
-            },
-            totalRequests: {
-                scopeAllKeys: " / all keys",
-                scopePrefix: "Scope: current tenant",
-                scopeSingleKey: " / single key",
-                title: "Total tenant API key requests (selected period)"
-            }
-        },
-        filters: {
-            apiKeyAll: "All API keys",
-            apiKeyAriaLabel: "API key filter",
-            apiKeyHint: "Tip: use API key filter to isolate hotspots quickly.",
-            range: {
-                last24Hours: "Last 24 hours",
-                last30Days: "Last 30 days",
-                last7Days: "Last 7 days"
-            },
-            rangeAriaLabel: "Time range"
-        },
-        groupOverview: {
-            allDescription: "How your current API keys are distributed across pricing groups.",
-            empty: "No API key groups to show yet.",
-            invalid: "Invalid",
-            keysBound: "{{count}} API keys bound",
-            singleDescription: "Current API key group binding and validity state.",
-            title: "API key group overview",
-            valid: "Valid"
-        },
-        hero: {
-            badge: "Tenant Workspace Overview",
-            summaryAllApiKeys: "(all API keys)",
-            summaryPrefix: "Scope: current tenant ",
-            summarySingleApiKey: "(single API key)"
-        },
-        subtitle: {
-            allApiKeys: "(all API keys)",
-            metricsFocus: "Focus metrics: TPM, RPM, total token consumption, total requests, and first-token speed.",
-            scopePrefix: "Scope: current tenant ",
-            singleApiKey: "(single API key)",
-            timeWindow: ", time window: "
-        },
-        modelDistribution: {
-            a11y: {
-                model: "Model",
-                summary: "Model distribution includes {{count}} rows sorted by {{mode}}. Leading model: {{top}}. Accessible data table follows.",
-                summaryEmpty: "No model distribution data is available for the current selection.",
-                tableLabel: "Model distribution data table"
-            },
-            description: "Top models by request count or token usage.",
-            empty: "No model distribution data yet",
-            modeRequests: "By requests",
-            modeTokens: "By tokens",
-            other: "Other",
-            title: "Model request distribution"
-        },
-        tokenComponents: {
-            cached: "Cached",
-            input: "Input",
-            output: "Output",
-            reasoning: "Reasoning"
-        },
-        tokenSummary: {
-            title: "Token component summary"
-        },
-        tokenTrend: {
-            a11y: {
-                summary: "Hourly token trend covering {{count}} time points from {{start}} to {{end}}. Accessible data table follows.",
-                summaryEmpty: "No token trend data is available for the current selection.",
-                tableLabel: "Token usage trend data table",
-                timestamp: "Timestamp"
-            },
-            description: "Hourly token trend by component. Toggle components to focus specific consumption.",
-            empty: "No token trend data yet",
-            title: "Token usage trend"
-        },
-        topKeys: {
-            description: "Based on request volume in selected period",
-            empty: "No API key usage rankings yet",
-            requests: "{{count}} requests",
-            share: "Share {{percent}}%",
-            title: "Top API keys",
-            unknownKey: "Unnamed key"
-        },
-        title: "Tenant Dashboard",
-        trend: {
-            description: "Scope: tenant API key request volume (hourly granularity)",
-            empty: "No request data yet",
-            series: {
-                requests: "Requests"
-            },
-            title: "Request trend"
-        }
-    },
-    tenantLogs: {
-        audit: {
-            actionValues: {
-                adminOperation: "Admin operation",
-                authOperation: "Auth operation",
-                requestOperation: "Request operation",
-                tenantOperation: "Tenant operation",
-                unknown: "Unknown action"
-            },
-            actorTypes: {
-                adminUser: "Admin user",
-                apiKey: "API key",
-                system: "System",
-                tenantUser: "Tenant user",
-                unknown: "Unknown actor"
-            },
-            payloadSummary: {
-                empty: "No extra context",
-                present: "Contains extra context"
-            },
-            reasonValues: {
-                none: "No extra notes",
-                present: "Contains operator notes"
-            },
-            targetTypes: {
-                requestLogs: "Request logs",
-                requestCorrelation: "Request correlation",
-                auditLogs: "Audit logs",
-                usageSummary: "Usage summary",
-                usageTrendsHourly: "Hourly usage trends",
-                upstreamErrorTemplate: "Upstream error template",
-                builtinErrorTemplate: "Built-in error template",
-                upstreamErrorLearningSettings: "Error learning settings",
-                unknown: "Unknown target"
-            },
-            columns: {
-                action: "Action",
-                actor: "Actor",
-                reason: "Details",
-                result: "Result",
-                target: "Target",
-                time: "Time"
-            },
-            description: "Definition: Control Plane audit events (current tenant only)",
-            empty: "No audit log data",
-            filters: {
-                actionPlaceholder: "Action",
-                actorIdPlaceholder: "Actor ID",
-                actorTypePlaceholder: "Actor type",
-                keywordPlaceholder: "Keyword (reason/payload)",
-                resultStatusPlaceholder: "Result status",
-                actionAriaLabel: "Action filter",
-                actorIdAriaLabel: "Actor ID filter",
-                actorTypeAriaLabel: "Actor type filter",
-                keywordAriaLabel: "Keyword filter",
-                rangeAriaLabel: "Time range",
-                resultStatusAriaLabel: "Result status filter"
-            },
-            resultStatuses: {
-                denied: "Denied",
-                failed: "Failed",
-                ok: "Success",
-                unknown: "Unknown result"
-            },
-            title: "Audit Logs"
-        },
-        filters: {
-            range: {
-                last24Hours: "Last 24 hours",
-                last30Days: "Last 30 days",
-                last7Days: "Last 7 days"
-            }
-        },
-        request: {
-            columns: {
-                apiKey: "API Key",
-                error: "Error",
-                latency: "Latency",
-                path: "Path",
-                requestId: "Request ID",
-                serviceTier: "Tier",
-                status: "Status",
-                time: "Time"
-            },
-            description: "Definition: Data Plane raw request events (current tenant only)",
-            empty: "No log data",
-            filters: {
-                apiKeyIdPlaceholder: "API Key ID",
-                keywordPlaceholder: "Keyword (path/error/model)",
-                requestIdPlaceholder: "Request ID",
-                statusCodePlaceholder: "Status code (e.g. 429)",
-                apiKeyAriaLabel: "API key filter",
-                keywordAriaLabel: "Keyword filter",
-                rangeAriaLabel: "Time range",
-                requestIdAriaLabel: "Request ID filter",
-                statusCodeAriaLabel: "Status code filter"
-            },
-            title: "Request Logs"
-        },
-        scope: "Scope: current tenant only",
-        time: {
-            displayMode: "Displayed in local time ({{timezone}}). UTC is preserved in tooltips.",
-            tooltip: "Local: {{local}} | UTC: {{utc}}"
-        },
-        tabs: {
-            audit: "Audit Logs",
-            request: "Request Logs"
-        },
-        title: "Logs"
-    },
-    tenantUsage: {
-        columns: {
-            apiKey: "API Key",
-            requests: "Requests",
-            tenantLabel: "Tenant: {{tenantId}}",
-            time: "Time"
-        },
-        filters: {
-            apiKeyAll: "All API Keys",
-            apiKeyAriaLabel: "API key filter",
-            range: {
-                last24Hours: "Last 24 Hours",
-                last30Days: "Last 30 Days",
-                last7Days: "Last 7 Days"
-            },
-            rangeAriaLabel: "Time range"
-        },
-        hourly: {
-            description: "Auditable request counts for each sampled hour.",
-            empty: "No data yet",
-            title: "Hourly Detail"
-        },
-        leaderboard: {
-            description: "API keys ranked by request volume for the current selection.",
-            empty: "No ranking data yet",
-            title: "API Key Ranking"
-        },
-        subtitle: "Track request trends, filter by API key, and inspect hourly detail.",
-        title: "Usage Analysis",
-        trend: {
-            description: "Hourly request volume for the selected time range.",
-            empty: "No trend data yet",
-            title: "Request Trend"
-        }
-    },
-    tenants: {
-        create: {
-            fields: {
-                expiresAt: "Expires At",
-                name: "Tenant Name",
-                plan: "Plan (credit)",
-                status: "Status (active/inactive)"
-            },
-            submit: "Create Tenant",
-            title: "Create Tenant"
-        },
-        impersonation: {
-            copyToken: "Copy Token",
-            create: "Create Impersonation",
-            fields: {
-                reason: "Reason (required)"
-            },
-            revoke: "Revoke Session",
-            sessionIdLabel: "Session ID:",
-            tokenLabel: "Token:",
-            title: "Admin Impersonation"
-        },
-        notifications: {
-            copyPlaintextFailed: "Failed to copy plaintext key.",
-            copyPlaintextSuccess: "Copied plaintext key.",
-            copyPrefixFailed: "Failed to copy key prefix.",
-            copyPrefixSuccess: "Copied key prefix.",
-            copyTokenFailed: "Failed to copy token.",
-            copyTokenSuccess: "Copied token."
-        },
-        keys: {
-            create: {
-                fields: {
-                    name: "Key Name",
-                    namePlaceholder: "e.g. admin-main-key"
-                },
-                submit: "Create Key",
-                title: "Create API Key"
-            },
-            created: {
-                copyPlaintext: "Copy Plaintext Key",
-                notice: "The plaintext key is shown only once. Save it now."
-            },
-            list: {
-                caption: "Tenant API key list",
-                columns: {
-                    actions: "Actions",
-                    createdAt: "Created At",
-                    name: "Name",
-                    prefix: "Prefix",
-                    status: "Status"
-                },
-                copyPrefix: "Copy key prefix",
-                disable: "Disable",
-                empty: "No API keys for this tenant",
-                enable: "Enable",
-                status: {
-                    active: "Active",
-                    revoked: "Revoked"
-                },
-                title: "API Key List"
-            }
-        },
-        list: {
-            caption: "Tenant pool list",
-            columns: {
-                actions: "Actions",
-                apiKeys: "API Keys",
-                expiresAt: "Expires At",
-                plan: "Plan",
-                status: "Status",
-                tenant: "Tenant",
-                tenantId: "Tenant ID",
-                updatedAt: "Updated At"
-            },
-            planValues: {
-                credit: "Credit",
-                standard: "Standard",
-                unknown: "Unknown plan"
-            },
-            statusValues: {
-                active: "Active",
-                inactive: "Inactive",
-                suspended: "Suspended",
-                disabled: "Disabled",
-                unknown: "Unknown"
-            },
-            defaultBadge: "Default",
-            empty: "No tenant data",
-            openProfile: "Open Tenant Profile",
-            searchPlaceholder: "Search tenants by name or ID",
-            title: "Tenant Pool"
-        },
-        messages: {
-            apiKeyCreateFailed: "Failed to create API key",
-            apiKeyCreateSuccess: "Created API key for tenant {{tenantName}}: {{keyName}}",
-            apiKeyNameRequired: "Please enter an API key name",
-            apiKeyToggleFailed: "Failed to update API key status",
-            createFailed: "Failed to create tenant",
-            createSuccess: "Tenant created: {{name}} ({{id}})",
-            impersonationCreateFailed: "Failed to create impersonation",
-            impersonationCreated: "Impersonation session created (token returned)",
-            impersonationRevokeFailed: "Failed to revoke impersonation",
-            impersonationRevoked: "Impersonation session revoked",
-            rechargeFailed: "Failed to recharge tenant",
-            rechargeSuccess: "Recharge successful: +{{amount}}, current balance {{balance}}",
-            updateFailed: "Failed to update tenant",
-            updateSuccess: "Tenant updated: {{name}}"
-        },
-        profile: {
-            dialogDescription: "Manage profile, API keys, and usage in one dialog with tabs.",
-            dialogTitle: "Tenant Profile",
-            dialogTitleWithName: "Tenant Profile · {{name}}",
-            fields: {
-                expiresAt: "Expires At",
-                plan: "Plan",
-                status: "Status"
-            },
-            meta: {
-                createdAt: "Created At",
-                tenantId: "Tenant ID",
-                updatedAt: "Updated At"
-            },
-            save: "Save Profile",
-            section: {
-                title: "Tenant Profile"
-            },
-            tabs: {
-                ariaLabel: "Tenant profile tabs",
-                keys: "API Keys",
-                profile: "Profile",
-                usage: "Usage"
-            }
-        },
-        recharge: {
-            fields: {
-                amount: "Microcredits (integer)",
-                reason: "Reason"
-            },
-            submit: "Apply Recharge",
-            title: "Tenant Recharge"
-        },
-        subtitle: "Check tenant availability and manage profiles, API keys, and usage.",
-        title: "Tenants",
-        usage: {
-            filter: {
-                allKeys: "All API keys",
-                currentView: "Current view",
-                label: "API key filter",
-                noKeys: "No API keys for current tenant",
-                noMatches: "No matching API keys",
-                placeholder: "Search name / prefix / key_id"
-            },
-            meta: {
-                tenantId: "Tenant ID"
-            },
-            metrics: {
-                accountRequests: "Account requests",
-                activeAccounts: "Active accounts",
-                activeApiKeys: "Active API keys",
-                apiKeyRequests: "API key requests",
-                tenantApiKeyRequests: "Tenant API key requests"
-            },
-            sectionTitle: "Usage in the last 24 hours",
-            status: {
-                error: "Failed to load usage data",
-                loading: "Loading usage data…"
-            }
-        }
-    },
-    layout: {
-        theme: {
-            quickSwitchFromSystem: "Following system: {{current}}, click to switch to {{next}}"
-        }
-    },
-    theme: {
-        aurora: "Aurora",
-        colorful: "Colorful",
-        dark: "Dark",
-        light: "Light",
-        system: "System"
-    },
+    subtitle:
+      "Check tenant availability and manage profiles, API keys, and usage.",
+    title: "Tenants",
     usage: {
-        actions: {
-            export: "Export CSV",
-            filters: "Filters"
-        },
-        antigravity: {
-            estimatedCost: "Estimated cost",
-            estimatedCostHint: "Approximate spend projected from current request mix.",
-            avgLatency: "Average first-token latency",
-            avgLatencyHint: "Mean first-token response time over the last 30 days.",
-            last30Days: "Last 30 days",
-            loading: "Loading usage analytics…",
-            modelMixDescription: "See which models currently absorb most of the request volume.",
-            modelMixEmpty: "No model distribution data is available yet.",
-            modelMixTitle: "Model Load Mix",
-            peakDay: "Peak day",
-            peakDayValue: "{{date}} · {{requests}} requests",
-            requestsSummaryHint: "Total requests over the last 30 days.",
-            requestsCount: "{{value}} requests",
-            shareValue: "{{value}}%",
-            signalsDescription: "Keep the most important peaks, leading models, and leading keys together in one quick brief.",
-            signalsTitle: "Key Signals",
-            timeWindow: "Analysis window",
-            tokenTrendDescription: "Shows how input, cached, and output tokens changed across the selected window.",
-            tokenTrendEmpty: "No token trend data is available yet.",
-            tokenTrendTitle: "Token Trend",
-            topApiKey: "Top API key",
-            topApiKeyValue: "{{value}} requests",
-            topModel: "Top model",
-            topModelValue: "{{value}} requests",
-            tokensCount: "{{value}} tokens",
-            topKeysHint: "Compare model concentration by request count and aggregate token load.",
-            totalTokensHint: "All input, cached, output, and reasoning tokens."
-        },
-        chart: {
-            empty: "No data recorded in this period.",
-            requests: "Requests",
-            subtitle: "Daily totals aggregated across all tenants and upstream providers",
-            title: "Request Volume · 30 Days"
-        },
-        subtitle: "Review request volume and API key concentration across the last 30 days.",
-        title: "Usage Analysis",
-        topKeys: {
-            columns: {
-                apiKey: "API Key",
-                name: "Tenant / Key",
-                requests: "Requests",
-                share: "Share",
-                tenant: "Tenant"
-            },
-            empty: "No usage recorded yet.",
-            keyFallback: "API Key {{keyId}}",
-            searchPlaceholder: "Search API keys…",
-            subtitle: "Sorted by request volume",
-            title: "API Key Ranking",
-            reqs: "reqs"
-        }
+      filter: {
+        allKeys: "All API keys",
+        currentView: "Current view",
+        label: "API key filter",
+        noKeys: "No API keys for current tenant",
+        noMatches: "No matching API keys",
+        placeholder: "Search name / prefix / key_id",
+      },
+      meta: {
+        tenantId: "Tenant ID",
+      },
+      metrics: {
+        accountRequests: "Account requests",
+        activeAccounts: "Active accounts",
+        activeApiKeys: "Active API keys",
+        apiKeyRequests: "API key requests",
+        tenantApiKeyRequests: "Tenant API key requests",
+      },
+      sectionTitle: "Usage in the last 24 hours",
+      status: {
+        error: "Failed to load usage data",
+        loading: "Loading usage data…",
+      },
     },
-    cleanup: {
-        title: "Credential Cleanup",
-        subtitle: "Automated governance and lifecycle policies",
-        save: "Save Policies",
-        policy: {
-            title: "Automatic governance policy",
-            desc: "When refresh_token is reused, revoked, or continuously invalid, isolate accounts automatically to reduce blast radius.",
-            refreshEnabled: "Enable OAuth auto refresh",
-            refreshEnabledDesc: "If disabled, accounts will no longer auto-renew access_token.",
-            intervalSec: "Refresh interval (seconds)",
-            notes: "Policy notes"
-        },
-        workspace: {
-            title: "OAuth account governance workspace",
-            desc: "Check account login refresh status, then refresh now or pause/resume linked accounts.",
-            searchPlaceholder: "Search by label / account id",
-            onlyDisabled: "Only disabled accounts",
-            loadingAccounts: "Loading accounts…",
-            noAccounts: "No matching OAuth accounts.",
-            enabled: "Enabled",
-            disabled: "Disabled",
-            selectHint: "Select an account on the left to view status.",
-            loadingStatus: "Loading OAuth status…",
-            noStatus: "No OAuth status available for this account yet.",
-            refreshNow: "Refresh now",
-            disableFamily: "Pause linked accounts",
-            enableFamily: "Resume linked accounts",
-            status: {
-                never: "Not refreshed",
-                ok: "Healthy",
-                failed: "Failed"
-            },
-            fields: {
-                refreshStatus: "Refresh status",
-                reuseDetected: "Refresh token reuse detected",
-                groupId: "Group ID",
-                tokenVersion: "Token version",
-                expiresAt: "Token expiry",
-                errorCode: "Error code",
-                errorMessage: "Error details"
-            }
-        },
-        quarantine: {
-            title: "Auto-Quarantine Policy",
-            desc: "Automatically isolate accounts that fail authorization",
-            threshold: "Failure Threshold",
-            thresholdDesc: "Consecutive 401/403 errors before isolation",
-            action: "Refresh Revoked Action",
-            actionDesc: "When generic refresh_token is revoked",
-            options: {
-                family: "Quarantine Family",
-                disable: "Disable Account Only",
-                nothing: "Do Nothing"
-            }
-        },
-        purge: {
-            title: "Auto-Purge Policy",
-            desc: "Permanently remove dead credentials to save space",
-            retention: "Retention Period",
-            retentionDesc: "Days to keep disabled accounts before purging"
-        }
+  },
+  layout: {
+    theme: {
+      quickSwitchFromSystem:
+        "Following system: {{current}}, click to switch to {{next}}",
     },
-    apiKeys: {
-        title: "Key Pool",
-        subtitle: "Manage the standalone workspace key pool and issue secure access credentials.",
-        listTitle: "Key Pool",
-        createPanelDescription: "Create a Data Plane access key for this standalone workspace. The plaintext key is shown only once.",
-        create: "Create Secret Key",
-        search: "Search key name or prefix…",
-        loading: "Loading credentials…",
-        empty: "No valid API keys found matching your criteria.",
-        columns: {
-            name: "Application Name",
-            tenant: "Tenant ID",
-            key: "API Key",
-            status: "Status",
-            issued: "Issued At",
-            actions: "Actions"
-        },
-        status: {
-            active: "Active",
-            revoked: "Revoked"
-        },
-        defaultTenant: "Default",
-        filters: {
-            label: "Status filter",
-            all: "All keys",
-            active: "Active",
-            revoked: "Revoked"
-        },
-        actions: {
-            copyPrefixTitle: "Copy prefix",
-            menu: "Key actions",
-            copyPrefix: "Copy key prefix",
-            processing: "Processing…",
-            disable: "Disable key",
-            enable: "Re-enable key"
-        },
-        messages: {
-            createFailed: "Failed to create API key",
-            missingName: "Please enter a key name"
-        },
-        notifications: {
-            copyPlaintextFailed: "Failed to copy plaintext key.",
-            copyPlaintextSuccess: "Copied plaintext key.",
-            copyPrefixFailed: "Failed to copy key prefix.",
-            copyPrefixSuccess: "Copied key prefix."
-        },
-        dialog: {
-            create: {
-                title: "Create API Key",
-                desc: "Create a Data Plane access key for a tenant. The plaintext key is shown only once.",
-                nameLabel: "Key name",
-                namePlaceholder: "e.g. prod-codex-clients",
-                tenantLabel: "Tenant name (optional)",
-                tenantPlaceholder: "Leave empty to use default",
-                confirm: "Create",
-                creating: "Creating…"
-            },
-            created: {
-                title: "New key created",
-                desc: "The plaintext key is shown only once. Please copy and store it now.",
-                securityTip: "Security notice: once this dialog is closed, the plaintext key cannot be viewed again.",
-                nameLabel: "Key name",
-                plaintextLabel: "Plaintext key",
-                close: "Close",
-                copyPlaintext: "Copy plaintext key"
-            }
-        },
-        antigravity: {
-            lastUsed: "Last Used",
-            revoke: "Revoke",
-            rotate: "Rotate Key",
-            view: "View Details"
-        }
-    }
-}
+  },
+  theme: {
+    aurora: "Aurora",
+    colorful: "Colorful",
+    dark: "Dark",
+    light: "Light",
+    system: "System",
+  },
+  usage: {
+    actions: {
+      export: "Export CSV",
+      filters: "Filters",
+    },
+    antigravity: {
+      estimatedCost: "Estimated cost",
+      estimatedCostHint:
+        "Approximate spend projected from current request mix.",
+      avgLatency: "Average first-token latency",
+      avgLatencyHint: "Mean first-token response time over the last 30 days.",
+      last30Days: "Last 30 days",
+      loading: "Loading usage analytics…",
+      modelMixDescription:
+        "See which models currently absorb most of the request volume.",
+      modelMixEmpty: "No model distribution data is available yet.",
+      modelMixTitle: "Model Load Mix",
+      peakDay: "Peak day",
+      peakDayValue: "{{date}} · {{requests}} requests",
+      requestsSummaryHint: "Total requests over the last 30 days.",
+      requestsCount: "{{value}} requests",
+      shareValue: "{{value}}%",
+      signalsDescription:
+        "Keep the most important peaks, leading models, and leading keys together in one quick brief.",
+      signalsTitle: "Key Signals",
+      timeWindow: "Analysis window",
+      tokenTrendDescription:
+        "Shows how input, cached, and output tokens changed across the selected window.",
+      tokenTrendEmpty: "No token trend data is available yet.",
+      tokenTrendTitle: "Token Trend",
+      topApiKey: "Top API key",
+      topApiKeyValue: "{{value}} requests",
+      topModel: "Top model",
+      topModelValue: "{{value}} requests",
+      tokensCount: "{{value}} tokens",
+      topKeysHint:
+        "Compare model concentration by request count and aggregate token load.",
+      totalTokensHint: "All input, cached, output, and reasoning tokens.",
+    },
+    chart: {
+      empty: "No data recorded in this period.",
+      requests: "Requests",
+      subtitle:
+        "Daily totals aggregated across all tenants and upstream providers",
+      title: "Request Volume · 30 Days",
+    },
+    subtitle:
+      "Review request volume and API key concentration across the last 30 days.",
+    title: "Usage Analysis",
+    topKeys: {
+      columns: {
+        apiKey: "API Key",
+        name: "Tenant / Key",
+        requests: "Requests",
+        share: "Share",
+        tenant: "Tenant",
+      },
+      empty: "No usage recorded yet.",
+      keyFallback: "API Key {{keyId}}",
+      searchPlaceholder: "Search API keys…",
+      subtitle: "Sorted by request volume",
+      title: "API Key Ranking",
+      reqs: "reqs",
+    },
+  },
+  cleanup: {
+    title: "Credential Cleanup",
+    subtitle: "Automated governance and lifecycle policies",
+    save: "Save Policies",
+    policy: {
+      title: "Automatic governance policy",
+      desc: "When refresh_token is reused, revoked, or continuously invalid, isolate accounts automatically to reduce blast radius.",
+      refreshEnabled: "Enable OAuth auto refresh",
+      refreshEnabledDesc:
+        "If disabled, accounts will no longer auto-renew access_token.",
+      intervalSec: "Refresh interval (seconds)",
+      notes: "Policy notes",
+    },
+    workspace: {
+      title: "OAuth account governance workspace",
+      desc: "Check account login refresh status, then refresh now or pause/resume linked accounts.",
+      searchPlaceholder: "Search by label / account id",
+      onlyDisabled: "Only disabled accounts",
+      loadingAccounts: "Loading accounts…",
+      noAccounts: "No matching OAuth accounts.",
+      enabled: "Enabled",
+      disabled: "Disabled",
+      selectHint: "Select an account on the left to view status.",
+      loadingStatus: "Loading OAuth status…",
+      noStatus: "No OAuth status available for this account yet.",
+      refreshNow: "Refresh now",
+      disableFamily: "Pause linked accounts",
+      enableFamily: "Resume linked accounts",
+      status: {
+        never: "Not refreshed",
+        ok: "Healthy",
+        failed: "Failed",
+      },
+      fields: {
+        refreshStatus: "Refresh status",
+        reuseDetected: "Refresh token reuse detected",
+        groupId: "Group ID",
+        tokenVersion: "Token version",
+        expiresAt: "Token expiry",
+        errorCode: "Error code",
+        errorMessage: "Error details",
+      },
+    },
+    quarantine: {
+      title: "Auto-Quarantine Policy",
+      desc: "Automatically isolate accounts that fail authorization",
+      threshold: "Failure Threshold",
+      thresholdDesc: "Consecutive 401/403 errors before isolation",
+      action: "Refresh Revoked Action",
+      actionDesc: "When generic refresh_token is revoked",
+      options: {
+        family: "Quarantine Family",
+        disable: "Disable Account Only",
+        nothing: "Do Nothing",
+      },
+    },
+    purge: {
+      title: "Auto-Purge Policy",
+      desc: "Permanently remove dead credentials to save space",
+      retention: "Retention Period",
+      retentionDesc: "Days to keep disabled accounts before purging",
+    },
+  },
+  apiKeys: {
+    title: "Key Pool",
+    subtitle:
+      "Manage the standalone workspace key pool and issue secure access credentials.",
+    listTitle: "Key Pool",
+    createPanelDescription:
+      "Create a Data Plane access key for this standalone workspace. The plaintext key is shown only once.",
+    create: "Create Secret Key",
+    search: "Search key name or prefix…",
+    loading: "Loading credentials…",
+    empty: "No valid API keys found matching your criteria.",
+    columns: {
+      name: "Application Name",
+      tenant: "Tenant ID",
+      key: "API Key",
+      status: "Status",
+      issued: "Issued At",
+      actions: "Actions",
+    },
+    status: {
+      active: "Active",
+      revoked: "Revoked",
+    },
+    defaultTenant: "Default",
+    filters: {
+      label: "Status filter",
+      all: "All keys",
+      active: "Active",
+      revoked: "Revoked",
+    },
+    actions: {
+      copyPrefixTitle: "Copy prefix",
+      menu: "Key actions",
+      copyPrefix: "Copy key prefix",
+      processing: "Processing…",
+      disable: "Disable key",
+      enable: "Re-enable key",
+    },
+    messages: {
+      createFailed: "Failed to create API key",
+      missingName: "Please enter a key name",
+    },
+    notifications: {
+      copyPlaintextFailed: "Failed to copy plaintext key.",
+      copyPlaintextSuccess: "Copied plaintext key.",
+      copyPrefixFailed: "Failed to copy key prefix.",
+      copyPrefixSuccess: "Copied key prefix.",
+    },
+    dialog: {
+      create: {
+        title: "Create API Key",
+        desc: "Create a Data Plane access key for a tenant. The plaintext key is shown only once.",
+        nameLabel: "Key name",
+        namePlaceholder: "e.g. prod-codex-clients",
+        tenantLabel: "Tenant name (optional)",
+        tenantPlaceholder: "Leave empty to use default",
+        confirm: "Create",
+        creating: "Creating…",
+      },
+      created: {
+        title: "New key created",
+        desc: "The plaintext key is shown only once. Please copy and store it now.",
+        securityTip:
+          "Security notice: once this dialog is closed, the plaintext key cannot be viewed again.",
+        nameLabel: "Key name",
+        plaintextLabel: "Plaintext key",
+        close: "Close",
+        copyPlaintext: "Copy plaintext key",
+      },
+    },
+    antigravity: {
+      lastUsed: "Last Used",
+      revoke: "Revoke",
+      rotate: "Rotate Key",
+      view: "View Details",
+    },
+  },
+};

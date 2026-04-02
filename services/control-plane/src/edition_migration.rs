@@ -7,10 +7,10 @@ use anyhow::{bail, Context, Result};
 use chrono::{DateTime, Duration, Utc};
 use codex_pool_core::api::ProductEdition;
 use codex_pool_core::model::{
-    AiErrorLearningSettings, ApiKey, BuiltinErrorTemplateOverrideRecord, ModelRoutingPolicy,
-    ModelRoutingSettings, ModelRoutingTriggerMode, OutboundProxyNode, OutboundProxyPoolSettings,
-    RoutingPlanVersion, RoutingPolicy, RoutingProfile, Tenant, UpstreamAccount,
-    UpstreamAuthProvider, UpstreamErrorTemplateRecord,
+    AiErrorLearningSettings, ApiKey, BuiltinErrorTemplateOverrideRecord, ClaudeCodeRoutingSettings,
+    ModelRoutingPolicy, ModelRoutingSettings, ModelRoutingTriggerMode, OutboundProxyNode,
+    OutboundProxyPoolSettings, RoutingPlanVersion, RoutingPolicy, RoutingProfile, Tenant,
+    UpstreamAccount, UpstreamAuthProvider, UpstreamErrorTemplateRecord,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -110,6 +110,7 @@ pub struct ControlPlaneMigrationBundle {
     pub routing_profiles: Vec<RoutingProfile>,
     pub model_routing_policies: Vec<ModelRoutingPolicy>,
     pub model_routing_settings: Option<ModelRoutingSettings>,
+    pub claude_code_routing_settings: Option<ClaudeCodeRoutingSettings>,
     pub outbound_proxy_pool_settings: Option<OutboundProxyPoolSettings>,
     pub outbound_proxy_nodes: Vec<OutboundProxyNode>,
     pub upstream_error_learning_settings: Option<AiErrorLearningSettings>,
@@ -225,6 +226,16 @@ pub(crate) fn default_model_routing_settings() -> ModelRoutingSettings {
         planner_model_chain: Vec::new(),
         trigger_mode: ModelRoutingTriggerMode::Hybrid,
         kill_switch: false,
+        updated_at: Utc::now(),
+    }
+}
+
+pub(crate) fn default_claude_code_routing_settings() -> ClaudeCodeRoutingSettings {
+    ClaudeCodeRoutingSettings {
+        enabled: false,
+        opus_target_model: None,
+        sonnet_target_model: None,
+        haiku_target_model: None,
         updated_at: Utc::now(),
     }
 }

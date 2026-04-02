@@ -210,6 +210,57 @@ async fn update_admin_model_routing_settings(
     Ok(Json(ModelRoutingSettingsResponse { settings: response }))
 }
 
+async fn get_admin_claude_code_routing_settings(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<ClaudeCodeRoutingSettingsResponse>, (StatusCode, Json<ErrorEnvelope>)> {
+    let _principal = require_admin_principal(&state, &headers)?;
+    let settings = state
+        .store
+        .claude_code_routing_settings()
+        .await
+        .map_err(map_tenant_error)?;
+    Ok(Json(ClaudeCodeRoutingSettingsResponse { settings }))
+}
+
+async fn update_admin_claude_code_routing_settings(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(req): Json<UpdateClaudeCodeRoutingSettingsRequest>,
+) -> Result<Json<ClaudeCodeRoutingSettingsResponse>, (StatusCode, Json<ErrorEnvelope>)> {
+    let principal = require_admin_principal(&state, &headers)?;
+    let response = state
+        .store
+        .update_claude_code_routing_settings(req)
+        .await
+        .map_err(map_tenant_error)?;
+    write_audit_log_best_effort(
+        &state,
+        crate::tenant::AuditLogWriteRequest {
+            actor_type: "admin_user".to_string(),
+            actor_id: Some(principal.user_id),
+            tenant_id: None,
+            action: "admin.model_routing.claude_code.update".to_string(),
+            reason: None,
+            request_ip: crate::tenant::extract_client_ip(&headers),
+            user_agent: extract_user_agent(&headers),
+            target_type: Some("claude_code_routing_settings".to_string()),
+            target_id: Some("singleton".to_string()),
+            payload_json: json!({
+                "enabled": response.enabled,
+                "opus_target_model": response.opus_target_model,
+                "sonnet_target_model": response.sonnet_target_model,
+                "haiku_target_model": response.haiku_target_model,
+            }),
+            result_status: "ok".to_string(),
+        },
+    )
+    .await;
+    Ok(Json(ClaudeCodeRoutingSettingsResponse {
+        settings: response,
+    }))
+}
+
 async fn list_admin_routing_plan_versions(
     State(state): State<AppState>,
     headers: HeaderMap,

@@ -31,6 +31,9 @@ impl InMemoryStore {
                 kill_switch: false,
                 updated_at: Utc::now(),
             })),
+            claude_code_routing_settings: Arc::new(RwLock::new(
+                ClaudeCodeRoutingSettings::default(),
+            )),
             upstream_error_learning_settings: Arc::new(RwLock::new(
                 AiErrorLearningSettings::default(),
             )),
@@ -490,8 +493,10 @@ impl InMemoryStore {
             state.token_invalidated_first_at = Some(reported_at);
             state.token_invalidated_strike_count = 1;
         } else {
-            state.token_invalidated_strike_count =
-                state.token_invalidated_strike_count.saturating_add(1).max(1);
+            state.token_invalidated_strike_count = state
+                .token_invalidated_strike_count
+                .saturating_add(1)
+                .max(1);
         }
 
         Ok(state.token_invalidated_strike_count >= threshold)
@@ -732,8 +737,9 @@ impl InMemoryStore {
         state.quarantine_until = None;
         state.quarantine_reason = None;
         state.pending_purge_at = Some(scheduled_at);
-        state.pending_purge_reason =
-            normalized_reason.clone().or_else(|| state.pending_purge_reason.clone());
+        state.pending_purge_reason = normalized_reason
+            .clone()
+            .or_else(|| state.pending_purge_reason.clone());
         state.last_pool_transition_at = Some(now);
         drop(states);
 
@@ -765,7 +771,11 @@ impl InMemoryStore {
                 }
                 match state.pending_purge_at {
                     Some(pending_purge_at) if pending_purge_at > now => None,
-                    _ => Some((*account_id, state.pending_purge_at, state.last_pool_transition_at)),
+                    _ => Some((
+                        *account_id,
+                        state.pending_purge_at,
+                        state.last_pool_transition_at,
+                    )),
                 }
             })
             .collect::<Vec<_>>();
@@ -781,8 +791,8 @@ impl InMemoryStore {
 
     fn purge_pending_upstream_accounts_inner(&self) -> Result<u64> {
         let started_at = Utc::now();
-        let candidates =
-            self.pending_purge_due_account_ids_inner(started_at, pending_purge_batch_size_from_env());
+        let candidates = self
+            .pending_purge_due_account_ids_inner(started_at, pending_purge_batch_size_from_env());
         let mut purged = 0_u64;
         for account_id in candidates {
             if self.delete_upstream_account_inner(account_id).is_ok() {
@@ -830,7 +840,10 @@ impl InMemoryStore {
         Ok(purged)
     }
 
-    fn account_pool_state_record_inner(&self, account_id: Uuid) -> UpstreamAccountHealthStateRecord {
+    fn account_pool_state_record_inner(
+        &self,
+        account_id: Uuid,
+    ) -> UpstreamAccountHealthStateRecord {
         let mut states = self.account_health_states.write().unwrap();
         let now = Utc::now();
         let state = states.entry(account_id).or_default();
@@ -903,7 +916,9 @@ impl InMemoryStore {
             category: codex_pool_core::events::SystemEventCategory::AccountPool,
             event_type: "account_pool_state_transition".to_string(),
             severity: match reason_class {
-                AccountPoolReasonClass::Healthy => codex_pool_core::events::SystemEventSeverity::Info,
+                AccountPoolReasonClass::Healthy => {
+                    codex_pool_core::events::SystemEventSeverity::Info
+                }
                 AccountPoolReasonClass::Quota | AccountPoolReasonClass::Transient => {
                     codex_pool_core::events::SystemEventSeverity::Warn
                 }
@@ -949,8 +964,10 @@ impl InMemoryStore {
         reason_code: Option<String>,
         source: &str,
     ) {
-        let reason_class =
-            account_pool_reason_class_from_code(reason_code.as_deref(), AccountPoolReasonClass::Fatal);
+        let reason_class = account_pool_reason_class_from_code(
+            reason_code.as_deref(),
+            AccountPoolReasonClass::Fatal,
+        );
         self.emit_system_event_inner(codex_pool_core::events::SystemEventWrite {
             event_id: None,
             ts: Some(Utc::now()),
@@ -1087,8 +1104,7 @@ impl InMemoryStore {
             credential
                 .map(|item| item.refresh_reused_detected)
                 .unwrap_or(false),
-            credential
-                .and_then(|item| item.last_refresh_error_code.as_deref()),
+            credential.and_then(|item| item.last_refresh_error_code.as_deref()),
             rate_limit_cache.expires_at,
             rate_limit_cache.last_error_code.as_deref(),
             rate_limit_cache.last_error.as_deref(),
@@ -1101,8 +1117,7 @@ impl InMemoryStore {
             credential
                 .map(|item| item.refresh_reused_detected)
                 .unwrap_or(false),
-            credential
-                .and_then(|item| item.last_refresh_error_code.as_deref()),
+            credential.and_then(|item| item.last_refresh_error_code.as_deref()),
         );
         let next_refresh_at = match provider {
             UpstreamAuthProvider::OAuthRefreshToken => token_expires_at
@@ -1217,13 +1232,12 @@ mod oauth_status_tests {
             },
         );
 
-        let status = store.oauth_status_from(
-            &account,
-            UpstreamAuthProvider::LegacyBearer,
-            None,
-            None,
-        );
+        let status =
+            store.oauth_status_from(&account, UpstreamAuthProvider::LegacyBearer, None, None);
 
-        assert_eq!(status.supported_models, vec!["gpt-5.4".to_string(), "o3".to_string()]);
+        assert_eq!(
+            status.supported_models,
+            vec!["gpt-5.4".to_string(), "o3".to_string()]
+        );
     }
 }

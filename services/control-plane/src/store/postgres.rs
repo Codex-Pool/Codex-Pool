@@ -3,15 +3,15 @@ use async_trait::async_trait;
 use chrono::{DateTime, Duration, Utc};
 use codex_pool_core::api::{
     DataPlaneSnapshot, DataPlaneSnapshotEvent, DataPlaneSnapshotEventType,
-    DataPlaneSnapshotEventsResponse,
+    DataPlaneSnapshotEventsResponse, UpdateClaudeCodeRoutingSettingsRequest,
 };
 use codex_pool_core::model::{
     AccountRoutingTraits, AiErrorLearningSettings, ApiKey, BuiltinErrorTemplateKind,
-    BuiltinErrorTemplateOverrideRecord, CompiledModelRoutingPolicy, CompiledRoutingPlan,
-    CompiledRoutingProfile, LocalizedErrorTemplates, ModelRoutingPolicy, ModelRoutingSettings,
-    ModelRoutingTriggerMode, OutboundProxyNode, OutboundProxyPoolSettings, ProxyFailMode,
-    RoutingPlanVersion, RoutingPolicy, RoutingProfile, RoutingProfileSelector, RoutingStrategy,
-    Tenant, UpstreamAccount, UpstreamAuthProvider, UpstreamErrorAction,
+    BuiltinErrorTemplateOverrideRecord, ClaudeCodeRoutingSettings, CompiledModelRoutingPolicy,
+    CompiledRoutingPlan, CompiledRoutingProfile, LocalizedErrorTemplates, ModelRoutingPolicy,
+    ModelRoutingSettings, ModelRoutingTriggerMode, OutboundProxyNode, OutboundProxyPoolSettings,
+    ProxyFailMode, RoutingPlanVersion, RoutingPolicy, RoutingProfile, RoutingProfileSelector,
+    RoutingStrategy, Tenant, UpstreamAccount, UpstreamAuthProvider, UpstreamErrorAction,
     UpstreamErrorRetryScope, UpstreamErrorTemplateRecord, UpstreamErrorTemplateStatus,
     UpstreamMode,
 };
@@ -23,20 +23,6 @@ use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 use uuid::Uuid;
 
-use crate::contracts::{
-    CreateApiKeyRequest, CreateApiKeyResponse, CreateOutboundProxyNodeRequest,
-    CreateTenantRequest, CreateUpstreamAccountRequest, ImportOAuthRefreshTokenRequest,
-    OAuthAccountStatusResponse, OAuthFamilyActionResponse, OAuthInventoryRecord,
-    OAuthInventoryFailureStage,
-    OAuthInventorySummaryResponse, OAuthRateLimitRefreshErrorSummary,
-    OAuthRateLimitRefreshJobStatus, OAuthRateLimitRefreshJobSummary, OAuthRateLimitSnapshot,
-    OAuthRefreshStatus, OAuthVaultRecordStatus, SessionCredentialKind,
-    UpdateAiErrorLearningSettingsRequest, UpdateModelRoutingSettingsRequest,
-    UpdateOutboundProxyNodeRequest, UpdateOutboundProxyPoolSettingsRequest,
-    UpsertModelRoutingPolicyRequest, UpsertRetryPolicyRequest, UpsertRoutingPolicyRequest,
-    UpsertRoutingProfileRequest, UpsertStreamRetryPolicyRequest,
-    ValidateOAuthRefreshTokenRequest, ValidateOAuthRefreshTokenResponse,
-};
 use super::{
     admission_probe_retry_after_with_budget, can_retry_fatal_activation_failure,
     can_retry_transient_admission_failure, has_refresh_credential,
@@ -46,6 +32,19 @@ use super::{
     SessionProfileRecord, UpsertOneTimeSessionAccountRequest,
 };
 use super::{ControlPlaneStore, OAuthUpsertResult, RuntimeStorePorts, ValidatedPrincipal};
+use crate::contracts::{
+    CreateApiKeyRequest, CreateApiKeyResponse, CreateOutboundProxyNodeRequest, CreateTenantRequest,
+    CreateUpstreamAccountRequest, ImportOAuthRefreshTokenRequest, OAuthAccountStatusResponse,
+    OAuthFamilyActionResponse, OAuthInventoryFailureStage, OAuthInventoryRecord,
+    OAuthInventorySummaryResponse, OAuthRateLimitRefreshErrorSummary,
+    OAuthRateLimitRefreshJobStatus, OAuthRateLimitRefreshJobSummary, OAuthRateLimitSnapshot,
+    OAuthRefreshStatus, OAuthVaultRecordStatus, SessionCredentialKind,
+    UpdateAiErrorLearningSettingsRequest, UpdateModelRoutingSettingsRequest,
+    UpdateOutboundProxyNodeRequest, UpdateOutboundProxyPoolSettingsRequest,
+    UpsertModelRoutingPolicyRequest, UpsertRetryPolicyRequest, UpsertRoutingPolicyRequest,
+    UpsertRoutingProfileRequest, UpsertStreamRetryPolicyRequest, ValidateOAuthRefreshTokenRequest,
+    ValidateOAuthRefreshTokenResponse,
+};
 use crate::crypto::CredentialCipher;
 use crate::oauth::{OAuthTokenClient, OAuthTokenInfo, OpenAiOAuthClient};
 
@@ -103,8 +102,7 @@ const OAUTH_VAULT_ACTIVATE_BATCH_SIZE_ENV: &str = "CONTROL_PLANE_VAULT_ACTIVATE_
 const DEFAULT_OAUTH_VAULT_ACTIVATE_BATCH_SIZE: usize = 200;
 const MIN_OAUTH_VAULT_ACTIVATE_BATCH_SIZE: usize = 1;
 const MAX_OAUTH_VAULT_ACTIVATE_BATCH_SIZE: usize = 2_000;
-const OAUTH_VAULT_ACTIVATE_CONCURRENCY_ENV: &str =
-    "CONTROL_PLANE_VAULT_ACTIVATE_CONCURRENCY";
+const OAUTH_VAULT_ACTIVATE_CONCURRENCY_ENV: &str = "CONTROL_PLANE_VAULT_ACTIVATE_CONCURRENCY";
 const DEFAULT_OAUTH_VAULT_ACTIVATE_CONCURRENCY: usize = 8;
 const MIN_OAUTH_VAULT_ACTIVATE_CONCURRENCY: usize = 1;
 const MAX_OAUTH_VAULT_ACTIVATE_CONCURRENCY: usize = 64;
@@ -232,7 +230,10 @@ fn oauth_vault_activate_max_rps_from_env() -> u32 {
         .ok()
         .and_then(|raw| raw.parse::<u32>().ok())
         .unwrap_or(DEFAULT_OAUTH_VAULT_ACTIVATE_MAX_RPS)
-        .clamp(MIN_OAUTH_VAULT_ACTIVATE_MAX_RPS, MAX_OAUTH_VAULT_ACTIVATE_MAX_RPS)
+        .clamp(
+            MIN_OAUTH_VAULT_ACTIVATE_MAX_RPS,
+            MAX_OAUTH_VAULT_ACTIVATE_MAX_RPS,
+        )
 }
 
 fn active_pool_target_from_env() -> usize {
@@ -277,8 +278,8 @@ mod postgres_env_tests {
     use super::{
         is_blocking_rate_limit_error, oauth_effective_enabled, oauth_refresh_batch_size_from_env,
         oauth_refresh_concurrency_from_env, oauth_refresh_max_rps_from_env,
-        rate_limit_failure_backoff_seconds, rate_limit_refresh_max_rps_from_env,
-        postgres_max_connections_from_env,
+        postgres_max_connections_from_env, rate_limit_failure_backoff_seconds,
+        rate_limit_refresh_max_rps_from_env,
     };
     use crate::test_support::{set_env, ENV_LOCK};
     use chrono::{Duration, Utc};

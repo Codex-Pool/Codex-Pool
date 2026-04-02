@@ -3862,6 +3862,9 @@ mod entry_route_selection_tests {
             billing_capture_retry_backoff: Duration::from_millis(200),
             billing_pricing_cache: std::sync::RwLock::new(HashMap::new()),
             models_cache: std::sync::RwLock::new(std::collections::HashMap::new()),
+            claude_code_routing_settings: std::sync::RwLock::new(
+                codex_pool_core::model::ClaudeCodeRoutingSettings::default(),
+            ),
             routing_cache: Arc::new(InMemoryRoutingCache::new()),
             #[cfg(feature = "redis-backend")]
             alive_ring_router: None,

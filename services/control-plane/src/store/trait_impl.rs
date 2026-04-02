@@ -146,10 +146,7 @@ impl ControlPlaneStore for InMemoryStore {
         self.upsert_oauth_refresh_token_inner(req).await
     }
 
-    async fn queue_oauth_refresh_token(
-        &self,
-        req: ImportOAuthRefreshTokenRequest,
-    ) -> Result<bool> {
+    async fn queue_oauth_refresh_token(&self, req: ImportOAuthRefreshTokenRequest) -> Result<bool> {
         let created = self.queue_oauth_refresh_token_inner(req.clone())?;
         if let Some(record_id) = self.oauth_vault_record_id_for_request(&req) {
             self.probe_oauth_vault_admission_inner(record_id).await?;
@@ -180,7 +177,9 @@ impl ControlPlaneStore for InMemoryStore {
         self.oauth_account_status_inner(account_id).await
     }
 
-    async fn oauth_inventory_summary(&self) -> Result<crate::contracts::OAuthInventorySummaryResponse> {
+    async fn oauth_inventory_summary(
+        &self,
+    ) -> Result<crate::contracts::OAuthInventorySummaryResponse> {
         Ok(self.oauth_inventory_summary_inner())
     }
 
@@ -378,7 +377,11 @@ impl ControlPlaneStore for InMemoryStore {
     }
 
     async fn delete_model_routing_policy(&self, policy_id: Uuid) -> Result<()> {
-        let removed = self.model_routing_policies.write().unwrap().remove(&policy_id);
+        let removed = self
+            .model_routing_policies
+            .write()
+            .unwrap()
+            .remove(&policy_id);
         if removed.is_none() {
             return Err(anyhow!("model routing policy not found"));
         }
@@ -407,8 +410,32 @@ impl ControlPlaneStore for InMemoryStore {
         Ok(settings)
     }
 
+    async fn claude_code_routing_settings(&self) -> Result<ClaudeCodeRoutingSettings> {
+        Ok(self.claude_code_routing_settings.read().unwrap().clone())
+    }
+
+    async fn update_claude_code_routing_settings(
+        &self,
+        req: UpdateClaudeCodeRoutingSettingsRequest,
+    ) -> Result<ClaudeCodeRoutingSettings> {
+        let settings = ClaudeCodeRoutingSettings {
+            enabled: req.enabled,
+            opus_target_model: normalize_optional_model(req.opus_target_model),
+            sonnet_target_model: normalize_optional_model(req.sonnet_target_model),
+            haiku_target_model: normalize_optional_model(req.haiku_target_model),
+            updated_at: Utc::now(),
+        };
+        *self.claude_code_routing_settings.write().unwrap() = settings.clone();
+        self.revision.fetch_add(1, Ordering::Relaxed);
+        Ok(settings)
+    }
+
     async fn upstream_error_learning_settings(&self) -> Result<AiErrorLearningSettings> {
-        Ok(self.upstream_error_learning_settings.read().unwrap().clone())
+        Ok(self
+            .upstream_error_learning_settings
+            .read()
+            .unwrap()
+            .clone())
     }
 
     async fn update_upstream_error_learning_settings(
@@ -595,7 +622,9 @@ impl ControlPlaneStore for InMemoryStore {
             }
 
             let fetched = targets.len();
-            let stats = self.refresh_rate_limit_targets_batch(targets, concurrency).await;
+            let stats = self
+                .refresh_rate_limit_targets_batch(targets, concurrency)
+                .await;
             self.emit_rate_limit_refresh_batch_summary_inner(
                 started_at,
                 "control_plane.rate_limit_refresh",
@@ -631,10 +660,12 @@ impl ControlPlaneStore for InMemoryStore {
             {
                 existing.count = existing.count.saturating_add(1);
             } else {
-                summary.error_summary.push(OAuthRateLimitRefreshErrorSummary {
-                    error_code: "job_recovered_after_restart".to_string(),
-                    count: 1,
-                });
+                summary
+                    .error_summary
+                    .push(OAuthRateLimitRefreshErrorSummary {
+                        error_code: "job_recovered_after_restart".to_string(),
+                        count: 1,
+                    });
             }
             recovered = recovered.saturating_add(1);
         }
@@ -730,7 +761,9 @@ impl ControlPlaneStore for InMemoryStore {
 
                 let fetched = targets.len();
                 cursor = targets.last().map(|target| target.account_id);
-                let stats = self.refresh_rate_limit_targets_batch(targets, concurrency).await;
+                let stats = self
+                    .refresh_rate_limit_targets_batch(targets, concurrency)
+                    .await;
                 self.emit_rate_limit_refresh_batch_summary_inner(
                     started_at,
                     "control_plane.rate_limit_refresh_job",
@@ -792,11 +825,7 @@ impl ControlPlaneStore for InMemoryStore {
         seen_ok_at: DateTime<Utc>,
         min_write_interval_sec: i64,
     ) -> Result<bool> {
-        Ok(self.mark_account_seen_ok_inner(
-            account_id,
-            seen_ok_at,
-            min_write_interval_sec,
-        ))
+        Ok(self.mark_account_seen_ok_inner(account_id, seen_ok_at, min_write_interval_sec))
     }
 
     async fn maybe_refresh_oauth_rate_limit_cache_on_seen_ok(
@@ -804,13 +833,13 @@ impl ControlPlaneStore for InMemoryStore {
         account_id: Uuid,
     ) -> Result<()> {
         let now = Utc::now();
-        let account = self
-            .accounts
+        let account = self.accounts.read().unwrap().get(&account_id).cloned();
+        let provider = self
+            .account_auth_providers
             .read()
             .unwrap()
             .get(&account_id)
             .cloned();
-        let provider = self.account_auth_providers.read().unwrap().get(&account_id).cloned();
         let credential = self
             .oauth_credentials
             .read()
@@ -837,36 +866,40 @@ impl ControlPlaneStore for InMemoryStore {
         if !account.enabled {
             return Ok(());
         }
-        let (token_expires_at, last_refresh_status, refresh_reused_detected, last_refresh_error_code) =
-            match provider {
-                UpstreamAuthProvider::OAuthRefreshToken => {
-                    let Some(credential) = credential.as_ref() else {
-                        return Ok(());
-                    };
-                    (
-                        Some(credential.token_expires_at),
-                        credential.last_refresh_status.clone(),
-                        credential.refresh_reused_detected,
-                        credential.last_refresh_error_code.clone(),
-                    )
+        let (
+            token_expires_at,
+            last_refresh_status,
+            refresh_reused_detected,
+            last_refresh_error_code,
+        ) = match provider {
+            UpstreamAuthProvider::OAuthRefreshToken => {
+                let Some(credential) = credential.as_ref() else {
+                    return Ok(());
+                };
+                (
+                    Some(credential.token_expires_at),
+                    credential.last_refresh_status.clone(),
+                    credential.refresh_reused_detected,
+                    credential.last_refresh_error_code.clone(),
+                )
+            }
+            UpstreamAuthProvider::LegacyBearer => {
+                let Some(profile) = session_profile.as_ref() else {
+                    return Ok(());
+                };
+                if account.mode != UpstreamMode::CodexOauth
+                    || profile.credential_kind != SessionCredentialKind::OneTimeAccessToken
+                {
+                    return Ok(());
                 }
-                UpstreamAuthProvider::LegacyBearer => {
-                    let Some(profile) = session_profile.as_ref() else {
-                        return Ok(());
-                    };
-                    if account.mode != UpstreamMode::CodexOauth
-                        || profile.credential_kind != SessionCredentialKind::OneTimeAccessToken
-                    {
-                        return Ok(());
-                    }
-                    (
-                        profile.token_expires_at,
-                        OAuthRefreshStatus::Never,
-                        false,
-                        None,
-                    )
-                }
-            };
+                (
+                    profile.token_expires_at,
+                    OAuthRefreshStatus::Never,
+                    false,
+                    None,
+                )
+            }
+        };
         if !should_refresh_rate_limit_cache_on_seen_ok(
             now,
             SeenOkRateLimitRefreshContext {
@@ -930,6 +963,13 @@ impl ControlPlaneStore for InMemoryStore {
     }
 }
 
+fn normalize_optional_model(value: Option<String>) -> Option<String> {
+    value.and_then(|value| {
+        let trimmed = value.trim();
+        (!trimmed.is_empty()).then(|| trimmed.to_string())
+    })
+}
+
 fn truncate_error_message(raw: String) -> String {
     const MAX_LEN: usize = 256;
     if raw.len() <= MAX_LEN {
@@ -952,8 +992,15 @@ fn refresh_token_sha256(token: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        ControlPlaneStore, InMemoryStore, OAuthCredentialRecord,
-        UpsertOneTimeSessionAccountRequest,
+        ControlPlaneStore, InMemoryStore, OAuthCredentialRecord, UpsertOneTimeSessionAccountRequest,
+    };
+    use crate::contracts::{
+        CreateApiKeyRequest, CreateTenantRequest, CreateUpstreamAccountRequest,
+        ImportOAuthRefreshTokenRequest, OAuthAccountPoolState, OAuthInventoryFailureStage,
+        OAuthLiveResultSource, OAuthLiveResultStatus, OAuthRateLimitRefreshJobStatus,
+        OAuthRateLimitSnapshot, OAuthRateLimitWindow, OAuthRefreshStatus, OAuthVaultRecordStatus,
+        RefreshCredentialState, SessionCredentialKind, UpsertModelRoutingPolicyRequest,
+        UpsertRoutingProfileRequest,
     };
     use crate::crypto::CredentialCipher;
     use crate::oauth::{OAuthTokenClient, OAuthTokenInfo, OAuthUsageSnapshot};
@@ -964,23 +1011,13 @@ mod tests {
     use async_trait::async_trait;
     use base64::Engine;
     use chrono::{DateTime, Duration, Utc};
-    use crate::contracts::{
-        CreateApiKeyRequest, CreateTenantRequest, CreateUpstreamAccountRequest,
-        ImportOAuthRefreshTokenRequest, OAuthAccountPoolState, OAuthInventoryFailureStage,
-        OAuthLiveResultSource, OAuthLiveResultStatus, OAuthRateLimitRefreshJobStatus,
-        OAuthRateLimitSnapshot, OAuthRateLimitWindow, OAuthRefreshStatus,
-        OAuthVaultRecordStatus, RefreshCredentialState, SessionCredentialKind,
-        UpsertModelRoutingPolicyRequest, UpsertRoutingProfileRequest,
-    };
-    use codex_pool_core::model::{
-        RoutingProfileSelector, UpstreamAuthProvider, UpstreamMode,
-    };
+    use codex_pool_core::model::{RoutingProfileSelector, UpstreamAuthProvider, UpstreamMode};
     use serde_json::json;
+    use sqlx_sqlite::SqlitePool;
     use std::collections::VecDeque;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::{Arc, Mutex};
     use tokio::time::{sleep, Duration as TokioDuration};
-    use sqlx_sqlite::SqlitePool;
 
     async fn wait_for_system_events(
         repo: &Arc<SqliteSystemEventRepo>,
@@ -1286,8 +1323,11 @@ mod tests {
 
     #[derive(Clone)]
     struct SequentialAdmissionProbeOAuthTokenClient {
-        fetch_results:
-            Arc<Mutex<VecDeque<Result<Vec<OAuthRateLimitSnapshot>, crate::oauth::OAuthTokenClientError>>>>,
+        fetch_results: Arc<
+            Mutex<
+                VecDeque<Result<Vec<OAuthRateLimitSnapshot>, crate::oauth::OAuthTokenClientError>>,
+            >,
+        >,
     }
 
     #[async_trait]
@@ -1354,7 +1394,8 @@ mod tests {
             refresh_token: &str,
             _base_url: Option<&str>,
         ) -> Result<OAuthTokenInfo, crate::oauth::OAuthTokenClientError> {
-            let (email, account_user_id, workspace_name) = if refresh_token.contains("workspace-b") {
+            let (email, account_user_id, workspace_name) = if refresh_token.contains("workspace-b")
+            {
                 (
                     "shared-workspace-b@example.com",
                     "acct_user_shared_workspace_b",
@@ -1438,9 +1479,7 @@ mod tests {
             _base_url: Option<&str>,
             chatgpt_account_id: Option<&str>,
         ) -> Result<Option<String>, crate::oauth::OAuthTokenClientError> {
-            if access_token == "probe-access"
-                && chatgpt_account_id == Some("acct_probe_team")
-            {
+            if access_token == "probe-access" && chatgpt_account_id == Some("acct_probe_team") {
                 return Ok(Some("OAI-03.09".to_string()));
             }
 
@@ -1553,10 +1592,7 @@ mod tests {
             status.chatgpt_account_user_id.as_deref(),
             Some("acct_user_demo")
         );
-        assert_eq!(
-            status.chatgpt_compute_residency.as_deref(),
-            Some("us")
-        );
+        assert_eq!(status.chatgpt_compute_residency.as_deref(), Some("us"));
         assert_eq!(status.organizations.as_ref().map(Vec::len), Some(1));
         assert_eq!(status.groups.as_ref().map(Vec::len), Some(1));
     }
@@ -1716,11 +1752,13 @@ mod tests {
                 .unwrap(),
             "ak-preserve"
         );
-        assert!(store
-            .oauth_account_status(second.account.id)
-            .await
-            .unwrap()
-            .has_access_token_fallback);
+        assert!(
+            store
+                .oauth_account_status(second.account.id)
+                .await
+                .unwrap()
+                .has_access_token_fallback
+        );
     }
 
     #[tokio::test]
@@ -1845,41 +1883,40 @@ mod tests {
             .unwrap()
             .insert(account.id, UpstreamAuthProvider::OAuthRefreshToken);
         let cipher = failing_store.require_credential_cipher().unwrap();
-        failing_store
-            .oauth_credentials
-            .write()
-            .unwrap()
-            .insert(
-                account.id,
-                OAuthCredentialRecord::from_token_info(
-                    cipher,
-                    &OAuthTokenInfo {
-                        access_token: "access-1".to_string(),
-                        refresh_token: "refresh-1".to_string(),
-                        expires_at: Utc::now() + Duration::seconds(10),
-                        token_type: Some("Bearer".to_string()),
-                        scope: Some("model.read".to_string()),
-                        email: Some("demo@example.com".to_string()),
-                        oauth_subject: Some("auth0|demo".to_string()),
-                        oauth_identity_provider: Some("google-oauth2".to_string()),
-                        email_verified: Some(true),
-                        chatgpt_account_id: Some("acct_demo".to_string()),
-                        chatgpt_user_id: Some("user_demo".to_string()),
-                        chatgpt_plan_type: Some("pro".to_string()),
-                        chatgpt_subscription_active_start: None,
-                        chatgpt_subscription_active_until: None,
-                        chatgpt_subscription_last_checked: None,
-                        chatgpt_account_user_id: Some("acct_user_demo".to_string()),
-                        chatgpt_compute_residency: Some("us".to_string()),
-                        workspace_name: None,
-                        organizations: None,
-                        groups: None,
-                    },
-                )
-                .unwrap(),
-            );
+        failing_store.oauth_credentials.write().unwrap().insert(
+            account.id,
+            OAuthCredentialRecord::from_token_info(
+                cipher,
+                &OAuthTokenInfo {
+                    access_token: "access-1".to_string(),
+                    refresh_token: "refresh-1".to_string(),
+                    expires_at: Utc::now() + Duration::seconds(10),
+                    token_type: Some("Bearer".to_string()),
+                    scope: Some("model.read".to_string()),
+                    email: Some("demo@example.com".to_string()),
+                    oauth_subject: Some("auth0|demo".to_string()),
+                    oauth_identity_provider: Some("google-oauth2".to_string()),
+                    email_verified: Some(true),
+                    chatgpt_account_id: Some("acct_demo".to_string()),
+                    chatgpt_user_id: Some("user_demo".to_string()),
+                    chatgpt_plan_type: Some("pro".to_string()),
+                    chatgpt_subscription_active_start: None,
+                    chatgpt_subscription_active_until: None,
+                    chatgpt_subscription_last_checked: None,
+                    chatgpt_account_user_id: Some("acct_user_demo".to_string()),
+                    chatgpt_compute_residency: Some("us".to_string()),
+                    workspace_name: None,
+                    organizations: None,
+                    groups: None,
+                },
+            )
+            .unwrap(),
+        );
 
-        let status = failing_store.refresh_oauth_account(account.id).await.unwrap();
+        let status = failing_store
+            .refresh_oauth_account(account.id)
+            .await
+            .unwrap();
 
         assert_eq!(
             status.refresh_credential_state,
@@ -1962,7 +1999,10 @@ mod tests {
             .unwrap();
 
         store
-            .mark_upstream_account_pending_purge(account.id, Some("account_deactivated".to_string()))
+            .mark_upstream_account_pending_purge(
+                account.id,
+                Some("account_deactivated".to_string()),
+            )
             .await
             .unwrap();
         store.delete_upstream_account(account.id).await.unwrap();
@@ -2053,7 +2093,8 @@ mod tests {
             items.iter().any(|item| {
                 item.category == codex_pool_core::events::SystemEventCategory::Patrol
                     && item.event_type == "active_patrol_batch_completed"
-                    && item.payload_json
+                    && item
+                        .payload_json
                         .as_ref()
                         .and_then(|value| value.get("patrolled"))
                         .and_then(|value| value.as_u64())
@@ -2104,10 +2145,7 @@ mod tests {
             .oauth_rate_limit_refresh_job(created.job_id)
             .await
             .expect("load rate-limit refresh job");
-        assert_eq!(
-            summary.status,
-            OAuthRateLimitRefreshJobStatus::Completed
-        );
+        assert_eq!(summary.status, OAuthRateLimitRefreshJobStatus::Completed);
         assert_eq!(summary.total, 1);
         assert_eq!(summary.processed, 1);
         assert_eq!(summary.success_count, 1);
@@ -2118,7 +2156,10 @@ mod tests {
             .await
             .expect("oauth account status");
         assert_eq!(status.rate_limits.len(), 1);
-        assert_eq!(status.rate_limits[0].limit_id.as_deref(), Some("five_hours"));
+        assert_eq!(
+            status.rate_limits[0].limit_id.as_deref(),
+            Some("five_hours")
+        );
         assert_eq!(status.chatgpt_plan_type.as_deref(), Some("plus"));
         assert!(status.rate_limits_fetched_at.is_some());
         assert!(status.rate_limits_expires_at.is_some());
@@ -2169,17 +2210,20 @@ mod tests {
                     && item.event_type == "rate_limit_refresh_batch_completed"
                     && item.source == "control_plane.rate_limit_refresh"
                     && item.job_id.is_none()
-                    && item.payload_json
+                    && item
+                        .payload_json
                         .as_ref()
                         .and_then(|value| value.get("processed"))
                         .and_then(|value| value.as_u64())
                         == Some(1)
-                    && item.payload_json
+                    && item
+                        .payload_json
                         .as_ref()
                         .and_then(|value| value.get("success"))
                         .and_then(|value| value.as_u64())
                         == Some(1)
-                    && item.payload_json
+                    && item
+                        .payload_json
                         .as_ref()
                         .and_then(|value| value.get("failed"))
                         .and_then(|value| value.as_u64())
@@ -2236,17 +2280,20 @@ mod tests {
                     && item.event_type == "rate_limit_refresh_batch_completed"
                     && item.source == "control_plane.rate_limit_refresh_job"
                     && item.job_id == Some(created.job_id)
-                    && item.payload_json
+                    && item
+                        .payload_json
                         .as_ref()
                         .and_then(|value| value.get("processed"))
                         .and_then(|value| value.as_u64())
                         == Some(1)
-                    && item.payload_json
+                    && item
+                        .payload_json
                         .as_ref()
                         .and_then(|value| value.get("success"))
                         .and_then(|value| value.as_u64())
                         == Some(1)
-                    && item.payload_json
+                    && item
+                        .payload_json
                         .as_ref()
                         .and_then(|value| value.get("failed"))
                         .and_then(|value| value.as_u64())
@@ -2294,7 +2341,10 @@ mod tests {
             .expect("legacy bearer oauth status");
         assert_eq!(status.auth_provider, UpstreamAuthProvider::LegacyBearer);
         assert_eq!(status.rate_limits.len(), 1);
-        assert_eq!(status.rate_limits[0].limit_id.as_deref(), Some("five_hours"));
+        assert_eq!(
+            status.rate_limits[0].limit_id.as_deref(),
+            Some("five_hours")
+        );
         assert_eq!(status.chatgpt_plan_type.as_deref(), Some("plus"));
         assert!(status.rate_limits_fetched_at.is_some());
     }
@@ -2332,7 +2382,10 @@ mod tests {
             .expect("legacy bearer oauth status");
         assert_eq!(status.auth_provider, UpstreamAuthProvider::LegacyBearer);
         assert_eq!(status.rate_limits.len(), 1);
-        assert_eq!(status.rate_limits[0].limit_id.as_deref(), Some("five_hours"));
+        assert_eq!(
+            status.rate_limits[0].limit_id.as_deref(),
+            Some("five_hours")
+        );
         assert_eq!(status.chatgpt_plan_type.as_deref(), Some("plus"));
         assert!(status.rate_limits_fetched_at.is_some());
     }
@@ -2369,7 +2422,10 @@ mod tests {
             .expect("legacy bearer oauth status");
         assert_eq!(status.auth_provider, UpstreamAuthProvider::LegacyBearer);
         assert_eq!(status.rate_limits.len(), 1);
-        assert_eq!(status.rate_limits[0].limit_id.as_deref(), Some("five_hours"));
+        assert_eq!(
+            status.rate_limits[0].limit_id.as_deref(),
+            Some("five_hours")
+        );
         assert_eq!(status.chatgpt_plan_type.as_deref(), Some("plus"));
         assert!(status.rate_limits_fetched_at.is_some());
     }
@@ -2453,7 +2509,10 @@ mod tests {
                 .await
                 .expect("oauth status after strike");
             assert_eq!(status.pool_state, OAuthAccountPoolState::Quarantine);
-            assert_eq!(status.quarantine_reason.as_deref(), Some("token_invalidated"));
+            assert_eq!(
+                status.quarantine_reason.as_deref(),
+                Some("token_invalidated")
+            );
         }
 
         let accepted = store
@@ -2488,10 +2547,8 @@ mod tests {
             &base64::engine::general_purpose::STANDARD.encode([10_u8; 32]),
         )
         .unwrap();
-        let store = InMemoryStore::new_with_oauth(
-            Arc::new(SharedAccountIdOAuthTokenClient),
-            Some(cipher),
-        );
+        let store =
+            InMemoryStore::new_with_oauth(Arc::new(SharedAccountIdOAuthTokenClient), Some(cipher));
 
         let account = store
             .import_oauth_refresh_token(ImportOAuthRefreshTokenRequest {
@@ -2600,17 +2657,13 @@ mod tests {
             status.rate_limits_last_error_code.as_deref(),
             Some("primary_window_exhausted")
         );
-        assert!(
-            status
-                .rate_limits_last_error
-                .as_deref()
-                .is_some_and(|message| message.contains("primary"))
-        );
-        assert!(
-            status
-                .rate_limits_expires_at
-                .is_some_and(|expires_at| expires_at >= observed_at + Duration::minutes(30))
-        );
+        assert!(status
+            .rate_limits_last_error
+            .as_deref()
+            .is_some_and(|message| message.contains("primary")));
+        assert!(status
+            .rate_limits_expires_at
+            .is_some_and(|expires_at| expires_at >= observed_at + Duration::minutes(30)));
         assert!(!status.effective_enabled);
     }
 
@@ -2648,10 +2701,8 @@ mod tests {
             &base64::engine::general_purpose::STANDARD.encode([3_u8; 32]),
         )
         .unwrap();
-        let store = InMemoryStore::new_with_oauth(
-            Arc::new(SharedAccountIdOAuthTokenClient),
-            Some(cipher),
-        );
+        let store =
+            InMemoryStore::new_with_oauth(Arc::new(SharedAccountIdOAuthTokenClient), Some(cipher));
 
         let first = store
             .upsert_oauth_refresh_token(ImportOAuthRefreshTokenRequest {
@@ -2707,10 +2758,8 @@ mod tests {
             &base64::engine::general_purpose::STANDARD.encode([4_u8; 32]),
         )
         .unwrap();
-        let store = InMemoryStore::new_with_oauth(
-            Arc::new(SharedAccountIdOAuthTokenClient),
-            Some(cipher),
-        );
+        let store =
+            InMemoryStore::new_with_oauth(Arc::new(SharedAccountIdOAuthTokenClient), Some(cipher));
 
         let first = store
             .upsert_oauth_refresh_token(ImportOAuthRefreshTokenRequest {
@@ -2908,7 +2957,10 @@ mod tests {
             .find(|policy| policy.exact_models == vec!["gpt-5.4".to_string()])
             .expect("compiled exact route for gpt-5.4");
         assert_eq!(gpt54.fallback_segments.len(), 1);
-        assert_eq!(gpt54.fallback_segments[0].account_ids, vec![paid_account.id]);
+        assert_eq!(
+            gpt54.fallback_segments[0].account_ids,
+            vec![paid_account.id]
+        );
     }
 
     #[tokio::test]
@@ -3359,8 +3411,14 @@ mod tests {
         assert_eq!(patrolled, 1);
 
         let pool_record = store.account_pool_record(account.id).await.unwrap();
-        assert_eq!(pool_record.operator_state, crate::contracts::AccountPoolOperatorState::PendingDelete);
-        assert_eq!(pool_record.reason_code.as_deref(), Some("account_deactivated"));
+        assert_eq!(
+            pool_record.operator_state,
+            crate::contracts::AccountPoolOperatorState::PendingDelete
+        );
+        assert_eq!(
+            pool_record.reason_code.as_deref(),
+            Some("account_deactivated")
+        );
     }
 
     #[tokio::test]
@@ -3413,10 +3471,8 @@ mod tests {
 
     #[tokio::test]
     async fn in_memory_active_patrol_labels_legacy_bearer_auth_failure_as_token_invalidated() {
-        let store = InMemoryStore::new_with_oauth(
-            Arc::new(LegacyBearerAuthFailureOAuthTokenClient),
-            None,
-        );
+        let store =
+            InMemoryStore::new_with_oauth(Arc::new(LegacyBearerAuthFailureOAuthTokenClient), None);
 
         let account = store
             .upsert_one_time_session_account(UpsertOneTimeSessionAccountRequest {
@@ -3446,14 +3502,23 @@ mod tests {
         assert_eq!(patrolled, 1);
 
         let status = store.oauth_account_status(account.id).await.unwrap();
-        assert_eq!(status.rate_limits_last_error_code.as_deref(), Some("token_invalidated"));
-        assert_eq!(status.pending_purge_reason.as_deref(), Some("token_invalidated"));
+        assert_eq!(
+            status.rate_limits_last_error_code.as_deref(),
+            Some("token_invalidated")
+        );
+        assert_eq!(
+            status.pending_purge_reason.as_deref(),
+            Some("token_invalidated")
+        );
 
         let pool_record = store.account_pool_record(account.id).await.unwrap();
         assert_eq!(
             pool_record.operator_state,
             crate::contracts::AccountPoolOperatorState::PendingDelete
         );
-        assert_eq!(pool_record.reason_code.as_deref(), Some("token_invalidated"));
+        assert_eq!(
+            pool_record.reason_code.as_deref(),
+            Some("token_invalidated")
+        );
     }
 }

@@ -38,15 +38,47 @@ fn auth_error_response(status: StatusCode, code: &'static str, message: &'static
 
 pub async fn require_api_key(
     State(state): State<Arc<AppState>>,
-    mut req: Request<Body>,
+    req: Request<Body>,
     next: Next,
 ) -> Result<Response, Response> {
+    require_api_key_with_extractor(
+        state,
+        req,
+        next,
+        extract_bearer,
+        "missing or invalid bearer token",
+    )
+    .await
+}
+
+pub async fn require_anthropic_api_key(
+    State(state): State<Arc<AppState>>,
+    req: Request<Body>,
+    next: Next,
+) -> Result<Response, Response> {
+    require_api_key_with_extractor(
+        state,
+        req,
+        next,
+        extract_bearer_or_x_api_key,
+        "missing or invalid api key",
+    )
+    .await
+}
+
+async fn require_api_key_with_extractor(
+    state: Arc<AppState>,
+    mut req: Request<Body>,
+    next: Next,
+    extractor: fn(&HeaderMap) -> Option<String>,
+    missing_token_message: &'static str,
+) -> Result<Response, Response> {
     if let Some(auth_validator) = state.auth_validator.as_ref() {
-        let token = extract_bearer(req.headers()).ok_or_else(|| {
+        let token = extractor(req.headers()).ok_or_else(|| {
             auth_error_response(
                 StatusCode::UNAUTHORIZED,
                 "unauthorized",
-                "missing or invalid bearer token",
+                missing_token_message,
             )
         })?;
         let principal = match auth_validator.validate(&token).await {
@@ -62,7 +94,15 @@ pub async fn require_api_key(
                 warn!(error = %err, "online api key validation failed");
                 if state.auth_fail_open && is_fail_open_eligible(&err) {
                     warn!("falling back to local auth mode after validator failure");
-                    return authorize_with_local_mode(req, next, &state, Some(token)).await;
+                    return authorize_with_local_mode(
+                        req,
+                        next,
+                        &state,
+                        Some(token),
+                        extractor,
+                        missing_token_message,
+                    )
+                    .await;
                 }
                 return Err(auth_error_response(
                     StatusCode::SERVICE_UNAVAILABLE,
@@ -83,7 +123,7 @@ pub async fn require_api_key(
         return Ok(next.run(req).await);
     }
 
-    authorize_with_local_mode(req, next, &state, None).await
+    authorize_with_local_mode(req, next, &state, None, extractor, missing_token_message).await
 }
 
 pub async fn require_internal_service_token(
@@ -115,6 +155,8 @@ async fn authorize_with_local_mode(
     next: Next,
     state: &AppState,
     token: Option<String>,
+    extractor: fn(&HeaderMap) -> Option<String>,
+    missing_token_message: &'static str,
 ) -> Result<Response, Response> {
     if state.allowed_api_keys.is_empty() {
         return Ok(next.run(req).await);
@@ -122,11 +164,11 @@ async fn authorize_with_local_mode(
 
     let token = match token {
         Some(token) => token,
-        None => extract_bearer(req.headers()).ok_or_else(|| {
+        None => extractor(req.headers()).ok_or_else(|| {
             auth_error_response(
                 StatusCode::UNAUTHORIZED,
                 "unauthorized",
-                "missing or invalid bearer token",
+                missing_token_message,
             )
         })?,
     };
@@ -180,9 +222,21 @@ fn extract_bearer(headers: &HeaderMap) -> Option<String> {
     Some(token.to_string())
 }
 
+fn extract_x_api_key(headers: &HeaderMap) -> Option<String> {
+    let raw = headers.get("x-api-key")?.to_str().ok()?.trim();
+    if raw.is_empty() {
+        return None;
+    }
+    Some(raw.to_string())
+}
+
+fn extract_bearer_or_x_api_key(headers: &HeaderMap) -> Option<String> {
+    extract_bearer(headers).or_else(|| extract_x_api_key(headers))
+}
+
 #[cfg(test)]
 mod tests {
-    use super::extract_bearer;
+    use super::{extract_bearer, extract_bearer_or_x_api_key};
     use axum::http::header::AUTHORIZATION;
     use axum::http::HeaderMap;
 
@@ -192,5 +246,16 @@ mod tests {
         headers.insert(AUTHORIZATION, "Bearer cp_test_key".parse().unwrap());
 
         assert_eq!(extract_bearer(&headers).as_deref(), Some("cp_test_key"));
+    }
+
+    #[test]
+    fn extracts_x_api_key_when_bearer_is_missing() {
+        let mut headers = HeaderMap::new();
+        headers.insert("x-api-key", "cp_test_key".parse().unwrap());
+
+        assert_eq!(
+            extract_bearer_or_x_api_key(&headers).as_deref(),
+            Some("cp_test_key")
+        );
     }
 }

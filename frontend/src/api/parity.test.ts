@@ -97,6 +97,8 @@ test('modelRoutingApi exposes the main branch routing management surface', () =>
     'deletePolicy',
     'getSettings',
     'updateSettings',
+    'getClaudeCodeSettings',
+    'updateClaudeCodeSettings',
     'listVersions',
   ]
 

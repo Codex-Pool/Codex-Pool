@@ -3,8 +3,9 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::model::{
-    AccountRoutingTraits, AiErrorLearningSettings, BuiltinErrorTemplateRecord, CompiledRoutingPlan,
-    OutboundProxyNode, OutboundProxyPoolSettings, UpstreamAccount, UpstreamErrorTemplateRecord,
+    AccountRoutingTraits, AiErrorLearningSettings, BuiltinErrorTemplateRecord,
+    ClaudeCodeRoutingSettings, CompiledRoutingPlan, OutboundProxyNode, OutboundProxyPoolSettings,
+    UpstreamAccount, UpstreamErrorTemplateRecord,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -27,6 +28,8 @@ pub struct DataPlaneSnapshot {
     pub outbound_proxy_pool_settings: OutboundProxyPoolSettings,
     #[serde(default)]
     pub outbound_proxy_nodes: Vec<OutboundProxyNode>,
+    #[serde(default)]
+    pub claude_code_routing_settings: ClaudeCodeRoutingSettings,
     pub issued_at: DateTime<Utc>,
 }
 
@@ -57,6 +60,8 @@ pub struct DataPlaneSnapshotEvent {
     pub outbound_proxy_pool_settings: Option<OutboundProxyPoolSettings>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub outbound_proxy_nodes: Option<Vec<OutboundProxyNode>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub claude_code_routing_settings: Option<ClaudeCodeRoutingSettings>,
     pub created_at: DateTime<Utc>,
 }
 

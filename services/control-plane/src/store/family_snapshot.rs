@@ -137,8 +137,7 @@ impl InMemoryStore {
                     .get(&account.id)
                     .map(|cache| cache.rate_limits.clone())
                     .unwrap_or_default();
-                let (blocked_until, hard_block_reason) =
-                    derive_rate_limit_block(&rate_limits, now);
+                let (blocked_until, hard_block_reason) = derive_rate_limit_block(&rate_limits, now);
                 let health_state = health_states.get(&account.id).cloned().unwrap_or_default();
                 let freshness = account_health_freshness_from_signals(
                     now,
@@ -455,11 +454,18 @@ impl InMemoryStore {
         }
 
         let account_traits_map = self.build_account_routing_traits(&accounts);
-        let compiled_routing_plan = self.compile_routing_plan_from_state(&accounts, &account_traits_map);
-        let ai_error_learning_settings = self.upstream_error_learning_settings.read().unwrap().clone();
+        let compiled_routing_plan =
+            self.compile_routing_plan_from_state(&accounts, &account_traits_map);
+        let ai_error_learning_settings = self
+            .upstream_error_learning_settings
+            .read()
+            .unwrap()
+            .clone();
         let outbound_proxy_pool_settings =
             self.outbound_proxy_pool_settings.read().unwrap().clone();
         let outbound_proxy_nodes = self.list_outbound_proxy_nodes_inner();
+        let claude_code_routing_settings =
+            self.claude_code_routing_settings.read().unwrap().clone();
         let mut approved_upstream_error_templates = self
             .upstream_error_templates
             .read()
@@ -484,6 +490,7 @@ impl InMemoryStore {
             builtin_error_templates: self.list_builtin_error_templates_inner(),
             outbound_proxy_pool_settings,
             outbound_proxy_nodes,
+            claude_code_routing_settings,
             issued_at: Utc::now(),
         })
     }

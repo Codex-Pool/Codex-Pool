@@ -1590,7 +1590,9 @@ impl PostgresStore {
         )
         .execute(tx.as_mut())
         .await
-        .context("failed to add oauth_refresh_token_vault admission_rate_limits_expires_at column")?;
+        .context(
+            "failed to add oauth_refresh_token_vault admission_rate_limits_expires_at column",
+        )?;
 
         sqlx::query(
             r#"
@@ -1825,6 +1827,41 @@ impl PostgresStore {
         .execute(tx.as_mut())
         .await
         .context("failed to initialize ai_routing_settings row")?;
+
+        sqlx::query(
+            r#"
+            CREATE TABLE IF NOT EXISTS claude_code_routing_settings (
+                singleton BOOLEAN PRIMARY KEY,
+                enabled BOOLEAN NOT NULL DEFAULT false,
+                opus_target_model TEXT NULL,
+                sonnet_target_model TEXT NULL,
+                haiku_target_model TEXT NULL,
+                updated_at TIMESTAMPTZ NOT NULL
+            )
+            "#,
+        )
+        .execute(tx.as_mut())
+        .await
+        .context("failed to create claude_code_routing_settings table")?;
+
+        sqlx::query(
+            r#"
+            INSERT INTO claude_code_routing_settings (
+                singleton,
+                enabled,
+                opus_target_model,
+                sonnet_target_model,
+                haiku_target_model,
+                updated_at
+            )
+            VALUES ($1, false, NULL, NULL, NULL, now())
+            ON CONFLICT (singleton) DO NOTHING
+            "#,
+        )
+        .bind(SNAPSHOT_SINGLETON_ROW)
+        .execute(tx.as_mut())
+        .await
+        .context("failed to initialize claude_code_routing_settings row")?;
 
         sqlx::query(
             r#"

@@ -1532,7 +1532,13 @@ mod tests {
         let usage = usage_snapshot_from_payload(payload);
         assert_eq!(usage.chatgpt_plan_type.as_deref(), Some("plus"));
         assert_eq!(usage.rate_limits.len(), 1);
-        assert_eq!(usage.rate_limits[0].primary.as_ref().and_then(|w| w.window_minutes), Some(300));
+        assert_eq!(
+            usage.rate_limits[0]
+                .primary
+                .as_ref()
+                .and_then(|w| w.window_minutes),
+            Some(300)
+        );
         assert_eq!(
             usage.rate_limits[0]
                 .secondary
