@@ -439,7 +439,7 @@ dependencies = [
 
 [[package]]
 name = "codex-pool-core"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "chrono",
  "serde",
@@ -473,7 +473,7 @@ dependencies = [
 
 [[package]]
 name = "control-plane"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "aes-gcm",
  "anyhow",
@@ -640,7 +640,7 @@ checksum = "d7a1e2f27636f116493b8b860f5546edb47c8d8f8ea73e1d2a20be88e28d1fea"
 
 [[package]]
 name = "data-plane"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "anyhow",
  "assert-json-diff",
