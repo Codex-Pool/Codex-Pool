@@ -2046,7 +2046,10 @@ mod tests {
     fn appends_client_version_query_for_codex_models_when_missing() {
         let query = ensure_client_version_query(Some("a=1"), None);
         assert!(query.contains("a=1"));
-        assert!(query.contains("client_version=0.1.0"));
+        assert!(query.contains(&format!(
+            "client_version={}",
+            env!("CARGO_PKG_VERSION")
+        )));
     }
 
     #[test]

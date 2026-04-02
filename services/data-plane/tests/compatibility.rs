@@ -1991,12 +1991,13 @@ async fn rewrites_v1_memories_trace_summarize_to_codex_memories_trace_summarize_
 
 #[tokio::test]
 async fn rewrites_v1_models_to_codex_models_and_appends_client_version() {
+    let package_version = env!("CARGO_PKG_VERSION");
     let upstream = MockServer::start().await;
 
     Mock::given(method("GET"))
         .and(path("/backend-api/codex/models"))
         .and(query_param("a", "1"))
-        .and(query_param("client_version", "0.1.0"))
+        .and(query_param("client_version", package_version))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({"models": []})))
         .mount(&upstream)
         .await;
@@ -2056,12 +2057,13 @@ async fn rewrites_v1_models_to_codex_models_and_uses_version_header_when_query_m
 
 #[tokio::test]
 async fn codex_models_passthrough_preserves_raw_body_headers_and_local_304_cache() {
+    let package_version = env!("CARGO_PKG_VERSION");
     let upstream = MockServer::start().await;
     let raw_body = r#"{"models":[{"id":"o3","visibility":"list"}],"meta":{"source":"upstream"}}"#;
 
     Mock::given(method("GET"))
         .and(path("/backend-api/codex/models"))
-        .and(query_param("client_version", "0.1.0"))
+        .and(query_param("client_version", package_version))
         .respond_with(
             ResponseTemplate::new(200)
                 .insert_header("content-type", "application/vnd.openai.codex-models+json")
