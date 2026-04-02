@@ -275,13 +275,13 @@ export default function AppLayout({
       <aside
         className={cn(
           "fixed z-50 flex flex-col border-r border-default-100 bg-content1/70 backdrop-blur-xl transition-all duration-200 md:static md:inset-auto md:z-auto",
-          collapsed ? "w-[68px]" : "w-60",
+          collapsed ? "w-[68px]" : "w-56",
           mobileOpen ? mobileDrawerOpenClassName : mobileDrawerPlacementClassName,
           drawerPlacement === "top" || drawerPlacement === "bottom"
             ? "max-h-[min(80vh,42rem)] w-full border-b border-r-0 md:inset-y-0 md:left-0 md:max-h-none md:w-[68px] md:border-b-0 md:border-r"
             : "inset-y-0",
           drawerPlacement === "right" ? "md:left-0" : "",
-          !collapsed && (drawerPlacement === "top" || drawerPlacement === "bottom") ? "md:w-60" : "",
+          !collapsed && (drawerPlacement === "top" || drawerPlacement === "bottom") ? "md:w-56" : "",
           "md:translate-x-0 md:translate-y-0",
         )}
       >
