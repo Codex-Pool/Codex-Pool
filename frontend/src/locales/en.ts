@@ -703,13 +703,25 @@ export default {
       description:
         "Start broad, then narrow to one tenant or API key when a spike, alert, or cost change needs explanation.",
       eyebrow: "Context",
+      granularityAriaLabel: "Trend granularity",
+      granularityOptions: {
+        hour: "Hourly",
+        day: "Daily",
+        week: "Weekly",
+      },
       range: {
         last24Hours: "Last 24 hours",
         last30Days: "Last 30 days",
         last7Days: "Last 7 days",
       },
       rangeAriaLabel: "Time range",
+      ranges: {
+        last24h: "Last 24 hours",
+        last7d: "Last 7 days",
+        last30d: "Last 30 days",
+      },
       scopeAriaLabel: "Scope filter",
+      summary: "{{range}} · grouped by {{granularity}}",
       tenantAriaLabel: "Tenant filter",
       tenantPlaceholder: "Select tenant",
       title: "Scope and filters",

@@ -685,13 +685,25 @@ export default {
       description:
         "先看全局，再在告警、尖峰或成本波动需要解释时收窄到单个租户或 API 密钥。",
       eyebrow: "上下文",
+      granularityAriaLabel: "趋势粒度",
+      granularityOptions: {
+        hour: "按小时",
+        day: "按天",
+        week: "按周",
+      },
       range: {
         last24Hours: "过去 24 小时",
         last30Days: "过去 30 天",
         last7Days: "过去 7 天",
       },
       rangeAriaLabel: "时间范围",
+      ranges: {
+        last24h: "最近 24 小时",
+        last7d: "最近 7 天",
+        last30d: "最近 30 天",
+      },
       scopeAriaLabel: "范围筛选",
+      summary: "{{range}} · 按{{granularity}}聚合",
       tenantAriaLabel: "租户筛选",
       tenantPlaceholder: "选择租户",
       title: "范围与筛选",

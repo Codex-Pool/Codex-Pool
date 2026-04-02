@@ -33,6 +33,13 @@ export interface DashboardTokenTrendPoint {
   reasoning: number
 }
 
+export type DashboardTrendGranularity = 'hour' | 'day' | 'week'
+
+interface DashboardTrendBuildOptions {
+  granularity?: DashboardTrendGranularity
+  rangeSeconds?: number
+}
+
 export interface DashboardTopApiKey {
   apiKeyId: string
   tenantId: string
@@ -50,6 +57,54 @@ function roundToTwo(value: number): number {
 
 function safeArray<T>(value: T[] | null | undefined): T[] {
   return Array.isArray(value) ? value : []
+}
+
+function resolveBucketStart(
+  hourStart: number,
+  granularity: DashboardTrendGranularity,
+): number {
+  const bucket = new Date(hourStart * 1000)
+
+  if (granularity === 'week') {
+    const day = bucket.getDay()
+    const diffToMonday = day === 0 ? 6 : day - 1
+    bucket.setDate(bucket.getDate() - diffToMonday)
+    bucket.setHours(0, 0, 0, 0)
+    return Math.floor(bucket.getTime() / 1000)
+  }
+
+  if (granularity === 'day') {
+    bucket.setHours(0, 0, 0, 0)
+    return Math.floor(bucket.getTime() / 1000)
+  }
+
+  bucket.setMinutes(0, 0, 0)
+  return Math.floor(bucket.getTime() / 1000)
+}
+
+function formatBucketLabel(
+  bucketStart: number,
+  granularity: DashboardTrendGranularity,
+  rangeSeconds?: number,
+): string {
+  const bucket = new Date(bucketStart * 1000)
+  const month = String(bucket.getMonth() + 1).padStart(2, '0')
+  const day = String(bucket.getDate()).padStart(2, '0')
+  const hour = String(bucket.getHours()).padStart(2, '0')
+
+  if (granularity === 'week') {
+    return `${month}-${day}`
+  }
+
+  if (granularity === 'day') {
+    return `${month}-${day}`
+  }
+
+  if ((rangeSeconds ?? 0) > 86400) {
+    return `${month}-${day} ${hour}:00`
+  }
+
+  return `${hour}:00`
 }
 
 export function buildDashboardKpis(
@@ -95,24 +150,26 @@ export function groupTenantHourlyUsageByDay(
 
 export function buildTrafficData(
   hourlyTrends: UsageHourlyTrendsResponse | undefined,
+  options: DashboardTrendBuildOptions = {},
 ): DashboardTrafficPoint[] {
+  const granularity = options.granularity ?? 'hour'
   const hourlyMap = new Map<number, DashboardTrafficPoint>()
 
   safeArray(hourlyTrends?.account_totals).forEach((point) => {
-    const hour = `${String(new Date(point.hour_start * 1000).getHours()).padStart(2, '0')}:00`
-    hourlyMap.set(point.hour_start, {
-      hour,
-      accounts: point.request_count,
-      apiKeys: hourlyMap.get(point.hour_start)?.apiKeys ?? 0,
+    const bucketStart = resolveBucketStart(point.hour_start, granularity)
+    hourlyMap.set(bucketStart, {
+      hour: formatBucketLabel(bucketStart, granularity, options.rangeSeconds),
+      accounts: point.request_count + (hourlyMap.get(bucketStart)?.accounts ?? 0),
+      apiKeys: hourlyMap.get(bucketStart)?.apiKeys ?? 0,
     })
   })
 
   safeArray(hourlyTrends?.tenant_api_key_totals).forEach((point) => {
-    const hour = `${String(new Date(point.hour_start * 1000).getHours()).padStart(2, '0')}:00`
-    hourlyMap.set(point.hour_start, {
-      hour,
-      accounts: hourlyMap.get(point.hour_start)?.accounts ?? 0,
-      apiKeys: point.request_count,
+    const bucketStart = resolveBucketStart(point.hour_start, granularity)
+    hourlyMap.set(bucketStart, {
+      hour: formatBucketLabel(bucketStart, granularity, options.rangeSeconds),
+      accounts: hourlyMap.get(bucketStart)?.accounts ?? 0,
+      apiKeys: point.request_count + (hourlyMap.get(bucketStart)?.apiKeys ?? 0),
     })
   })
 
@@ -123,14 +180,25 @@ export function buildTrafficData(
 
 export function buildTokenTrend(
   summary: UsageSummaryQueryResponse | undefined,
+  options: DashboardTrendBuildOptions = {},
 ): DashboardTokenTrendPoint[] {
-  return safeArray(summary?.dashboard_metrics?.token_trends).map((point) => ({
-    hour: `${String(new Date(point.hour_start * 1000).getHours()).padStart(2, '0')}:00`,
-    input: point.input_tokens,
-    cached: point.cached_input_tokens,
-    output: point.output_tokens,
-    reasoning: point.reasoning_tokens,
-  }))
+  const granularity = options.granularity ?? 'hour'
+  const trendMap = new Map<number, DashboardTokenTrendPoint>()
+
+  safeArray(summary?.dashboard_metrics?.token_trends).forEach((point) => {
+    const bucketStart = resolveBucketStart(point.hour_start, granularity)
+    trendMap.set(bucketStart, {
+      hour: formatBucketLabel(bucketStart, granularity, options.rangeSeconds),
+      input: point.input_tokens + (trendMap.get(bucketStart)?.input ?? 0),
+      cached: point.cached_input_tokens + (trendMap.get(bucketStart)?.cached ?? 0),
+      output: point.output_tokens + (trendMap.get(bucketStart)?.output ?? 0),
+      reasoning: point.reasoning_tokens + (trendMap.get(bucketStart)?.reasoning ?? 0),
+    })
+  })
+
+  return [...trendMap.entries()]
+    .sort((left, right) => left[0] - right[0])
+    .map(([, value]) => value)
 }
 
 export function buildTopApiKeys(

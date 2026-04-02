@@ -7,6 +7,8 @@ import {
   DropdownMenu,
   DropdownTrigger,
   Progress,
+  Select,
+  SelectItem,
   Spinner,
 } from '@heroui/react'
 import { useQuery } from '@tanstack/react-query'
@@ -57,6 +59,7 @@ import {
   buildTopApiKeys,
   buildTokenTrend,
   buildTrafficData,
+  type DashboardTrendGranularity,
 } from '@/features/usage/contracts'
 import { formatDurationMs } from '@/lib/duration-format'
 import { cn } from '@/lib/utils'
@@ -83,6 +86,25 @@ const POOL_PIE_COLORS = {
   danger: 'hsl(var(--heroui-danger))',
 } as const
 
+type DashboardRangePreset = 'last24h' | 'last7d' | 'last30d'
+
+const DASHBOARD_RANGE_PRESET_SECONDS: Record<DashboardRangePreset, number> = {
+  last24h: 86400,
+  last7d: 7 * 86400,
+  last30d: 30 * 86400,
+}
+
+const DASHBOARD_RANGE_PRESETS: DashboardRangePreset[] = ['last24h', 'last7d', 'last30d']
+const DASHBOARD_GRANULARITY_OPTIONS: DashboardTrendGranularity[] = ['hour', 'day', 'week']
+
+function buildDashboardQueryWindow(durationSeconds: number) {
+  const endTs = Math.floor(Date.now() / 1000)
+  return {
+    startTs: endTs - durationSeconds,
+    endTs,
+  }
+}
+
 function formatNumber(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
   if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`
@@ -101,11 +123,9 @@ export default function Dashboard() {
   const { textColor: chartTextColor, gridColor: chartGridColor, tooltipStyle: chartTooltipStyle } = useChartTheme()
   const prefersReducedMotion =
     typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches
-  const [{ startTs, endTs }] = useState(() => {
-    const endTs = Math.floor(Date.now() / 1000)
-    const startTs = endTs - 86400
-    return { startTs, endTs }
-  })
+  const [rangePreset, setRangePreset] = useState<DashboardRangePreset>('last24h')
+  const [granularity, setGranularity] = useState<DashboardTrendGranularity>('hour')
+  const rangeSeconds = DASHBOARD_RANGE_PRESET_SECONDS[rangePreset]
 
   const { data: systemState, isLoading: isLoadingSystem } = useQuery({
     queryKey: ['dashboardSystemState'],
@@ -114,30 +134,37 @@ export default function Dashboard() {
   })
 
   const { data: summaryData, isLoading: isLoadingSummary } = useQuery({
-    queryKey: ['dashboardUsageSummary', startTs, endTs],
-    queryFn: () => dashboardApi.getUsageSummary({ start_ts: startTs, end_ts: endTs }),
+    queryKey: ['dashboardUsageSummary', rangeSeconds],
+    queryFn: () => {
+      const { startTs, endTs } = buildDashboardQueryWindow(rangeSeconds)
+      return dashboardApi.getUsageSummary({ start_ts: startTs, end_ts: endTs })
+    },
     refetchInterval: 30_000,
   })
 
   const { data: hourlyTrends, isLoading: isLoadingTrends } = useQuery({
-    queryKey: ['dashboardHourlyTrends', startTs, endTs],
-    queryFn: () =>
-      dashboardApi.getHourlyTrends({
+    queryKey: ['dashboardHourlyTrends', rangeSeconds],
+    queryFn: () => {
+      const { startTs, endTs } = buildDashboardQueryWindow(rangeSeconds)
+      return dashboardApi.getHourlyTrends({
         start_ts: startTs,
         end_ts: endTs,
-        limit: 24,
-      }),
+        limit: Math.max(24, Math.ceil(rangeSeconds / 3600)),
+      })
+    },
     refetchInterval: 30_000,
   })
 
   const { data: leaderboard, isLoading: isLoadingLeaderboard } = useQuery({
-    queryKey: ['dashboardLeaderboard', startTs, endTs],
-    queryFn: () =>
-      usageApi.getLeaderboard({
+    queryKey: ['dashboardLeaderboard', rangeSeconds],
+    queryFn: () => {
+      const { startTs, endTs } = buildDashboardQueryWindow(rangeSeconds)
+      return usageApi.getLeaderboard({
         start_ts: startTs,
         end_ts: endTs,
         limit: 5,
-      }),
+      })
+    },
     refetchInterval: 60_000,
   })
 
@@ -180,18 +207,32 @@ export default function Dashboard() {
     return next
   }, [systemState, t])
 
-  const trafficData = useMemo(() => buildTrafficData(hourlyTrends), [hourlyTrends])
-  const tokenTrend = useMemo(() => buildTokenTrend(summaryData), [summaryData])
+  const rangeLabel = t(`dashboard.filters.ranges.${rangePreset}`)
+  const granularityLabel = t(`dashboard.filters.granularityOptions.${granularity}`)
+  const rangeGranularitySummary = t('dashboard.filters.summary', {
+    range: rangeLabel,
+    granularity: granularityLabel,
+    defaultValue: '{{range}} · grouped by {{granularity}}',
+  })
+
+  const trafficData = useMemo(
+    () => buildTrafficData(hourlyTrends, { granularity, rangeSeconds }),
+    [granularity, hourlyTrends, rangeSeconds],
+  )
+  const tokenTrend = useMemo(
+    () => buildTokenTrend(summaryData, { granularity, rangeSeconds }),
+    [granularity, rangeSeconds, summaryData],
+  )
   const topApiKeys = useMemo(() => buildTopApiKeys(leaderboard), [leaderboard])
   const topApiKeysMax = topApiKeys[0]?.requests ?? 0
   const modelDistribution = useMemo(() => buildModelDistribution(summaryData), [summaryData])
 
   // 图表版本号：数据更新时递增，用作 key 强制重新运行入场动画
   const chartAnimKey = useMemo(() => ({
-    traffic: `traffic-${hourlyTrends?.account_totals?.length ?? 0}-${hourlyTrends?.account_totals?.[0]?.hour_start ?? 0}`,
-    token: `token-${summaryData?.dashboard_metrics?.token_trends?.length ?? 0}`,
+    traffic: `traffic-${rangePreset}-${granularity}-${hourlyTrends?.account_totals?.length ?? 0}-${hourlyTrends?.account_totals?.[0]?.hour_start ?? 0}`,
+    token: `token-${rangePreset}-${granularity}-${summaryData?.dashboard_metrics?.token_trends?.length ?? 0}`,
     model: `model-${modelDistribution.length}-${modelDistribution[0]?.requests ?? 0}`,
-  }), [hourlyTrends, summaryData, modelDistribution])
+  }), [granularity, hourlyTrends, modelDistribution, rangePreset, summaryData])
 
   const requestSparkline = useMemo(() => trafficData.map((p) => p.accounts), [trafficData])
   const tokenSparkline = useMemo(
@@ -206,7 +247,7 @@ export default function Dashboard() {
         title: t('dashboard.kpi.totalRequests'),
         rawValue: kpis.totalRequests,
         format: formatNumber,
-        description: t('dashboard.antigravity.last24Hours', { defaultValue: 'Last 24 hours' }),
+        description: rangeGranularitySummary,
         sparklineData: requestSparkline,
         sparklineTone: 'primary' as const,
         trendType: 'up' as const,
@@ -217,7 +258,7 @@ export default function Dashboard() {
         title: t('dashboard.kpi.totalTokens'),
         rawValue: kpis.totalTokens,
         format: formatNumber,
-        description: t('dashboard.kpi.totalTokensDesc'),
+        description: rangeGranularitySummary,
         sparklineData: tokenSparkline,
         sparklineTone: 'warning' as const,
         trendType: 'up' as const,
@@ -228,7 +269,7 @@ export default function Dashboard() {
         title: t('dashboard.kpi.rpm'),
         rawValue: kpis.rpm,
         format: (n: number) => n.toString(),
-        description: t('dashboard.kpi.rpmDesc'),
+        description: rangeGranularitySummary,
         sparklineData: requestSparkline,
         sparklineTone: 'success' as const,
         trendType: 'up' as const,
@@ -242,7 +283,43 @@ export default function Dashboard() {
         description: t('dashboard.kpi.avgFirstTokenSpeedDesc'),
       },
     ],
-    [kpis, t, requestSparkline, tokenSparkline],
+    [kpis, rangeGranularitySummary, requestSparkline, t, tokenSparkline],
+  )
+
+  const dashboardFilters = useMemo(
+    () => (
+      <>
+        <Select
+          aria-label={t('dashboard.filters.rangeAriaLabel', { defaultValue: 'Time range' })}
+          disallowEmptySelection
+          selectedKeys={[rangePreset]}
+          onChange={(event) => setRangePreset(event.target.value as DashboardRangePreset)}
+          size="sm"
+          className="min-w-[10rem]"
+        >
+          {DASHBOARD_RANGE_PRESETS.map((preset) => (
+            <SelectItem key={preset}>
+              {t(`dashboard.filters.ranges.${preset}`)}
+            </SelectItem>
+          ))}
+        </Select>
+        <Select
+          aria-label={t('dashboard.filters.granularityAriaLabel', { defaultValue: 'Trend granularity' })}
+          disallowEmptySelection
+          selectedKeys={[granularity]}
+          onChange={(event) => setGranularity(event.target.value as DashboardTrendGranularity)}
+          size="sm"
+          className="min-w-[10rem]"
+        >
+          {DASHBOARD_GRANULARITY_OPTIONS.map((option) => (
+            <SelectItem key={option}>
+              {t(`dashboard.filters.granularityOptions.${option}`)}
+            </SelectItem>
+          ))}
+        </Select>
+      </>
+    ),
+    [granularity, rangePreset, t],
   )
 
   const secondaryMetrics = useMemo(
@@ -405,6 +482,7 @@ export default function Dashboard() {
         archetype="workspace"
         title={t('nav.dashboard')}
         description={t('dashboard.subtitle')}
+        actions={dashboardFilters}
       />
 
       {/* ── Pool 数据概览（紧凑分组） ── */}
@@ -653,7 +731,10 @@ export default function Dashboard() {
               <h2 className="text-lg font-semibold tracking-[-0.02em] text-foreground">
                 {t('dashboard.trafficChart.title')}
               </h2>
-              <Chip size="sm" variant="flat" color="default">24h</Chip>
+              <div className="flex flex-wrap items-center gap-2">
+                <Chip size="sm" variant="flat" color="default">{rangeLabel}</Chip>
+                <Chip size="sm" variant="flat" color="primary">{granularityLabel}</Chip>
+              </div>
             </div>
             {/* Inline KPI summary row */}
             <div className="flex flex-wrap gap-3">
@@ -699,9 +780,15 @@ export default function Dashboard() {
         {/* ── Token 使用趋势 — Graph 2 style with inline KPI legend ── */}
         <Card>
           <CardHeader className="flex flex-col gap-4 px-5 pb-2 pt-5">
-            <h2 className="text-lg font-semibold tracking-[-0.02em] text-foreground">
-              {t('dashboard.tokenTrend.title')}
-            </h2>
+            <div className="flex items-start justify-between gap-3">
+              <h2 className="text-lg font-semibold tracking-[-0.02em] text-foreground">
+                {t('dashboard.tokenTrend.title')}
+              </h2>
+              <div className="flex flex-wrap items-center gap-2">
+                <Chip size="sm" variant="flat" color="default">{rangeLabel}</Chip>
+                <Chip size="sm" variant="flat" color="primary">{granularityLabel}</Chip>
+              </div>
+            </div>
             {/* Token component KPI legend row */}
             <div className="flex flex-wrap gap-3">
               {([
