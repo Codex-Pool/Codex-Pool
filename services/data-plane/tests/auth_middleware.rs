@@ -159,3 +159,54 @@ async fn accepts_x_api_key_on_anthropic_messages_routes() {
 
     assert_ne!(response.status(), StatusCode::UNAUTHORIZED);
 }
+
+#[tokio::test]
+async fn anthropic_messages_auth_failure_uses_anthropic_error_shape() {
+    let (app, _upstream) = build_test_app_with_allowed_keys(vec!["cp_test_key".to_string()]).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/messages")
+                .header("content-type", "application/json")
+                .body(Body::from("{}"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    let payload: Value =
+        serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap()).unwrap();
+    assert_eq!(payload["type"], "error");
+    assert_eq!(payload["error"]["type"], "authentication_error");
+    assert_eq!(payload["error"]["message"], "missing or invalid api key");
+    assert!(payload["error"].get("code").is_none());
+}
+
+#[tokio::test]
+async fn anthropic_count_tokens_auth_failure_uses_anthropic_error_shape_for_bearer() {
+    let (app, _upstream) = build_test_app_with_allowed_keys(vec!["cp_test_key".to_string()]).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/messages/count_tokens")
+                .header("content-type", "application/json")
+                .header("authorization", "Bearer cp_wrong_key")
+                .body(Body::from("{}"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    let payload: Value =
+        serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap()).unwrap();
+    assert_eq!(payload["type"], "error");
+    assert_eq!(payload["error"]["type"], "permission_error");
+    assert_eq!(payload["error"]["message"], "api key is not allowed");
+    assert!(payload["error"].get("code").is_none());
+}

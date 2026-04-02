@@ -1,6 +1,8 @@
 #[path = "support/mod.rs"]
 mod support;
 
+#[path = "anthropic_edges.rs"]
+mod anthropic_edges;
 #[path = "auth_middleware.rs"]
 mod auth_middleware;
 #[path = "auth_validator.rs"]

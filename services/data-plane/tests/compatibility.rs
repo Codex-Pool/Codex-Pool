@@ -4903,6 +4903,66 @@ async fn anthropic_messages_translate_non_stream_responses() {
 }
 
 #[tokio::test]
+async fn anthropic_messages_translate_non_stream_function_call_to_tool_use() {
+    let upstream = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v1/responses"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "id": "resp_anthropic_tool_use",
+            "status": "completed",
+            "usage": {"input_tokens": 11, "output_tokens": 4},
+            "output": [{
+                "type": "function_call",
+                "call_id": "call_123",
+                "name": "Bash",
+                "arguments": "{\"command\":\"echo hi\"}"
+            }]
+        })))
+        .mount(&upstream)
+        .await;
+
+    let (app, state) =
+        embedded_test_app(vec![test_account(upstream.uri(), "upstream-token")]).await;
+    set_claude_code_sonnet_target(&state, Some("gpt-5.4"));
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/messages")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    json!({
+                        "model": "claude-sonnet-4-6",
+                        "max_tokens": 32,
+                        "messages": [{"role": "user", "content": "run echo hi"}]
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let payload: Value =
+        serde_json::from_slice(&response.into_body().collect().await.unwrap().to_bytes()).unwrap();
+    assert_eq!(payload["type"], "message");
+    assert_eq!(
+        payload["content"],
+        json!([{
+            "type": "tool_use",
+            "id": "call_123",
+            "name": "Bash",
+            "input": {"command": "echo hi"}
+        }])
+    );
+    assert_eq!(payload["stop_reason"], "tool_use");
+    assert_eq!(payload["usage"]["input_tokens"], 11);
+    assert_eq!(payload["usage"]["output_tokens"], 4);
+}
+
+#[tokio::test]
 async fn anthropic_messages_strip_claude_code_only_fields_for_responses_requests() {
     let upstream = MockServer::start().await;
     Mock::given(method("POST"))
@@ -4955,12 +5015,149 @@ async fn anthropic_messages_strip_claude_code_only_fields_for_responses_requests
     let forwarded: Value = serde_json::from_slice(&upstream_requests[0].body).unwrap();
     assert_eq!(forwarded["model"], "gpt-5.4");
     assert_eq!(forwarded["store"], false);
-    assert_eq!(forwarded["reasoning"]["effort"], "high");
+    assert_eq!(forwarded["reasoning"]["effort"], "medium");
     assert!(forwarded.get("metadata").is_none());
     assert!(forwarded.get("thinking").is_none());
     assert!(forwarded.get("context_management").is_none());
     assert!(forwarded.get("output_config").is_none());
     assert!(forwarded.get("speed").is_none());
+}
+
+#[tokio::test]
+async fn anthropic_messages_reasoning_omits_disabled_and_maps_adaptive_effort() {
+    let upstream = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v1/responses"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "id": "resp_anthropic_reasoning_modes",
+            "status": "completed",
+            "usage": {"input_tokens": 7, "output_tokens": 3},
+            "output": [{
+                "type": "message",
+                "role": "assistant",
+                "content": [{"type": "output_text", "text": "OK"}]
+            }]
+        })))
+        .mount(&upstream)
+        .await;
+
+    let (app, state) =
+        embedded_test_app(vec![test_account(upstream.uri(), "upstream-token")]).await;
+    set_claude_code_sonnet_target(&state, Some("gpt-5.4"));
+
+    for body in [
+        json!({
+            "model": "claude-sonnet-4-6",
+            "max_tokens": 32,
+            "thinking": {"type": "disabled"},
+            "output_config": {"effort": "high"},
+            "messages": [{"role": "user", "content": "Reply with exactly OK."}]
+        }),
+        json!({
+            "model": "claude-sonnet-4-6",
+            "max_tokens": 32,
+            "thinking": {"type": "adaptive"},
+            "output_config": {"effort": "low"},
+            "messages": [{"role": "user", "content": "Reply with exactly OK."}]
+        }),
+    ] {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/v1/messages")
+                    .header("content-type", "application/json")
+                    .body(Body::from(body.to_string()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    let upstream_requests = upstream.received_requests().await.unwrap();
+    assert_eq!(upstream_requests.len(), 2);
+
+    let disabled: Value = serde_json::from_slice(&upstream_requests[0].body).unwrap();
+    assert!(disabled.get("reasoning").is_none());
+    assert!(disabled.get("thinking").is_none());
+    assert!(disabled.get("output_config").is_none());
+
+    let adaptive: Value = serde_json::from_slice(&upstream_requests[1].body).unwrap();
+    assert_eq!(adaptive["reasoning"]["effort"], "low");
+    assert!(adaptive.get("thinking").is_none());
+    assert!(adaptive.get("output_config").is_none());
+}
+
+#[tokio::test]
+async fn anthropic_messages_context_management_reports_clear_thinking_edits() {
+    let upstream = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v1/responses"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "id": "resp_context_management_thinking",
+            "status": "completed",
+            "usage": {"input_tokens": 7, "output_tokens": 3},
+            "output": [{
+                "type": "message",
+                "role": "assistant",
+                "content": [{"type": "output_text", "text": "OK"}]
+            }]
+        })))
+        .mount(&upstream)
+        .await;
+
+    let (app, state) =
+        embedded_test_app(vec![test_account(upstream.uri(), "upstream-token")]).await;
+    set_claude_code_sonnet_target(&state, Some("gpt-5.4"));
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/messages")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    json!({
+                        "model": "claude-sonnet-4-6",
+                        "max_tokens": 32,
+                        "messages": [
+                            {"role": "assistant", "content": [
+                                {"type": "thinking", "thinking": "first hidden plan"},
+                                {"type": "text", "text": "First visible answer"}
+                            ]},
+                            {"role": "assistant", "content": [
+                                {"type": "thinking", "thinking": "second hidden plan"},
+                                {"type": "text", "text": "Second visible answer"}
+                            ]}
+                        ],
+                        "context_management": {
+                            "edits": [{
+                                "type": "clear_thinking_20251015",
+                                "keep": {"type": "thinking_turns", "value": 1}
+                            }]
+                        }
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let payload: Value =
+        serde_json::from_slice(&response.into_body().collect().await.unwrap().to_bytes()).unwrap();
+    assert_eq!(
+        payload["context_management"]["applied_edits"][0]["type"],
+        "clear_thinking_20251015"
+    );
+    assert_eq!(
+        payload["context_management"]["applied_edits"][0]["cleared_thinking_turns"],
+        1
+    );
 }
 
 #[tokio::test]
@@ -4998,11 +5195,18 @@ async fn anthropic_messages_translate_tool_history_to_top_level_responses_items(
                         "messages": [
                             {"role": "user", "content": "run echo hi"},
                             {"role": "assistant", "content": [
+                                {"type": "thinking", "thinking": "I'll inspect the command output first."},
                                 {"type": "text", "text": "I'll run it."},
+                                {"type": "redacted_thinking", "data": "secret"},
                                 {"type": "tool_use", "id": "toolu_1", "name": "Bash", "input": {"command": "echo hi"}}
                             ]},
                             {"role": "user", "content": [
-                                {"type": "tool_result", "tool_use_id": "toolu_1", "content": "hi"},
+                                {"type": "tool_result", "tool_use_id": "toolu_1", "content": [
+                                    {"type": "thinking", "thinking": "filtered"},
+                                    {"type": "text", "text": "hi"},
+                                    {"type": "redacted_thinking", "data": "secret"},
+                                    {"type": "tool_reference", "tool_name": "search_result", "tool_use_id": "toolu_prev"}
+                                ]},
                                 {"type": "text", "text": "Now explain briefly."}
                             ]}
                         ]
@@ -5045,7 +5249,7 @@ async fn anthropic_messages_translate_tool_history_to_top_level_responses_items(
             {
                 "type": "function_call_output",
                 "call_id": "toolu_1",
-                "output": "hi"
+                "output": "hi\n\nTool reference: search_result"
             },
             {
                 "role": "user",
@@ -5056,6 +5260,241 @@ async fn anthropic_messages_translate_tool_history_to_top_level_responses_items(
             }
         ])
     );
+}
+
+#[tokio::test]
+async fn anthropic_messages_context_management_clears_old_tool_results_and_inputs() {
+    let upstream = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v1/responses"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "id": "resp_context_management_tools",
+            "status": "completed",
+            "usage": {"input_tokens": 9, "output_tokens": 3},
+            "output": [{
+                "type": "message",
+                "role": "assistant",
+                "content": [{"type": "output_text", "text": "Done"}]
+            }]
+        })))
+        .mount(&upstream)
+        .await;
+
+    let stale_result = "very long old tool result ".repeat(120);
+    let newer_result = "another large historical tool result ".repeat(120);
+
+    let (app, state) =
+        embedded_test_app(vec![test_account(upstream.uri(), "upstream-token")]).await;
+    set_claude_code_sonnet_target(&state, Some("gpt-5.4"));
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/messages")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    json!({
+                        "model": "claude-sonnet-4-6",
+                        "max_tokens": 64,
+                        "messages": [
+                            {"role": "assistant", "content": [
+                                {"type": "tool_use", "id": "toolu_old_1", "name": "Bash", "input": {"command": "python build.py --target old-one"}}
+                            ]},
+                            {"role": "user", "content": [
+                                {"type": "tool_result", "tool_use_id": "toolu_old_1", "content": stale_result}
+                            ]},
+                            {"role": "assistant", "content": [
+                                {"type": "tool_use", "id": "toolu_old_2", "name": "Bash", "input": {"command": "python build.py --target old-two"}}
+                            ]},
+                            {"role": "user", "content": [
+                                {"type": "tool_result", "tool_use_id": "toolu_old_2", "content": newer_result}
+                            ]},
+                            {"role": "assistant", "content": [
+                                {"type": "tool_use", "id": "toolu_keep", "name": "Bash", "input": {"command": "echo keep"}}
+                            ]},
+                            {"role": "user", "content": [
+                                {"type": "tool_result", "tool_use_id": "toolu_keep", "content": "keep me visible"}
+                            ]}
+                        ],
+                        "context_management": {
+                            "edits": [{
+                                "type": "clear_tool_uses_20250919",
+                                "trigger": {"type": "tool_uses", "value": 1},
+                                "keep": {"type": "tool_uses", "value": 1},
+                                "clear_tool_inputs": true
+                            }]
+                        }
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let payload: Value =
+        serde_json::from_slice(&response.into_body().collect().await.unwrap().to_bytes()).unwrap();
+    assert_eq!(
+        payload["context_management"]["applied_edits"][0]["type"],
+        "clear_tool_uses_20250919"
+    );
+    assert_eq!(
+        payload["context_management"]["applied_edits"][0]["cleared_tool_uses"],
+        2
+    );
+
+    let upstream_requests = upstream.received_requests().await.unwrap();
+    assert_eq!(upstream_requests.len(), 1);
+    let forwarded: Value = serde_json::from_slice(&upstream_requests[0].body).unwrap();
+
+    assert_eq!(forwarded["input"][0]["arguments"], "{}");
+    assert_eq!(
+        forwarded["input"][1]["output"],
+        "[Old tool result content cleared]"
+    );
+    assert_eq!(forwarded["input"][2]["arguments"], "{}");
+    assert_eq!(
+        forwarded["input"][3]["output"],
+        "[Old tool result content cleared]"
+    );
+    assert_eq!(
+        forwarded["input"][4]["arguments"],
+        "{\"command\":\"echo keep\"}"
+    );
+    assert_eq!(forwarded["input"][5]["output"], "keep me visible");
+}
+
+#[tokio::test]
+async fn anthropic_messages_fallback_when_tool_result_content_filters_empty() {
+    let upstream = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v1/responses"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "id": "resp_anthropic_tool_result_fallback",
+            "status": "completed",
+            "usage": {"input_tokens": 9, "output_tokens": 3},
+            "output": [{
+                "type": "message",
+                "role": "assistant",
+                "content": [{"type": "output_text", "text": "Done"}]
+            }]
+        })))
+        .mount(&upstream)
+        .await;
+
+    let (app, state) =
+        embedded_test_app(vec![test_account(upstream.uri(), "upstream-token")]).await;
+    set_claude_code_sonnet_target(&state, Some("gpt-5.4"));
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/messages")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    json!({
+                        "model": "claude-sonnet-4-6",
+                        "max_tokens": 32,
+                        "messages": [
+                            {"role": "assistant", "content": [
+                                {"type": "tool_use", "id": "toolu_1", "name": "Bash", "input": {"command": "echo hi"}}
+                            ]},
+                            {"role": "user", "content": [
+                                {"type": "tool_result", "tool_use_id": "toolu_1", "content": [
+                                    {"type": "thinking", "thinking": "filtered"},
+                                    {"type": "redacted_thinking", "data": "secret"},
+                                    {"type": "text", "text": "   "}
+                                ]}
+                            ]}
+                        ]
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let upstream_requests = upstream.received_requests().await.unwrap();
+    assert_eq!(upstream_requests.len(), 1);
+    let forwarded: Value = serde_json::from_slice(&upstream_requests[0].body).unwrap();
+    assert_eq!(
+        forwarded["input"][1],
+        json!({
+            "type": "function_call_output",
+            "call_id": "toolu_1",
+            "output": "Tool result omitted."
+        })
+    );
+}
+
+#[tokio::test]
+async fn anthropic_messages_stream_message_delta_includes_context_management() {
+    let upstream = spawn_scripted_sse_upstream(vec![
+        "event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_context_stream\",\"status\":\"in_progress\"}}\n\n",
+        "event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"OK\"}\n\n",
+        "event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_context_stream\",\"status\":\"completed\",\"usage\":{\"input_tokens\":7,\"output_tokens\":3},\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"OK\"}]}]}}\n\n",
+        "data: [DONE]\n\n",
+    ])
+    .await;
+
+    let (app, state) = embedded_test_app(vec![test_account(upstream, "upstream-token")]).await;
+    set_claude_code_sonnet_target(&state, Some("gpt-5.4"));
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/messages")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    json!({
+                        "model": "claude-sonnet-4-6",
+                        "max_tokens": 32,
+                        "stream": true,
+                        "messages": [
+                            {"role": "assistant", "content": [
+                                {"type": "thinking", "thinking": "first hidden plan"},
+                                {"type": "text", "text": "First visible answer"}
+                            ]},
+                            {"role": "assistant", "content": [
+                                {"type": "thinking", "thinking": "second hidden plan"},
+                                {"type": "text", "text": "Second visible answer"}
+                            ]}
+                        ],
+                        "context_management": {
+                            "edits": [{
+                                "type": "clear_thinking_20251015",
+                                "keep": {"type": "thinking_turns", "value": 1}
+                            }]
+                        }
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = String::from_utf8(
+        response
+            .into_body()
+            .collect()
+            .await
+            .unwrap()
+            .to_bytes()
+            .to_vec(),
+    )
+    .unwrap();
+    assert!(body.contains("event: message_delta"));
+    assert!(body.contains("\"context_management\":{\"applied_edits\":["));
+    assert!(body.contains("\"type\":\"clear_thinking_20251015\""));
 }
 
 #[tokio::test]
@@ -5143,6 +5582,183 @@ async fn anthropic_messages_stream_emit_raw_message_event_order() {
     assert!(body.contains("\"text\":\"OK\""));
     assert!(body.contains("\"stop_reason\":\"end_turn\""));
     assert!(body.contains("\"usage\":{\"input_tokens\":7,\"output_tokens\":3}"));
+}
+
+#[tokio::test]
+async fn anthropic_messages_stream_translate_tool_use_with_split_sse_frames() {
+    let upstream = spawn_scripted_sse_upstream(vec![
+        "event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_tool_stream\",\"status\":\"in_progress\"}}\n\n",
+        "event: response.output_item.added\ndata: {\"type\":\"response.output_item.added\",\"output_index\":0,",
+        "\"item\":{\"type\":\"function_call\",\"call_id\":\"call_tool_stream\",\"name\":\"Bash\",\"arguments\":\"\"}}\n\n",
+        "event: response.function_call_arguments.delta\ndata: {\"type\":\"response.function_call_arguments.delta\",\"output_index\":0,\"delta\":\"{\\\"command\\\":\"}\n\n",
+        "event: response.function_call_arguments.delta\ndata: {\"type\":\"response.function_call_arguments.delta\",\"output_index\":0,\"delta\":\"\\\"echo hi\\\"}\"}\n\n",
+        "event: response.output_item.done\ndata: {\"type\":\"response.output_item.done\",\"output_index\":0,\"item\":{\"type\":\"function_call\",\"call_id\":\"call_tool_stream\",\"name\":\"Bash\",\"arguments\":\"{\\\"command\\\":\\\"echo hi\\\"}\"}}\n\n",
+        concat!(
+            "event: response.completed\n",
+            "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_tool_stream\",\"status\":\"completed\",\"usage\":{\"input_tokens\":9,\"output_tokens\":3},\"output\":[{\"type\":\"function_call\",\"call_id\":\"call_tool_stream\",\"name\":\"Bash\",\"arguments\":\"{\\\"command\\\":\\\"echo hi\\\"}\"}]}}\n\n",
+            "data: [DONE]\n\n",
+        ),
+    ])
+    .await;
+
+    let (app, state) = embedded_test_app(vec![test_account(upstream, "upstream-token")]).await;
+    set_claude_code_sonnet_target(&state, Some("gpt-5.4"));
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/messages")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    json!({
+                        "model": "claude-sonnet-4-6",
+                        "max_tokens": 32,
+                        "stream": true,
+                        "messages": [{"role": "user", "content": "run echo hi"}]
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = String::from_utf8(
+        response
+            .into_body()
+            .collect()
+            .await
+            .unwrap()
+            .to_bytes()
+            .to_vec(),
+    )
+    .unwrap();
+
+    let order = [
+        "event: message_start",
+        "event: content_block_start",
+        "event: content_block_delta",
+        "event: content_block_stop",
+        "event: message_delta",
+        "event: message_stop",
+    ];
+    let mut previous_index = 0usize;
+    for marker in order {
+        let index = body
+            .find(marker)
+            .unwrap_or_else(|| panic!("missing marker: {marker}\n{body}"));
+        assert!(
+            index >= previous_index,
+            "marker {marker} appeared out of order\n{body}"
+        );
+        previous_index = index;
+    }
+    assert!(body.contains("\"content_block\":{"));
+    assert!(body.contains("\"type\":\"tool_use\""));
+    assert!(body.contains("\"id\":\"call_tool_stream\""));
+    assert!(body.contains("\"name\":\"Bash\""));
+    assert!(body.contains("\"type\":\"input_json_delta\""));
+    assert!(body.contains("\"partial_json\":\"{\\\"command\\\":"));
+    assert!(body.contains("\"partial_json\":\"\\\"echo hi\\\"}\""));
+    assert!(body.contains("\"stop_reason\":\"tool_use\""));
+    assert!(body.contains("\"usage\":{\"input_tokens\":9,\"output_tokens\":3}"));
+}
+
+#[tokio::test]
+async fn anthropic_messages_stream_emit_error_event_for_response_failed() {
+    let upstream = spawn_scripted_sse_upstream(vec![
+        "event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_failed_stream\",\"status\":\"in_progress\"}}\n\n",
+        "event: response.failed\ndata: {\"type\":\"response.failed\",\"response\":{\"id\":\"resp_failed_stream\",\"status\":\"failed\",\"error\":{\"code\":\"rate_limit_exceeded\",\"message\":\"too many requests\"}}}\n\n",
+    ])
+    .await;
+
+    let (app, state) = embedded_test_app(vec![test_account(upstream, "upstream-token")]).await;
+    set_claude_code_sonnet_target(&state, Some("gpt-5.4"));
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/messages")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    json!({
+                        "model": "claude-sonnet-4-6",
+                        "max_tokens": 32,
+                        "stream": true,
+                        "messages": [{"role": "user", "content": "Reply with exactly OK."}]
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = String::from_utf8(
+        response
+            .into_body()
+            .collect()
+            .await
+            .unwrap()
+            .to_bytes()
+            .to_vec(),
+    )
+    .unwrap();
+    assert!(body.contains("event: error"));
+    assert!(body.contains("\"type\":\"error\""));
+    assert!(body.contains("\"type\":\"rate_limit_error\""));
+    assert!(body.contains("\"message\":\""));
+}
+
+#[tokio::test]
+async fn anthropic_messages_stream_emit_error_event_for_truncated_upstream_sse_frame() {
+    let upstream = spawn_scripted_sse_upstream(vec![
+        "event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_truncated_stream\",\"status\":\"in_progress\"}}\n\n",
+        "event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"partial\"",
+    ])
+    .await;
+
+    let (app, state) = embedded_test_app(vec![test_account(upstream, "upstream-token")]).await;
+    set_claude_code_sonnet_target(&state, Some("gpt-5.4"));
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/messages")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    json!({
+                        "model": "claude-sonnet-4-6",
+                        "max_tokens": 32,
+                        "stream": true,
+                        "messages": [{"role": "user", "content": "Reply with exactly OK."}]
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = String::from_utf8(
+        response
+            .into_body()
+            .collect()
+            .await
+            .unwrap()
+            .to_bytes()
+            .to_vec(),
+    )
+    .unwrap();
+    assert!(body.contains("event: error"));
+    assert!(body.contains("\"type\":\"api_error\""));
+    assert!(body.contains("\"message\":\""));
 }
 
 #[tokio::test]
@@ -5315,5 +5931,65 @@ async fn anthropic_count_tokens_uses_local_estimation() {
     let payload: Value =
         serde_json::from_slice(&response.into_body().collect().await.unwrap().to_bytes()).unwrap();
     assert!(payload["input_tokens"].as_i64().unwrap_or_default() > 0);
+    assert_eq!(upstream.received_requests().await.unwrap().len(), 0);
+}
+
+#[tokio::test]
+async fn anthropic_count_tokens_reports_context_management_original_input_tokens() {
+    let upstream = MockServer::start().await;
+    let (app, state) =
+        embedded_test_app(vec![test_account(upstream.uri(), "upstream-token")]).await;
+    set_claude_code_sonnet_target(&state, Some("gpt-5.4"));
+
+    let large_result = "large historical result ".repeat(140);
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/messages/count_tokens")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    json!({
+                        "model": "claude-3-7-sonnet-20250219",
+                        "messages": [
+                            {"role": "assistant", "content": [
+                                {"type": "tool_use", "id": "toolu_old_1", "name": "Bash", "input": {"command": "python build.py --target old-one"}}
+                            ]},
+                            {"role": "user", "content": [
+                                {"type": "tool_result", "tool_use_id": "toolu_old_1", "content": large_result}
+                            ]},
+                            {"role": "assistant", "content": [
+                                {"type": "tool_use", "id": "toolu_keep", "name": "Bash", "input": {"command": "echo keep"}}
+                            ]},
+                            {"role": "user", "content": [
+                                {"type": "tool_result", "tool_use_id": "toolu_keep", "content": "keep me visible"}
+                            ]}
+                        ],
+                        "context_management": {
+                            "edits": [{
+                                "type": "clear_tool_uses_20250919",
+                                "trigger": {"type": "tool_uses", "value": 1},
+                                "keep": {"type": "tool_uses", "value": 1},
+                                "clear_tool_inputs": true
+                            }]
+                        }
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let payload: Value =
+        serde_json::from_slice(&response.into_body().collect().await.unwrap().to_bytes()).unwrap();
+    let input_tokens = payload["input_tokens"].as_i64().unwrap_or_default();
+    let original_input_tokens = payload["context_management"]["original_input_tokens"]
+        .as_i64()
+        .unwrap_or_default();
+    assert!(input_tokens > 0);
+    assert!(original_input_tokens > input_tokens);
     assert_eq!(upstream.received_requests().await.unwrap().len(), 0);
 }

@@ -62,7 +62,7 @@ fn normalize_claude_code_family(model: &str) -> Option<ClaudeCodeFamily> {
 fn translate_anthropic_messages_request(
     request_value: &Value,
     target_model: &str,
-) -> Result<Value, Response> {
+) -> Result<TranslatedAnthropicRequest, Response> {
     let messages = request_value
         .get("messages")
         .and_then(Value::as_array)
@@ -73,6 +73,64 @@ fn translate_anthropic_messages_request(
                 "messages must be an array",
             )
         })?;
+
+    let (effective_messages, context_management) =
+        apply_anthropic_context_management(request_value, messages)?;
+    let object =
+        build_translated_responses_request(request_value, target_model, effective_messages.as_slice())?;
+    let estimated_input_tokens =
+        estimate_anthropic_request_input_tokens(request_value, effective_messages.as_slice()).max(0);
+
+    Ok(TranslatedAnthropicRequest {
+        body: Value::Object(object),
+        estimated_input_tokens,
+        context_management,
+    })
+}
+
+#[derive(Debug, Clone)]
+struct TranslatedAnthropicRequest {
+    body: Value,
+    estimated_input_tokens: i64,
+    context_management: AnthropicContextManagementOutcome,
+}
+
+#[derive(Debug, Clone, Default)]
+struct AnthropicContextManagementOutcome {
+    requested: bool,
+    original_input_tokens: i64,
+    applied_edits: Vec<Value>,
+}
+
+impl AnthropicContextManagementOutcome {
+    fn response_value(&self) -> Option<Value> {
+        self.requested.then(|| {
+            serde_json::json!({
+                "applied_edits": self.applied_edits.clone(),
+            })
+        })
+    }
+
+    fn count_tokens_value(&self) -> Option<Value> {
+        self.requested.then(|| {
+            serde_json::json!({
+                "original_input_tokens": self.original_input_tokens.max(0),
+            })
+        })
+    }
+}
+
+const CONTEXT_TOOL_RESULT_CLEARED_MESSAGE: &str = "[Old tool result content cleared]";
+const DEFAULT_CONTEXT_EDITING_INPUT_TOKENS_TRIGGER: i64 = 100_000;
+const DEFAULT_CONTEXT_EDITING_KEEP_TOOL_USES: usize = 3;
+const ROUGH_IMAGE_TOKEN_ESTIMATE: i64 = 2_000;
+const CLEARED_TOOL_INPUT_JSON: &str = "{}";
+
+fn build_translated_responses_request(
+    request_value: &Value,
+    target_model: &str,
+    messages: &[Value],
+) -> Result<serde_json::Map<String, Value>, Response> {
 
     let mut input = Vec::with_capacity(messages.len());
     for message in messages {
@@ -95,10 +153,7 @@ fn translate_anthropic_messages_request(
     }
 
     let mut object = serde_json::Map::new();
-    object.insert(
-        "model".to_string(),
-        Value::String(target_model.to_string()),
-    );
+    object.insert("model".to_string(), Value::String(target_model.to_string()));
     object.insert("input".to_string(), Value::Array(input));
     // Claude Code expects stateless messages semantics, while the Codex upstream
     // rejects persisted responses for this compatibility path.
@@ -142,23 +197,587 @@ fn translate_anthropic_messages_request(
         );
     }
 
-    Ok(Value::Object(object))
+    Ok(object)
+}
+
+fn apply_anthropic_context_management(
+    request_value: &Value,
+    messages: &[Value],
+) -> Result<(Vec<Value>, AnthropicContextManagementOutcome), Response> {
+    let Some(context_management) = request_value.get("context_management") else {
+        return Ok((messages.to_vec(), AnthropicContextManagementOutcome::default()));
+    };
+    if context_management.is_null() {
+        return Ok((messages.to_vec(), AnthropicContextManagementOutcome::default()));
+    }
+
+    let edits = context_management
+        .get("edits")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+
+    validate_context_management_edit_order(edits.as_slice())?;
+
+    let mut effective_messages = messages.to_vec();
+    let mut outcome = AnthropicContextManagementOutcome {
+        requested: true,
+        original_input_tokens: estimate_anthropic_request_input_tokens(request_value, messages),
+        applied_edits: Vec::new(),
+    };
+
+    for edit in edits.iter() {
+        let Some(edit_type) = edit.get("type").and_then(Value::as_str) else {
+            return Err(anthropic_json_error(
+                StatusCode::BAD_REQUEST,
+                "invalid_request_error",
+                "context_management edits must include a type",
+            ));
+        };
+        let applied = match edit_type {
+            "clear_thinking_20251015" => {
+                apply_clear_thinking_context_edit(effective_messages.as_mut_slice(), edit)
+            }
+            "clear_tool_uses_20250919" => apply_clear_tool_uses_context_edit(
+                request_value,
+                effective_messages.as_mut_slice(),
+                edit,
+            ),
+            _ => {
+                return Err(anthropic_json_error(
+                    StatusCode::BAD_REQUEST,
+                    "invalid_request_error",
+                    "unsupported context management edit type",
+                ))
+            }
+        };
+        if let Some(applied) = applied {
+            outcome.applied_edits.push(applied);
+        }
+    }
+
+    Ok((effective_messages, outcome))
+}
+
+fn validate_context_management_edit_order(edits: &[Value]) -> Result<(), Response> {
+    if edits.len() < 2 {
+        return Ok(());
+    }
+    let first_type = edits
+        .first()
+        .and_then(|value| value.get("type"))
+        .and_then(Value::as_str);
+    let has_clear_thinking = edits.iter().any(|value| {
+        value
+            .get("type")
+            .and_then(Value::as_str)
+            .is_some_and(|item| item == "clear_thinking_20251015")
+    });
+    if has_clear_thinking && first_type != Some("clear_thinking_20251015") {
+        return Err(anthropic_json_error(
+            StatusCode::BAD_REQUEST,
+            "invalid_request_error",
+            "clear_thinking_20251015 must be listed first in context_management.edits",
+        ));
+    }
+    Ok(())
 }
 
 enum AnthropicInputItem {
     MessageContent(Value),
     Standalone(Value),
+    Dropped,
+}
+
+fn apply_clear_thinking_context_edit(messages: &mut [Value], edit: &Value) -> Option<Value> {
+    let keep = parse_clear_thinking_keep(edit);
+    if keep.is_none() {
+        return None;
+    }
+    let keep = keep.unwrap();
+    let mut thinking_turn_indices = Vec::new();
+    for (message_index, message) in messages.iter().enumerate() {
+        let role = message.get("role").and_then(Value::as_str).unwrap_or_default();
+        let Some(content) = message.get("content").and_then(Value::as_array) else {
+            continue;
+        };
+        if !role.eq_ignore_ascii_case("assistant") {
+            continue;
+        }
+        if content.iter().any(is_thinking_block) {
+            thinking_turn_indices.push(message_index);
+        }
+    }
+
+    if thinking_turn_indices.len() <= keep {
+        return None;
+    }
+
+    let preserve_from = thinking_turn_indices.len().saturating_sub(keep);
+    let mut cleared_turns = 0usize;
+    let mut cleared_tokens = 0i64;
+    for message_index in thinking_turn_indices.into_iter().take(preserve_from) {
+        let Some(content) = messages
+            .get_mut(message_index)
+            .and_then(Value::as_object_mut)
+            .and_then(|message| message.get_mut("content"))
+            .and_then(Value::as_array_mut)
+        else {
+            continue;
+        };
+        let before_len = content.len();
+        let mut removed_tokens = 0i64;
+        content.retain(|block| {
+            if is_thinking_block(block) {
+                removed_tokens += estimate_anthropic_content_block_tokens(block);
+                return false;
+            }
+            true
+        });
+        if content.len() != before_len {
+            cleared_turns += 1;
+            cleared_tokens += removed_tokens.max(0);
+        }
+    }
+
+    (cleared_turns > 0).then(|| {
+        serde_json::json!({
+            "type": "clear_thinking_20251015",
+            "cleared_thinking_turns": cleared_turns,
+            "cleared_input_tokens": cleared_tokens.max(0),
+        })
+    })
+}
+
+fn parse_clear_thinking_keep(edit: &Value) -> Option<usize> {
+    match edit.get("keep") {
+        Some(Value::String(value)) if value.eq_ignore_ascii_case("all") => None,
+        Some(Value::Object(map)) => map
+            .get("value")
+            .and_then(Value::as_u64)
+            .map(|value| value.max(1) as usize)
+            .or(Some(1)),
+        _ => Some(1),
+    }
+}
+
+fn apply_clear_tool_uses_context_edit(
+    request_value: &Value,
+    messages: &mut [Value],
+    edit: &Value,
+) -> Option<Value> {
+    let tool_history = collect_tool_history_entries(messages);
+    if tool_history.is_empty() {
+        return None;
+    }
+
+    let exclude_tools = parse_context_management_tool_names(edit.get("exclude_tools"));
+    let clearable_entries = tool_history
+        .into_iter()
+        .filter(|entry| !exclude_tools.contains(entry.name.as_str()))
+        .collect::<Vec<_>>();
+
+    if clearable_entries.is_empty() {
+        return None;
+    }
+
+    if !tool_clear_trigger_fired(request_value, messages, edit, clearable_entries.as_slice()) {
+        return None;
+    }
+
+    let keep = parse_tool_use_keep(edit);
+    let clear_inputs_for = parse_clear_tool_inputs(edit.get("clear_tool_inputs"));
+    let clear_up_to = clearable_entries.len().saturating_sub(keep);
+    let minimum_tokens_to_clear = parse_clear_at_least_tokens(edit);
+    let mut cleared_tool_uses = 0usize;
+    let mut cleared_tokens = 0i64;
+
+    for entry in clearable_entries.iter().take(clear_up_to) {
+        let mut changed = false;
+        if let Some(saved) = clear_tool_result_content(messages, entry) {
+            if saved > 0 {
+                cleared_tokens += saved;
+                changed = true;
+            }
+        }
+        if should_clear_tool_inputs_for_name(clear_inputs_for.as_ref(), entry.name.as_str()) {
+            if let Some(saved) = clear_tool_use_input(messages, entry) {
+                if saved > 0 {
+                    cleared_tokens += saved;
+                    changed = true;
+                }
+            }
+        }
+        if changed {
+            cleared_tool_uses += 1;
+        }
+        if minimum_tokens_to_clear > 0 && cleared_tokens >= minimum_tokens_to_clear {
+            break;
+        }
+    }
+
+    (cleared_tool_uses > 0).then(|| {
+        serde_json::json!({
+            "type": "clear_tool_uses_20250919",
+            "cleared_tool_uses": cleared_tool_uses,
+            "cleared_input_tokens": cleared_tokens.max(0),
+        })
+    })
+}
+
+#[derive(Debug, Clone)]
+struct ToolHistoryEntry {
+    name: String,
+    use_message_index: usize,
+    use_block_index: usize,
+    result_message_index: usize,
+    result_block_index: usize,
+}
+
+fn collect_tool_history_entries(messages: &[Value]) -> Vec<ToolHistoryEntry> {
+    let mut entries = Vec::new();
+    let mut tool_use_by_id = std::collections::BTreeMap::new();
+
+    for (message_index, message) in messages.iter().enumerate() {
+        let role = message.get("role").and_then(Value::as_str).unwrap_or_default();
+        let Some(content) = message.get("content").and_then(Value::as_array) else {
+            continue;
+        };
+        if role.eq_ignore_ascii_case("assistant") {
+            for (block_index, block) in content.iter().enumerate() {
+                if block.get("type").and_then(Value::as_str) != Some("tool_use") {
+                    continue;
+                }
+                let id = block
+                    .get("id")
+                    .or_else(|| block.get("tool_use_id"))
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .trim()
+                    .to_string();
+                if id.is_empty() {
+                    continue;
+                }
+                let entry_index = entries.len();
+                entries.push(ToolHistoryEntry {
+                    name: block
+                        .get("name")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default()
+                        .to_string(),
+                    use_message_index: message_index,
+                    use_block_index: block_index,
+                    result_message_index: usize::MAX,
+                    result_block_index: usize::MAX,
+                });
+                tool_use_by_id.insert(id, entry_index);
+            }
+        } else if role.eq_ignore_ascii_case("user") {
+            for (block_index, block) in content.iter().enumerate() {
+                if block.get("type").and_then(Value::as_str) != Some("tool_result") {
+                    continue;
+                }
+                let Some(tool_use_id) = block.get("tool_use_id").and_then(Value::as_str) else {
+                    continue;
+                };
+                let Some(entry_index) = tool_use_by_id.get(tool_use_id).copied() else {
+                    continue;
+                };
+                if entries[entry_index].result_message_index != usize::MAX {
+                    continue;
+                }
+                entries[entry_index].result_message_index = message_index;
+                entries[entry_index].result_block_index = block_index;
+            }
+        }
+    }
+
+    entries
+        .into_iter()
+        .filter(|entry| entry.result_message_index != usize::MAX)
+        .collect()
+}
+
+fn parse_context_management_tool_names(value: Option<&Value>) -> std::collections::BTreeSet<String> {
+    value
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(Value::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(ToString::to_string)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+#[derive(Debug, Clone)]
+enum ClearToolInputsSetting {
+    All,
+    Named(std::collections::BTreeSet<String>),
+}
+
+fn parse_clear_tool_inputs(value: Option<&Value>) -> Option<ClearToolInputsSetting> {
+    match value {
+        Some(Value::Bool(true)) => Some(ClearToolInputsSetting::All),
+        Some(Value::Array(items)) => {
+            let names = items
+                .iter()
+                .filter_map(Value::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(ToString::to_string)
+                .collect::<std::collections::BTreeSet<_>>();
+            (!names.is_empty()).then_some(ClearToolInputsSetting::Named(names))
+        }
+        _ => None,
+    }
+}
+
+fn should_clear_tool_inputs_for_name(
+    setting: Option<&ClearToolInputsSetting>,
+    name: &str,
+) -> bool {
+    match setting {
+        Some(ClearToolInputsSetting::All) => true,
+        Some(ClearToolInputsSetting::Named(names)) => names.contains(name),
+        None => false,
+    }
+}
+
+fn parse_tool_use_keep(edit: &Value) -> usize {
+    edit.get("keep")
+        .and_then(Value::as_object)
+        .and_then(|keep| keep.get("value"))
+        .and_then(Value::as_u64)
+        .map(|value| value.max(1) as usize)
+        .unwrap_or(DEFAULT_CONTEXT_EDITING_KEEP_TOOL_USES)
+}
+
+fn parse_clear_at_least_tokens(edit: &Value) -> i64 {
+    edit.get("clear_at_least")
+        .and_then(Value::as_object)
+        .and_then(|value| value.get("value"))
+        .and_then(Value::as_i64)
+        .unwrap_or_default()
+        .max(0)
+}
+
+fn tool_clear_trigger_fired(
+    request_value: &Value,
+    messages: &[Value],
+    edit: &Value,
+    clearable_entries: &[ToolHistoryEntry],
+) -> bool {
+    match edit
+        .get("trigger")
+        .and_then(Value::as_object)
+        .and_then(|trigger| trigger.get("type"))
+        .and_then(Value::as_str)
+    {
+        Some("tool_uses") => {
+            let threshold = edit
+                .get("trigger")
+                .and_then(Value::as_object)
+                .and_then(|trigger| trigger.get("value"))
+                .and_then(Value::as_u64)
+                .unwrap_or(DEFAULT_CONTEXT_EDITING_KEEP_TOOL_USES as u64)
+                .max(1) as usize;
+            clearable_entries.len() >= threshold
+        }
+        _ => {
+            let threshold = edit
+                .get("trigger")
+                .and_then(Value::as_object)
+                .and_then(|trigger| trigger.get("value"))
+                .and_then(Value::as_i64)
+                .unwrap_or(DEFAULT_CONTEXT_EDITING_INPUT_TOKENS_TRIGGER)
+                .max(0);
+            estimate_anthropic_request_input_tokens(request_value, messages) >= threshold
+        }
+    }
+}
+
+fn clear_tool_result_content(messages: &mut [Value], entry: &ToolHistoryEntry) -> Option<i64> {
+    let block = messages
+        .get(entry.result_message_index)
+        .and_then(Value::as_object)
+        .and_then(|message| message.get("content"))
+        .and_then(Value::as_array)
+        .and_then(|content| content.get(entry.result_block_index))?;
+    if block.get("content").and_then(Value::as_str) == Some(CONTEXT_TOOL_RESULT_CLEARED_MESSAGE) {
+        return None;
+    }
+    let old_tokens = estimate_tool_result_content_tokens(block.get("content"));
+    let new_tokens = rough_token_count_estimation(CONTEXT_TOOL_RESULT_CLEARED_MESSAGE);
+
+    let block = messages
+        .get_mut(entry.result_message_index)
+        .and_then(Value::as_object_mut)
+        .and_then(|message| message.get_mut("content"))
+        .and_then(Value::as_array_mut)
+        .and_then(|content| content.get_mut(entry.result_block_index))
+        .and_then(Value::as_object_mut)?;
+    block.insert(
+        "content".to_string(),
+        Value::String(CONTEXT_TOOL_RESULT_CLEARED_MESSAGE.to_string()),
+    );
+    Some((old_tokens - new_tokens).max(0))
+}
+
+fn clear_tool_use_input(messages: &mut [Value], entry: &ToolHistoryEntry) -> Option<i64> {
+    let block = messages
+        .get(entry.use_message_index)
+        .and_then(Value::as_object)
+        .and_then(|message| message.get("content"))
+        .and_then(Value::as_array)
+        .and_then(|content| content.get(entry.use_block_index))?;
+    let old_tokens = block
+        .get("input")
+        .map(estimate_jsonish_tokens)
+        .unwrap_or_default();
+    let new_tokens = rough_token_count_estimation(CLEARED_TOOL_INPUT_JSON);
+    if old_tokens <= new_tokens {
+        return None;
+    }
+
+    let block = messages
+        .get_mut(entry.use_message_index)
+        .and_then(Value::as_object_mut)
+        .and_then(|message| message.get_mut("content"))
+        .and_then(Value::as_array_mut)
+        .and_then(|content| content.get_mut(entry.use_block_index))
+        .and_then(Value::as_object_mut)?;
+    block.insert(
+        "input".to_string(),
+        Value::Object(serde_json::Map::new()),
+    );
+    Some((old_tokens - new_tokens).max(0))
+}
+
+fn estimate_anthropic_request_input_tokens(request_value: &Value, messages: &[Value]) -> i64 {
+    let mut total = 0i64;
+    total += estimate_system_tokens(request_value.get("system"));
+    total += request_value
+        .get("tools")
+        .and_then(Value::as_array)
+        .map(|tools| tools.iter().map(estimate_jsonish_tokens).sum::<i64>())
+        .unwrap_or_default();
+    total += messages
+        .iter()
+        .map(estimate_anthropic_message_tokens)
+        .sum::<i64>();
+    (((total.max(0)) as f64) * (4.0 / 3.0)).ceil() as i64
+}
+
+fn estimate_system_tokens(system: Option<&Value>) -> i64 {
+    match system {
+        Some(Value::String(text)) => rough_token_count_estimation(text),
+        Some(Value::Array(items)) => items
+            .iter()
+            .map(|item| match item {
+                Value::String(text) => rough_token_count_estimation(text),
+                Value::Object(map) => map
+                    .get("text")
+                    .and_then(Value::as_str)
+                    .map(rough_token_count_estimation)
+                    .unwrap_or_else(|| estimate_jsonish_tokens(item)),
+                _ => estimate_jsonish_tokens(item),
+            })
+            .sum(),
+        Some(other) => estimate_jsonish_tokens(other),
+        None => 0,
+    }
+}
+
+fn estimate_anthropic_message_tokens(message: &Value) -> i64 {
+    match message.get("content") {
+        Some(Value::String(text)) => rough_token_count_estimation(text),
+        Some(Value::Array(items)) => items.iter().map(estimate_anthropic_content_block_tokens).sum(),
+        Some(other) => estimate_jsonish_tokens(other),
+        None => 0,
+    }
+}
+
+fn estimate_anthropic_content_block_tokens(block: &Value) -> i64 {
+    match block {
+        Value::String(text) => rough_token_count_estimation(text),
+        Value::Object(map) => match map.get("type").and_then(Value::as_str) {
+            Some("text") => map
+                .get("text")
+                .and_then(Value::as_str)
+                .map(rough_token_count_estimation)
+                .unwrap_or_default(),
+            Some("thinking") => map
+                .get("thinking")
+                .and_then(Value::as_str)
+                .map(rough_token_count_estimation)
+                .unwrap_or_default(),
+            Some("redacted_thinking") => map
+                .get("data")
+                .and_then(Value::as_str)
+                .map(rough_token_count_estimation)
+                .unwrap_or_default(),
+            Some("tool_use") => rough_token_count_estimation(
+                &format!(
+                    "{}{}",
+                    map.get("name").and_then(Value::as_str).unwrap_or_default(),
+                    map.get("input")
+                        .map(|value| serde_json::to_string(value).unwrap_or_default())
+                        .unwrap_or_default()
+                ),
+            ),
+            Some("tool_result") => estimate_tool_result_content_tokens(map.get("content")),
+            Some("image") | Some("document") => ROUGH_IMAGE_TOKEN_ESTIMATE,
+            Some("tool_reference") => {
+                rough_token_count_estimation(&anthropic_tool_reference_text(block))
+            }
+            _ => estimate_jsonish_tokens(block),
+        },
+        _ => estimate_jsonish_tokens(block),
+    }
+}
+
+fn estimate_tool_result_content_tokens(content: Option<&Value>) -> i64 {
+    match content {
+        Some(Value::String(text)) => rough_token_count_estimation(text),
+        Some(Value::Array(items)) => items.iter().map(estimate_anthropic_content_block_tokens).sum(),
+        Some(other) => estimate_jsonish_tokens(other),
+        None => 0,
+    }
+}
+
+fn estimate_jsonish_tokens(value: &Value) -> i64 {
+    rough_token_count_estimation(&serde_json::to_string(value).unwrap_or_default())
+}
+
+fn rough_token_count_estimation(text: &str) -> i64 {
+    ((text.chars().count() as f64) / 4.0).ceil() as i64
+}
+
+fn is_thinking_block(block: &Value) -> bool {
+    matches!(
+        block.get("type").and_then(Value::as_str),
+        Some("thinking") | Some("redacted_thinking")
+    )
 }
 
 fn translate_anthropic_reasoning(
     thinking: Option<&Value>,
     output_config: Option<&Value>,
 ) -> Option<Value> {
-    let effort = output_config
+    let explicit_effort = output_config
         .and_then(|value| value.get("effort"))
         .and_then(Value::as_str)
-        .and_then(normalize_reasoning_effort)
-        .or_else(|| infer_reasoning_effort_from_thinking(thinking))?;
+        .and_then(normalize_reasoning_effort);
+    let effort = match anthropic_thinking_mode(thinking) {
+        Some("disabled") => None,
+        Some("adaptive") => explicit_effort.or(Some("medium")),
+        Some("enabled") => infer_reasoning_effort_from_thinking(thinking).or(explicit_effort),
+        _ => explicit_effort.or_else(|| infer_reasoning_effort_from_thinking(thinking)),
+    }?;
 
     Some(serde_json::json!({ "effort": effort }))
 }
@@ -190,6 +809,15 @@ fn infer_reasoning_effort_from_thinking(thinking: Option<&Value>) -> Option<&'st
         }
         _ => None,
     }
+}
+
+fn anthropic_thinking_mode(thinking: Option<&Value>) -> Option<&str> {
+    thinking?
+        .as_object()?
+        .get("type")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
 }
 
 fn anthropic_system_to_instructions(system: Option<&Value>) -> Option<String> {
@@ -237,13 +865,10 @@ fn translate_anthropic_message_items(
                         pending_message_content.push(content);
                     }
                     AnthropicInputItem::Standalone(item) => {
-                        flush_pending_message_item(
-                            role,
-                            &mut pending_message_content,
-                            &mut items,
-                        );
+                        flush_pending_message_item(role, &mut pending_message_content, &mut items);
                         items.push(item);
                     }
+                    AnthropicInputItem::Dropped => {}
                 }
             }
             flush_pending_message_item(role, &mut pending_message_content, &mut items);
@@ -257,7 +882,11 @@ fn translate_anthropic_message_items(
     }
 }
 
-fn flush_pending_message_item(role: &str, pending_content: &mut Vec<Value>, items: &mut Vec<Value>) {
+fn flush_pending_message_item(
+    role: &str,
+    pending_content: &mut Vec<Value>,
+    items: &mut Vec<Value>,
+) {
     if pending_content.is_empty() {
         return;
     }
@@ -286,19 +915,23 @@ fn translate_anthropic_content_block(
         "text" => Ok(AnthropicInputItem::MessageContent(
             translate_text_block_for_role(
                 role,
-                block.get("text").and_then(Value::as_str).unwrap_or_default(),
+                block
+                    .get("text")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default(),
             ),
         )),
+        "thinking" | "redacted_thinking" => Ok(AnthropicInputItem::Dropped),
         "tool_result" => Ok(AnthropicInputItem::Standalone(serde_json::json!({
             "type": "function_call_output",
             "call_id": block.get("tool_use_id").and_then(Value::as_str).unwrap_or_default(),
-            "output": block
-                .get("content")
-                .cloned()
-                .unwrap_or(Value::String(String::new())),
+            "output": translate_anthropic_tool_result_output(block.get("content")),
         }))),
         "tool_use" => Ok(AnthropicInputItem::Standalone(
             translate_assistant_tool_use_block(block),
+        )),
+        "tool_reference" => Ok(AnthropicInputItem::MessageContent(
+            translate_text_block_for_role(role, anthropic_tool_reference_text(block)),
         )),
         "image" => Ok(AnthropicInputItem::MessageContent(
             translate_anthropic_image_block(role, block),
@@ -306,6 +939,56 @@ fn translate_anthropic_content_block(
         _ => Ok(AnthropicInputItem::MessageContent(
             translate_text_block_for_role(role, block.to_string()),
         )),
+    }
+}
+
+fn translate_anthropic_tool_result_output(content: Option<&Value>) -> Value {
+    match content {
+        Some(Value::Array(blocks)) => {
+            let parts = blocks
+                .iter()
+                .filter_map(translate_anthropic_tool_result_block_to_text)
+                .collect::<Vec<_>>();
+            if parts.is_empty() {
+                Value::String("Tool result omitted.".to_string())
+            } else {
+                Value::String(parts.join("\n\n"))
+            }
+        }
+        Some(other) => other.clone(),
+        None => Value::String(String::new()),
+    }
+}
+
+fn translate_anthropic_tool_result_block_to_text(block: &Value) -> Option<String> {
+    match block {
+        Value::String(text) => (!text.trim().is_empty()).then(|| text.to_string()),
+        Value::Object(_) => match block.get("type").and_then(Value::as_str) {
+            Some("text") => block
+                .get("text")
+                .and_then(Value::as_str)
+                .filter(|text| !text.trim().is_empty())
+                .map(ToString::to_string),
+            Some("thinking") | Some("redacted_thinking") => None,
+            Some("tool_reference") => Some(anthropic_tool_reference_text(block)),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+fn anthropic_tool_reference_text(block: &Value) -> String {
+    let label = block
+        .get("tool_name")
+        .and_then(Value::as_str)
+        .or_else(|| block.get("tool_use_id").and_then(Value::as_str))
+        .or_else(|| block.get("id").and_then(Value::as_str))
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+
+    match label {
+        Some(value) => format!("Tool reference: {value}"),
+        None => "Tool reference".to_string(),
     }
 }
 
@@ -353,7 +1036,10 @@ fn translate_anthropic_image_block(role: &str, block: &Value) -> Value {
                 .get("media_type")
                 .and_then(Value::as_str)
                 .unwrap_or("application/octet-stream");
-            let data = source.get("data").and_then(Value::as_str).unwrap_or_default();
+            let data = source
+                .get("data")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
             serde_json::json!({
                 "type": "input_image",
                 "image_url": format!("data:{media_type};base64,{data}"),
@@ -379,7 +1065,12 @@ fn translate_anthropic_tool_definition(tool: &Value) -> Value {
     if let Some(parameters) = tool.get("input_schema").cloned() {
         mapped.insert("parameters".to_string(), parameters);
     }
-    for key in ["strict", "defer_loading", "eager_input_streaming", "cache_control"] {
+    for key in [
+        "strict",
+        "defer_loading",
+        "eager_input_streaming",
+        "cache_control",
+    ] {
         if let Some(value) = tool.get(key).cloned() {
             mapped.insert(key.to_string(), value);
         }
@@ -474,8 +1165,9 @@ fn anthropic_content_from_responses_output(response_value: &Value) -> Vec<Value>
 
 fn parse_response_function_arguments(value: &Value) -> Value {
     match value {
-        Value::String(raw) => serde_json::from_str(raw)
-            .unwrap_or_else(|_| Value::String(raw.to_string())),
+        Value::String(raw) => {
+            serde_json::from_str(raw).unwrap_or_else(|_| Value::String(raw.to_string()))
+        }
         other => other.clone(),
     }
 }
@@ -522,33 +1214,80 @@ struct AnthropicSseTranslator {
     message_started: bool,
     text_block_started: bool,
     emitted_content_blocks: usize,
+    tool_use_blocks: std::collections::BTreeMap<usize, ToolUseStreamState>,
+    terminal_event_seen: bool,
+    context_management: Option<Value>,
+}
+
+#[derive(Debug, Clone, Default)]
+struct ToolUseStreamState {
+    id: String,
+    name: String,
+    started: bool,
+    delta_emitted: bool,
+    stopped: bool,
 }
 
 impl AnthropicSseTranslator {
-    fn new(requested_model: String) -> Self {
+    fn new(requested_model: String, context_management: Option<Value>) -> Self {
         Self {
             requested_model,
             response_id: None,
             message_started: false,
             text_block_started: false,
             emitted_content_blocks: 0,
+            tool_use_blocks: std::collections::BTreeMap::new(),
+            terminal_event_seen: false,
+            context_management,
         }
     }
 
     fn translate_frame(&mut self, payload: &[u8]) -> Vec<Bytes> {
+        if self.terminal_event_seen {
+            return Vec::new();
+        }
         if payload == b"[DONE]" {
             return Vec::new();
         }
         let Ok(value) = serde_json::from_slice::<Value>(payload) else {
-            return Vec::new();
+            self.terminal_event_seen = true;
+            return vec![anthropic_stream_error_frame(
+                None,
+                None,
+                "upstream stream emitted invalid JSON",
+            )];
         };
-        let event_type = value.get("type").and_then(Value::as_str).unwrap_or_default();
+        let event_type = value
+            .get("type")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
         match event_type {
             "response.created" => self.handle_response_created(&value),
             "response.output_text.delta" => self.handle_output_text_delta(&value),
+            "response.output_item.added" => self.handle_response_output_item_added(&value),
+            "response.function_call_arguments.delta" => {
+                self.handle_function_call_arguments_delta(&value)
+            }
+            "response.function_call_arguments.done" => {
+                self.handle_function_call_arguments_done(&value)
+            }
+            "response.output_item.done" => self.handle_response_output_item_done(&value),
+            "response.failed" | "response.error" | "error" => self.handle_response_failed(&value),
             "response.completed" => self.handle_response_completed(&value),
             _ => Vec::new(),
         }
+    }
+
+    fn finish_on_upstream_eof(&mut self) -> Option<Bytes> {
+        if self.terminal_event_seen {
+            return None;
+        }
+        self.terminal_event_seen = true;
+        Some(anthropic_stream_error_frame(
+            None,
+            None,
+            "upstream response stream ended before a terminal event",
+        ))
     }
 
     fn handle_response_created(&mut self, value: &Value) -> Vec<Bytes> {
@@ -594,7 +1333,94 @@ impl AnthropicSseTranslator {
         frames
     }
 
+    fn handle_response_output_item_added(&mut self, value: &Value) -> Vec<Bytes> {
+        let Some(item) = value.get("item") else {
+            return Vec::new();
+        };
+        if item.get("type").and_then(Value::as_str) != Some("function_call") {
+            return Vec::new();
+        }
+        let index = value
+            .get("output_index")
+            .and_then(Value::as_u64)
+            .unwrap_or(self.emitted_content_blocks as u64) as usize;
+        self.ensure_tool_use_block_started(index, item, value.get("response").unwrap_or(value))
+    }
+
+    fn handle_function_call_arguments_delta(&mut self, value: &Value) -> Vec<Bytes> {
+        let index = value
+            .get("output_index")
+            .and_then(Value::as_u64)
+            .unwrap_or(self.emitted_content_blocks as u64) as usize;
+        let mut frames = self.ensure_tool_use_block_started(
+            index,
+            value.get("item").unwrap_or(&Value::Null),
+            value.get("response").unwrap_or(value),
+        );
+        let Some(delta) = value.get("delta").and_then(Value::as_str) else {
+            return frames;
+        };
+        frames.push(build_sse_frame(
+            Some("content_block_delta"),
+            &serde_json::json!({
+                "type": "content_block_delta",
+                "index": index,
+                "delta": {
+                    "type": "input_json_delta",
+                    "partial_json": delta,
+                }
+            }),
+        ));
+        if let Some(state) = self.tool_use_blocks.get_mut(&index) {
+            state.delta_emitted = true;
+        }
+        frames
+    }
+
+    fn handle_function_call_arguments_done(&mut self, value: &Value) -> Vec<Bytes> {
+        let index = value
+            .get("output_index")
+            .and_then(Value::as_u64)
+            .unwrap_or(self.emitted_content_blocks as u64) as usize;
+        self.close_tool_use_block(
+            index,
+            value.get("arguments").and_then(Value::as_str),
+            value.get("item"),
+            value.get("response").unwrap_or(value),
+        )
+    }
+
+    fn handle_response_output_item_done(&mut self, value: &Value) -> Vec<Bytes> {
+        let Some(item) = value.get("item") else {
+            return Vec::new();
+        };
+        if item.get("type").and_then(Value::as_str) != Some("function_call") {
+            return Vec::new();
+        }
+        let index = value
+            .get("output_index")
+            .and_then(Value::as_u64)
+            .unwrap_or(self.emitted_content_blocks as u64) as usize;
+        self.close_tool_use_block(
+            index,
+            item.get("arguments").and_then(Value::as_str),
+            Some(item),
+            value.get("response").unwrap_or(value),
+        )
+    }
+
+    fn handle_response_failed(&mut self, value: &Value) -> Vec<Bytes> {
+        self.terminal_event_seen = true;
+        let (error_code, message) = upstream_stream_error_details(value);
+        vec![anthropic_stream_error_frame(
+            None,
+            error_code.as_deref(),
+            message.as_deref().unwrap_or("request failed"),
+        )]
+    }
+
     fn handle_response_completed(&mut self, value: &Value) -> Vec<Bytes> {
+        self.terminal_event_seen = true;
         let response = value.get("response").unwrap_or(value);
         self.response_id = response
             .get("id")
@@ -602,10 +1428,8 @@ impl AnthropicSseTranslator {
             .map(ToString::to_string)
             .or_else(|| self.response_id.clone());
 
-        let translated = translate_responses_json_to_anthropic_message(
-            response,
-            self.requested_model.as_str(),
-        );
+        let translated =
+            translate_responses_json_to_anthropic_message(response, self.requested_model.as_str());
         let mut frames = self.ensure_message_start(response);
         let content_blocks = translated
             .get("content")
@@ -622,25 +1446,28 @@ impl AnthropicSseTranslator {
                 }),
             ));
             for (index, block) in content_blocks.iter().enumerate().skip(1) {
-                self.emit_full_content_block(index, block, &mut frames);
+                self.maybe_emit_or_close_content_block(index, block, &mut frames);
             }
         } else {
             for (index, block) in content_blocks.iter().enumerate() {
-                self.emit_full_content_block(index, block, &mut frames);
+                self.maybe_emit_or_close_content_block(index, block, &mut frames);
             }
         }
 
-        frames.push(build_sse_frame(
-            Some("message_delta"),
-            &serde_json::json!({
-                "type": "message_delta",
-                "delta": {
-                    "stop_reason": translated.get("stop_reason").cloned().unwrap_or(Value::Null),
-                    "stop_sequence": Value::Null,
-                },
-                "usage": translated.get("usage").cloned().unwrap_or_else(|| anthropic_usage_value(response)),
-            }),
-        ));
+        let mut message_delta = serde_json::json!({
+            "type": "message_delta",
+            "delta": {
+                "stop_reason": translated.get("stop_reason").cloned().unwrap_or(Value::Null),
+                "stop_sequence": Value::Null,
+            },
+            "usage": translated.get("usage").cloned().unwrap_or_else(|| anthropic_usage_value(response)),
+        });
+        if let Some(context_management) = self.context_management.clone() {
+            if let Some(object) = message_delta.as_object_mut() {
+                object.insert("context_management".to_string(), context_management);
+            }
+        }
+        frames.push(build_sse_frame(Some("message_delta"), &message_delta));
         frames.push(build_sse_frame(
             Some("message_stop"),
             &serde_json::json!({
@@ -684,8 +1511,118 @@ impl AnthropicSseTranslator {
         )]
     }
 
+    fn maybe_emit_or_close_content_block(
+        &mut self,
+        index: usize,
+        block: &Value,
+        frames: &mut Vec<Bytes>,
+    ) {
+        if block.get("type").and_then(Value::as_str) == Some("tool_use") {
+            let input = block
+                .get("input")
+                .map(|value| serde_json::to_string(value).unwrap_or_else(|_| "{}".to_string()));
+            if self.tool_use_blocks.contains_key(&index) {
+                let final_input = input.as_deref();
+                frames.extend(self.close_tool_use_block(
+                    index,
+                    final_input,
+                    Some(block),
+                    &Value::Null,
+                ));
+                return;
+            }
+        }
+        self.emit_full_content_block(index, block, frames);
+    }
+
+    fn ensure_tool_use_block_started(
+        &mut self,
+        index: usize,
+        item: &Value,
+        response: &Value,
+    ) -> Vec<Bytes> {
+        let mut frames = self.ensure_message_start(response);
+        let state = self.tool_use_blocks.entry(index).or_default();
+        if state.id.is_empty() {
+            state.id = item
+                .get("call_id")
+                .or_else(|| item.get("id"))
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_string();
+        }
+        if state.name.is_empty() {
+            state.name = item
+                .get("name")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_string();
+        }
+        if state.started || state.stopped {
+            return frames;
+        }
+        frames.push(build_sse_frame(
+            Some("content_block_start"),
+            &serde_json::json!({
+                "type": "content_block_start",
+                "index": index,
+                "content_block": {
+                    "type": "tool_use",
+                    "id": state.id.clone(),
+                    "name": state.name.clone(),
+                    "input": {},
+                }
+            }),
+        ));
+        state.started = true;
+        self.emitted_content_blocks = self.emitted_content_blocks.max(index + 1);
+        frames
+    }
+
+    fn close_tool_use_block(
+        &mut self,
+        index: usize,
+        final_arguments: Option<&str>,
+        item: Option<&Value>,
+        response: &Value,
+    ) -> Vec<Bytes> {
+        let mut frames =
+            self.ensure_tool_use_block_started(index, item.unwrap_or(&Value::Null), response);
+        let state = self.tool_use_blocks.entry(index).or_default();
+        if !state.delta_emitted {
+            if let Some(arguments) = final_arguments.filter(|value| !value.is_empty()) {
+                frames.push(build_sse_frame(
+                    Some("content_block_delta"),
+                    &serde_json::json!({
+                        "type": "content_block_delta",
+                        "index": index,
+                        "delta": {
+                            "type": "input_json_delta",
+                            "partial_json": arguments,
+                        }
+                    }),
+                ));
+                state.delta_emitted = true;
+            }
+        }
+        if !state.stopped {
+            frames.push(build_sse_frame(
+                Some("content_block_stop"),
+                &serde_json::json!({
+                    "type": "content_block_stop",
+                    "index": index,
+                }),
+            ));
+            state.stopped = true;
+        }
+        frames
+    }
+
     fn emit_full_content_block(&mut self, index: usize, block: &Value, frames: &mut Vec<Bytes>) {
-        let block_type = block.get("type").and_then(Value::as_str).unwrap_or_default();
+        let block_type = block
+            .get("type")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
         frames.push(build_sse_frame(
             Some("content_block_start"),
             &serde_json::json!({
@@ -747,4 +1684,22 @@ impl AnthropicSseTranslator {
         ));
         self.emitted_content_blocks = self.emitted_content_blocks.max(index + 1);
     }
+}
+
+fn upstream_stream_error_details(value: &Value) -> (Option<String>, Option<String>) {
+    let error = value.get("error").or_else(|| {
+        value
+            .get("response")
+            .and_then(|response| response.get("error"))
+    });
+    let code = error
+        .and_then(|error| error.get("code"))
+        .and_then(Value::as_str)
+        .map(ToString::to_string);
+    let message = error
+        .and_then(|error| error.get("message"))
+        .and_then(Value::as_str)
+        .or_else(|| value.get("message").and_then(Value::as_str))
+        .map(ToString::to_string);
+    (code, message)
 }

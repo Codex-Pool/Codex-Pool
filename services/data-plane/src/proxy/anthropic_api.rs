@@ -69,7 +69,8 @@ pub async fn anthropic_messages_handler(
         HeaderValue::from_static("application/json"),
     );
 
-    let mut internal_request = Request::from_parts(parts, Body::from(translated_request.to_string()));
+    let mut internal_request =
+        Request::from_parts(parts, Body::from(translated_request.body.to_string()));
     if let Some(principal) = principal {
         internal_request.extensions_mut().insert(principal);
     }
@@ -80,6 +81,7 @@ pub async fn anthropic_messages_handler(
         requested_model,
         header_locale.as_str(),
         expects_stream,
+        translated_request.context_management.response_value(),
     )
     .await
 }
@@ -135,15 +137,21 @@ pub async fn anthropic_count_tokens_handler(
             Ok(value) => value,
             Err(response) => return response,
         };
-    let input_tokens = estimate_request_input_tokens(&translated_request)
-        .unwrap_or(0)
-        .max(0);
+    let input_tokens = translated_request.estimated_input_tokens.max(0);
+
+    let mut payload = serde_json::json!({
+        "input_tokens": input_tokens
+    });
+    if let Some(context_management) = translated_request.context_management.count_tokens_value() {
+        payload
+            .as_object_mut()
+            .expect("count_tokens payload must be an object")
+            .insert("context_management".to_string(), context_management);
+    }
 
     anthropic_json_response(
         StatusCode::OK,
-        &serde_json::json!({
-            "input_tokens": input_tokens
-        }),
+        &payload,
         None,
     )
 }
@@ -153,6 +161,7 @@ async fn translate_proxy_response_to_anthropic(
     requested_model: String,
     _locale: &str,
     expects_stream: bool,
+    context_management: Option<Value>,
 ) -> Response {
     let status = response.status();
     let headers = response.headers().clone();
@@ -170,11 +179,19 @@ async fn translate_proxy_response_to_anthropic(
             Ok(collected) => collected.to_bytes(),
             Err(_) => bytes::Bytes::new(),
         };
+        if expects_stream {
+            return anthropic_sse_error_response(status, &body_bytes, request_id);
+        }
         return anthropic_error_from_proxy(status, &body_bytes, request_id);
     }
 
     if expects_stream || is_event_stream {
-        return translate_proxy_stream_to_anthropic(body, requested_model, request_id);
+        return translate_proxy_stream_to_anthropic(
+            body,
+            requested_model,
+            request_id,
+            context_management,
+        );
     }
 
     let body_bytes = match body.collect().await {
@@ -197,7 +214,12 @@ async fn translate_proxy_response_to_anthropic(
             );
         }
     };
-    let translated = translate_responses_json_to_anthropic_message(&body_value, &requested_model);
+    let mut translated = translate_responses_json_to_anthropic_message(&body_value, &requested_model);
+    if let Some(context_management) = context_management {
+        if let Some(object) = translated.as_object_mut() {
+            object.insert("context_management".to_string(), context_management);
+        }
+    }
     anthropic_json_response(StatusCode::OK, &translated, request_id)
 }
 
@@ -205,17 +227,27 @@ fn translate_proxy_stream_to_anthropic(
     body: Body,
     requested_model: String,
     request_id: Option<HeaderValue>,
+    context_management: Option<Value>,
 ) -> Response {
     let (tx, rx) = mpsc::channel::<Result<Bytes, Infallible>>(16);
     tokio::spawn(async move {
-        let mut translator = AnthropicSseTranslator::new(requested_model);
+        let mut translator = AnthropicSseTranslator::new(requested_model, context_management);
         let mut buffer = Vec::new();
         let mut stream = body.into_data_stream();
 
         while let Some(item) = stream.next().await {
             let chunk = match item {
                 Ok(chunk) => chunk,
-                Err(_) => return,
+                Err(_) => {
+                    let _ = tx
+                        .send(Ok(anthropic_stream_error_frame(
+                            None,
+                            None,
+                            "failed to read upstream response stream",
+                        )))
+                        .await;
+                    return;
+                }
             };
             buffer.extend_from_slice(&chunk);
             while let Some(frame_end) = find_sse_frame_end(&buffer) {
@@ -229,6 +261,19 @@ fn translate_proxy_stream_to_anthropic(
                     }
                 }
             }
+        }
+        if !buffer.is_empty() {
+            let _ = tx
+                .send(Ok(anthropic_stream_error_frame(
+                    None,
+                    None,
+                    "upstream response stream ended with an incomplete SSE frame",
+                )))
+                .await;
+            return;
+        }
+        if let Some(frame) = translator.finish_on_upstream_eof() {
+            let _ = tx.send(Ok(frame)).await;
         }
     });
 
@@ -249,27 +294,36 @@ fn anthropic_error_from_proxy(
     body_bytes: &Bytes,
     request_id: Option<HeaderValue>,
 ) -> Response {
-    let message = serde_json::from_slice::<Value>(body_bytes)
-        .ok()
-        .and_then(|value| {
-            value
-                .get("error")
-                .and_then(|error| error.get("message"))
-                .and_then(Value::as_str)
-                .map(ToString::to_string)
-        })
-        .unwrap_or_else(|| "request failed".to_string());
+    let (error_code, message) = extract_upstream_error_details(body_bytes);
+    let message = message.unwrap_or_else(|| "request failed".to_string());
     anthropic_json_response(
         status,
-        &serde_json::json!({
-            "type": "error",
-            "error": {
-                "type": anthropic_error_type_for_status(status),
-                "message": message,
-            }
-        }),
+        &anthropic_error_payload(Some(status), error_code.as_deref(), &message),
         request_id,
     )
+}
+
+fn anthropic_sse_error_response(
+    status: StatusCode,
+    body_bytes: &Bytes,
+    request_id: Option<HeaderValue>,
+) -> Response {
+    let (error_code, message) = extract_upstream_error_details(body_bytes);
+    let message = message.unwrap_or_else(|| "request failed".to_string());
+    let mut builder = Response::builder()
+        .status(StatusCode::OK)
+        .header(axum::http::header::CONTENT_TYPE, "text/event-stream")
+        .header(axum::http::header::CACHE_CONTROL, "no-cache");
+    if let Some(request_id) = request_id.as_ref() {
+        builder = builder.header("x-request-id", request_id);
+    }
+    builder
+        .body(Body::from(anthropic_stream_error_frame(
+            Some(status),
+            error_code.as_deref(),
+            &message,
+        )))
+        .unwrap_or_else(|_| Response::new(Body::empty()))
 }
 
 fn anthropic_json_error(
@@ -306,12 +360,61 @@ fn anthropic_json_response(
         .unwrap_or_else(|_| Response::new(Body::empty()))
 }
 
-fn anthropic_error_type_for_status(status: StatusCode) -> &'static str {
-    match status {
-        StatusCode::BAD_REQUEST => "invalid_request_error",
-        StatusCode::UNAUTHORIZED => "authentication_error",
-        StatusCode::FORBIDDEN => "permission_error",
-        StatusCode::TOO_MANY_REQUESTS => "rate_limit_error",
-        _ => "api_error",
+fn anthropic_stream_error_frame(
+    status: Option<StatusCode>,
+    error_code: Option<&str>,
+    message: &str,
+) -> Bytes {
+    build_sse_frame(
+        Some("error"),
+        &anthropic_error_payload(status, error_code, message),
+    )
+}
+
+fn anthropic_error_payload(
+    status: Option<StatusCode>,
+    error_code: Option<&str>,
+    message: &str,
+) -> Value {
+    serde_json::json!({
+        "type": "error",
+        "error": {
+            "type": anthropic_error_type(status, error_code),
+            "message": message,
+        }
+    })
+}
+
+fn anthropic_error_type(status: Option<StatusCode>, error_code: Option<&str>) -> &'static str {
+    if let Some(status) = status {
+        return match status {
+            StatusCode::BAD_REQUEST => "invalid_request_error",
+            StatusCode::UNAUTHORIZED => "authentication_error",
+            StatusCode::FORBIDDEN => "permission_error",
+            StatusCode::TOO_MANY_REQUESTS => "rate_limit_error",
+            _ => "api_error",
+        };
     }
+
+    let normalized = error_code.unwrap_or_default().trim().to_ascii_lowercase();
+    if normalized.contains("rate_limit")
+        || normalized.contains("quota")
+        || normalized.contains("usage_limit")
+    {
+        return "rate_limit_error";
+    }
+    if normalized.contains("auth") || normalized.contains("api_key") {
+        return "authentication_error";
+    }
+    if normalized.contains("permission") || normalized.contains("forbidden") {
+        return "permission_error";
+    }
+    if normalized.contains("invalid")
+        || normalized.contains("unsupported")
+        || normalized.contains("bad_request")
+    {
+        return "invalid_request_error";
+    }
+
+    "api_error"
 }

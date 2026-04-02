@@ -9,6 +9,7 @@ use axum::response::{IntoResponse, Response};
 use axum::Json;
 use chrono::{DateTime, Utc};
 use codex_pool_core::api::ErrorEnvelope;
+use serde_json::json;
 use tracing::warn;
 use uuid::Uuid;
 
@@ -36,6 +37,32 @@ fn auth_error_response(status: StatusCode, code: &'static str, message: &'static
     (status, Json(ErrorEnvelope::new(code, message))).into_response()
 }
 
+fn anthropic_error_type_for_status(status: StatusCode) -> &'static str {
+    match status {
+        StatusCode::UNAUTHORIZED => "authentication_error",
+        StatusCode::FORBIDDEN => "permission_error",
+        _ => "api_error",
+    }
+}
+
+fn anthropic_auth_error_response(
+    status: StatusCode,
+    _code: &'static str,
+    message: &'static str,
+) -> Response {
+    (
+        status,
+        Json(json!({
+            "type": "error",
+            "error": {
+                "type": anthropic_error_type_for_status(status),
+                "message": message,
+            }
+        })),
+    )
+        .into_response()
+}
+
 pub async fn require_api_key(
     State(state): State<Arc<AppState>>,
     req: Request<Body>,
@@ -47,6 +74,7 @@ pub async fn require_api_key(
         next,
         extract_bearer,
         "missing or invalid bearer token",
+        auth_error_response,
     )
     .await
 }
@@ -62,6 +90,7 @@ pub async fn require_anthropic_api_key(
         next,
         extract_bearer_or_x_api_key,
         "missing or invalid api key",
+        anthropic_auth_error_response,
     )
     .await
 }
@@ -72,10 +101,11 @@ async fn require_api_key_with_extractor(
     next: Next,
     extractor: fn(&HeaderMap) -> Option<String>,
     missing_token_message: &'static str,
+    error_response: fn(StatusCode, &'static str, &'static str) -> Response,
 ) -> Result<Response, Response> {
     if let Some(auth_validator) = state.auth_validator.as_ref() {
         let token = extractor(req.headers()).ok_or_else(|| {
-            auth_error_response(
+            error_response(
                 StatusCode::UNAUTHORIZED,
                 "unauthorized",
                 missing_token_message,
@@ -84,7 +114,7 @@ async fn require_api_key_with_extractor(
         let principal = match auth_validator.validate(&token).await {
             Ok(Some(principal)) => principal,
             Ok(None) => {
-                return Err(auth_error_response(
+                return Err(error_response(
                     StatusCode::UNAUTHORIZED,
                     "unauthorized",
                     "api key is unauthorized",
@@ -101,10 +131,11 @@ async fn require_api_key_with_extractor(
                         Some(token),
                         extractor,
                         missing_token_message,
+                        error_response,
                     )
                     .await;
                 }
-                return Err(auth_error_response(
+                return Err(error_response(
                     StatusCode::SERVICE_UNAVAILABLE,
                     "service_unavailable",
                     "auth validator is unavailable",
@@ -112,7 +143,7 @@ async fn require_api_key_with_extractor(
             }
         };
         if !principal.enabled {
-            return Err(auth_error_response(
+            return Err(error_response(
                 StatusCode::FORBIDDEN,
                 "forbidden",
                 "api key is disabled",
@@ -123,7 +154,16 @@ async fn require_api_key_with_extractor(
         return Ok(next.run(req).await);
     }
 
-    authorize_with_local_mode(req, next, &state, None, extractor, missing_token_message).await
+    authorize_with_local_mode(
+        req,
+        next,
+        &state,
+        None,
+        extractor,
+        missing_token_message,
+        error_response,
+    )
+    .await
 }
 
 pub async fn require_internal_service_token(
@@ -157,6 +197,7 @@ async fn authorize_with_local_mode(
     token: Option<String>,
     extractor: fn(&HeaderMap) -> Option<String>,
     missing_token_message: &'static str,
+    error_response: fn(StatusCode, &'static str, &'static str) -> Response,
 ) -> Result<Response, Response> {
     if state.allowed_api_keys.is_empty() {
         return Ok(next.run(req).await);
@@ -165,7 +206,7 @@ async fn authorize_with_local_mode(
     let token = match token {
         Some(token) => token,
         None => extractor(req.headers()).ok_or_else(|| {
-            auth_error_response(
+            error_response(
                 StatusCode::UNAUTHORIZED,
                 "unauthorized",
                 missing_token_message,
@@ -173,7 +214,7 @@ async fn authorize_with_local_mode(
         })?,
     };
     if !state.allowed_api_keys.contains(&token) {
-        return Err(auth_error_response(
+        return Err(error_response(
             StatusCode::FORBIDDEN,
             "forbidden",
             "api key is not allowed",
