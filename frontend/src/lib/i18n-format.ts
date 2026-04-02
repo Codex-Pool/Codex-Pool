@@ -1,4 +1,5 @@
 import i18n from '@/i18n'
+import { formatCompactNumber as formatCompactNumberBase } from './compact-number'
 
 type DateTimePreset = 'date' | 'time' | 'timeWithSeconds' | 'datetime'
 
@@ -111,6 +112,20 @@ export function formatNumber(
   const { locale, fallback, ...numberOptions } = options
   void fallback
   return new Intl.NumberFormat(resolveLocale(locale), numberOptions).format(value)
+}
+
+export function formatCompactNumber(
+  value: number | undefined,
+  options: {
+    locale?: string
+    fallback?: string
+    maximumFractionDigits?: number
+  } = {},
+): string {
+  return formatCompactNumberBase(value, {
+    ...options,
+    locale: resolveLocale(options.locale),
+  })
 }
 
 export function formatPercent(

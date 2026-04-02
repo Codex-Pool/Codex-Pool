@@ -539,9 +539,12 @@ export default function AppLayout({
                     key="header-docked-actions"
                     {...compactHeaderRevealMotion}
                     transition={compactHeaderRevealTransition}
-                    className="hidden overflow-hidden lg:flex lg:items-center lg:gap-2"
+                    className={cn(
+                      "hidden overflow-hidden lg:flex lg:items-center lg:gap-2",
+                      pageHeader?.dockedActionsClassName,
+                    )}
                   >
-                    {pageHeader.actions}
+                    {pageHeader.dockedActions ?? pageHeader.actions}
                   </motion.div>
                 ) : null}
               </AnimatePresence>
@@ -573,7 +576,7 @@ export default function AppLayout({
                   ) : null}
                 </div>
                 {pageHeader?.actions ? (
-                  <div className="flex shrink-0 flex-wrap items-center gap-2 lg:justify-end">
+                  <div className={cn("flex shrink-0 flex-wrap items-center gap-2 lg:justify-end", pageHeader?.actionsClassName)}>
                     {pageHeader?.actions}
                   </div>
                 ) : null}

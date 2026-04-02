@@ -698,8 +698,10 @@ export default {
     },
     currentScope: "Current: {{scope}}",
     filters: {
+      apply: "Apply",
       apiKeyAriaLabel: "API key filter",
       apiKeyPlaceholder: "Select API key",
+      dateRangeAriaLabel: "Date and time range",
       description:
         "Start broad, then narrow to one tenant or API key when a spike, alert, or cost change needs explanation.",
       eyebrow: "Context",
@@ -719,6 +721,7 @@ export default {
         last24h: "Last 24 hours",
         last7d: "Last 7 days",
         last30d: "Last 30 days",
+        custom: "Custom range",
       },
       scopeAriaLabel: "Scope filter",
       summary: "{{range}} · grouped by {{granularity}}",

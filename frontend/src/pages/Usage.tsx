@@ -45,6 +45,7 @@ import {
   groupTenantHourlyUsageByDay,
 } from '@/features/usage/contracts'
 import { formatDurationMs } from '@/lib/duration-format'
+import { formatCompactNumber } from '@/lib/i18n-format'
 
 const TABLE_PAGE_SIZE_OPTIONS = [5, 10, 20]
 
@@ -55,12 +56,6 @@ function normalizeSelection(selection: Selection) {
 
   const [first] = Array.from(selection)
   return first === undefined ? '' : String(first)
-}
-
-function formatNumber(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`
-  return n.toString()
 }
 
 function formatCurrency(value: number): string {
@@ -148,14 +143,14 @@ export default function Usage() {
   const overviewMetrics = [
     {
       title: t('dashboard.kpi.totalRequests'),
-      value: formatNumber(summary.totalRequests),
+      value: formatCompactNumber(summary.totalRequests),
       description: t('usage.antigravity.requestsSummaryHint'),
       icon: <Activity className="h-4 w-4" />,
       toneClassName: 'bg-primary/10 text-primary',
     },
     {
       title: t('dashboard.kpi.totalTokens'),
-      value: formatNumber(summary.totalTokens),
+      value: formatCompactNumber(summary.totalTokens),
       description: t('usage.antigravity.totalTokensHint'),
       icon: <Zap className="h-4 w-4" />,
       toneClassName: 'bg-secondary/10 text-secondary',
@@ -251,7 +246,7 @@ export default function Usage() {
                 <BarChart data={dailyUsage}>
                   <CartesianGrid stroke={chartGridColor} strokeDasharray="3 3" />
                   <XAxis axisLine={false} dataKey="date" tick={{ fill: chartTextColor, fontSize: 11 }} tickLine={false} />
-                  <YAxis axisLine={false} tick={{ fill: chartTextColor, fontSize: 11 }} tickFormatter={(value) => formatNumber(value)} tickLine={false} />
+                  <YAxis axisLine={false} tick={{ fill: chartTextColor, fontSize: 11 }} tickFormatter={(value) => formatCompactNumber(Number(value))} tickLine={false} />
                   <Tooltip contentStyle={chartTooltipStyle} />
                   <Bar dataKey="requests" fill="hsl(var(--heroui-primary))" radius={[6, 6, 0, 0]} />
                 </BarChart>
@@ -284,7 +279,7 @@ export default function Usage() {
                 {peakDay
                   ? t('usage.antigravity.peakDayValue', {
                     date: peakDay.date,
-                    requests: formatNumber(peakDay.requests),
+                    requests: formatCompactNumber(peakDay.requests),
                   })
                   : t('usage.chart.empty')}
               </div>
@@ -298,7 +293,7 @@ export default function Usage() {
               </div>
               <div className="mt-1 text-xs text-default-500">
                 {topModel
-                  ? t('usage.antigravity.topModelValue', { value: formatNumber(topModel.requests) })
+                  ? t('usage.antigravity.topModelValue', { value: formatCompactNumber(topModel.requests) })
                   : t('usage.chart.empty')}
               </div>
             </div>
@@ -311,7 +306,7 @@ export default function Usage() {
               </div>
               <div className="mt-1 text-xs text-default-500">
                 {topApiKey
-                  ? t('usage.antigravity.topApiKeyValue', { value: formatNumber(topApiKey.requests) })
+                  ? t('usage.antigravity.topApiKeyValue', { value: formatCompactNumber(topApiKey.requests) })
                   : t('usage.topKeys.empty')}
               </div>
             </div>
@@ -345,7 +340,7 @@ export default function Usage() {
                 <AreaChart data={tokenTrend}>
                   <CartesianGrid stroke={chartGridColor} strokeDasharray="3 3" />
                   <XAxis axisLine={false} dataKey="hour" tick={{ fill: chartTextColor, fontSize: 11 }} tickLine={false} />
-                  <YAxis axisLine={false} tick={{ fill: chartTextColor, fontSize: 11 }} tickFormatter={(value) => formatNumber(value)} tickLine={false} />
+                  <YAxis axisLine={false} tick={{ fill: chartTextColor, fontSize: 11 }} tickFormatter={(value) => formatCompactNumber(Number(value))} tickLine={false} />
                   <Tooltip contentStyle={chartTooltipStyle} />
                   <Area dataKey="input" fill="hsl(var(--heroui-primary) / 0.18)" stroke="hsl(var(--heroui-primary))" strokeWidth={2} type="monotone" />
                   <Area dataKey="cached" fill="hsl(var(--heroui-secondary) / 0.15)" stroke="hsl(var(--heroui-secondary))" strokeWidth={2} type="monotone" />
@@ -383,7 +378,7 @@ export default function Usage() {
                     <div className="min-w-0">
                       <div className="truncate font-medium text-foreground">{item.model}</div>
                       <div className="text-xs text-default-500">
-                        {t('usage.antigravity.requestsCount', { value: formatNumber(item.requests) })}
+                        {t('usage.antigravity.requestsCount', { value: formatCompactNumber(item.requests) })}
                       </div>
                     </div>
                     <Chip color="primary" size="sm" variant="flat">
@@ -492,7 +487,7 @@ export default function Usage() {
                         <div className="font-mono text-sm font-semibold text-foreground">{item.apiKeyId}</div>
                         <div className="text-xs text-default-500">
                           {t('usage.antigravity.topApiKeyValue', {
-                            value: formatNumber(item.requests),
+                            value: formatCompactNumber(item.requests),
                           })}
                         </div>
                       </div>
@@ -502,7 +497,7 @@ export default function Usage() {
                     </TableCell>
                     <TableCell>
                       <Chip color="primary" size="sm" variant="flat">
-                        {formatNumber(item.requests)}
+                        {formatCompactNumber(item.requests)}
                       </Chip>
                     </TableCell>
                     <TableCell>

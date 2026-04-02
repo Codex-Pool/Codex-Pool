@@ -267,10 +267,12 @@ function AppShell() {
 }
 
 export default function App() {
+  const { i18n } = useTranslation()
+
   return (
     <ThemeProvider defaultTheme="system" storageKey="codex-ui-theme">
       <UiPreferencesProvider>
-        <HeroUIProvider>
+        <HeroUIProvider locale={i18n.resolvedLanguage ?? i18n.language ?? 'en-US'}>
           <main className="bg-background text-foreground min-h-screen">
             <AppShell />
             <NotificationCenter />

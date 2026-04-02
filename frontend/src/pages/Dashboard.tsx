@@ -2,6 +2,7 @@ import { Icon } from '@iconify/react'
 import {
   Button,
   Chip,
+  DateRangePicker,
   Dropdown,
   DropdownItem,
   DropdownMenu,
@@ -12,6 +13,7 @@ import {
   Spinner,
 } from '@heroui/react'
 import { useQuery } from '@tanstack/react-query'
+import { fromDateToLocal, type ZonedDateTime } from '@internationalized/date'
 import {
   AlertTriangle,
   Archive,
@@ -22,7 +24,9 @@ import {
   Timer,
   TriangleAlert,
 } from 'lucide-react'
-import { useMemo, useState } from 'react'
+import type { RangeValue } from '@react-types/shared'
+import type { Ref } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router-dom'
 import {
@@ -61,6 +65,7 @@ import {
   buildTrafficData,
   type DashboardTrendGranularity,
 } from '@/features/usage/contracts'
+import { formatCompactNumber } from '@/lib/i18n-format'
 import { formatDurationMs } from '@/lib/duration-format'
 import { cn } from '@/lib/utils'
 
@@ -86,15 +91,14 @@ const POOL_PIE_COLORS = {
   danger: 'hsl(var(--heroui-danger))',
 } as const
 
-type DashboardRangePreset = 'last24h' | 'last7d' | 'last30d'
+type DashboardRangePreset = 'last24h' | 'last7d' | 'last30d' | 'custom'
 
-const DASHBOARD_RANGE_PRESET_SECONDS: Record<DashboardRangePreset, number> = {
+const DASHBOARD_RANGE_PRESET_SECONDS: Record<Exclude<DashboardRangePreset, 'custom'>, number> = {
   last24h: 86400,
   last7d: 7 * 86400,
   last30d: 30 * 86400,
 }
 
-const DASHBOARD_RANGE_PRESETS: DashboardRangePreset[] = ['last24h', 'last7d', 'last30d']
 const DASHBOARD_GRANULARITY_OPTIONS: DashboardTrendGranularity[] = ['hour', 'day', 'week']
 
 function buildDashboardQueryWindow(durationSeconds: number) {
@@ -105,10 +109,12 @@ function buildDashboardQueryWindow(durationSeconds: number) {
   }
 }
 
-function formatNumber(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`
-  return n.toString()
+function buildDashboardDateRangeValue(durationSeconds: number): RangeValue<ZonedDateTime> {
+  const { startTs, endTs } = buildDashboardQueryWindow(durationSeconds)
+  return {
+    start: fromDateToLocal(new Date(startTs * 1000)),
+    end: fromDateToLocal(new Date(endTs * 1000)),
+  }
 }
 
 /** 弹簧动画数字：从旧值平滑过渡到新值，刷新时有触感反馈 */
@@ -121,11 +127,40 @@ export default function Dashboard() {
   const { t } = useTranslation()
   const navigate = useNavigate()
   const { textColor: chartTextColor, gridColor: chartGridColor, tooltipStyle: chartTooltipStyle } = useChartTheme()
+  const topDateRangePickerRef = useRef<HTMLElement | null>(null)
   const prefersReducedMotion =
     typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches
-  const [rangePreset, setRangePreset] = useState<DashboardRangePreset>('last24h')
   const [granularity, setGranularity] = useState<DashboardTrendGranularity>('hour')
-  const rangeSeconds = DASHBOARD_RANGE_PRESET_SECONDS[rangePreset]
+  const [appliedRangePreset, setAppliedRangePreset] = useState<DashboardRangePreset>('last24h')
+  const [draftDateRange, setDraftDateRange] = useState<RangeValue<ZonedDateTime> | null>(() =>
+    buildDashboardDateRangeValue(DASHBOARD_RANGE_PRESET_SECONDS.last24h),
+  )
+  const [appliedCustomDateRange, setAppliedCustomDateRange] = useState<RangeValue<ZonedDateTime> | null>(() =>
+    buildDashboardDateRangeValue(DASHBOARD_RANGE_PRESET_SECONDS.last24h),
+  )
+  const activeWindow = useMemo(() => {
+    if (appliedRangePreset === 'custom' && appliedCustomDateRange?.start && appliedCustomDateRange?.end) {
+      const startTs = Math.floor(appliedCustomDateRange.start.toDate().getTime() / 1000)
+      const endTs = Math.floor(appliedCustomDateRange.end.toDate().getTime() / 1000)
+      if (endTs > startTs) {
+        return { startTs, endTs }
+      }
+    }
+
+    return buildDashboardQueryWindow(DASHBOARD_RANGE_PRESET_SECONDS[appliedRangePreset === 'custom' ? 'last24h' : appliedRangePreset])
+  }, [appliedCustomDateRange, appliedRangePreset])
+  const rangeSeconds = Math.max(activeWindow.endTs - activeWindow.startTs, 60)
+
+  const hasCompleteDraftRange = Boolean(draftDateRange?.start && draftDateRange?.end)
+  const hasPendingCustomRange = useMemo(() => {
+    if (!draftDateRange?.start || !draftDateRange?.end || !appliedCustomDateRange?.start || !appliedCustomDateRange?.end) {
+      return appliedRangePreset !== 'custom'
+    }
+
+    return draftDateRange.start.toString() !== appliedCustomDateRange.start.toString()
+      || draftDateRange.end.toString() !== appliedCustomDateRange.end.toString()
+      || appliedRangePreset !== 'custom'
+  }, [appliedCustomDateRange, appliedRangePreset, draftDateRange])
 
   const { data: systemState, isLoading: isLoadingSystem } = useQuery({
     queryKey: ['dashboardSystemState'],
@@ -134,37 +169,33 @@ export default function Dashboard() {
   })
 
   const { data: summaryData, isLoading: isLoadingSummary } = useQuery({
-    queryKey: ['dashboardUsageSummary', rangeSeconds],
-    queryFn: () => {
-      const { startTs, endTs } = buildDashboardQueryWindow(rangeSeconds)
-      return dashboardApi.getUsageSummary({ start_ts: startTs, end_ts: endTs })
-    },
+    queryKey: ['dashboardUsageSummary', activeWindow.startTs, activeWindow.endTs],
+    queryFn: () => dashboardApi.getUsageSummary({ start_ts: activeWindow.startTs, end_ts: activeWindow.endTs }),
+    placeholderData: (previousData) => previousData,
     refetchInterval: 30_000,
   })
 
   const { data: hourlyTrends, isLoading: isLoadingTrends } = useQuery({
-    queryKey: ['dashboardHourlyTrends', rangeSeconds],
-    queryFn: () => {
-      const { startTs, endTs } = buildDashboardQueryWindow(rangeSeconds)
-      return dashboardApi.getHourlyTrends({
-        start_ts: startTs,
-        end_ts: endTs,
+    queryKey: ['dashboardHourlyTrends', activeWindow.startTs, activeWindow.endTs],
+    queryFn: () =>
+      dashboardApi.getHourlyTrends({
+        start_ts: activeWindow.startTs,
+        end_ts: activeWindow.endTs,
         limit: Math.max(24, Math.ceil(rangeSeconds / 3600)),
-      })
-    },
+      }),
+    placeholderData: (previousData) => previousData,
     refetchInterval: 30_000,
   })
 
   const { data: leaderboard, isLoading: isLoadingLeaderboard } = useQuery({
-    queryKey: ['dashboardLeaderboard', rangeSeconds],
-    queryFn: () => {
-      const { startTs, endTs } = buildDashboardQueryWindow(rangeSeconds)
-      return usageApi.getLeaderboard({
-        start_ts: startTs,
-        end_ts: endTs,
+    queryKey: ['dashboardLeaderboard', activeWindow.startTs, activeWindow.endTs],
+    queryFn: () =>
+      usageApi.getLeaderboard({
+        start_ts: activeWindow.startTs,
+        end_ts: activeWindow.endTs,
         limit: 5,
-      })
-    },
+      }),
+    placeholderData: (previousData) => previousData,
     refetchInterval: 60_000,
   })
 
@@ -207,13 +238,16 @@ export default function Dashboard() {
     return next
   }, [systemState, t])
 
-  const rangeLabel = t(`dashboard.filters.ranges.${rangePreset}`)
+  const rangeLabel = t(`dashboard.filters.ranges.${appliedRangePreset}`)
   const granularityLabel = t(`dashboard.filters.granularityOptions.${granularity}`)
   const rangeGranularitySummary = t('dashboard.filters.summary', {
     range: rangeLabel,
     granularity: granularityLabel,
     defaultValue: '{{range}} · grouped by {{granularity}}',
   })
+  const dockedRangeLabel = appliedRangePreset === 'custom'
+    ? t('dashboard.filters.ranges.custom')
+    : t(`dashboard.filters.ranges.${appliedRangePreset}`)
 
   const trafficData = useMemo(
     () => buildTrafficData(hourlyTrends, { granularity, rangeSeconds }),
@@ -229,10 +263,10 @@ export default function Dashboard() {
 
   // 图表版本号：数据更新时递增，用作 key 强制重新运行入场动画
   const chartAnimKey = useMemo(() => ({
-    traffic: `traffic-${rangePreset}-${granularity}-${hourlyTrends?.account_totals?.length ?? 0}-${hourlyTrends?.account_totals?.[0]?.hour_start ?? 0}`,
-    token: `token-${rangePreset}-${granularity}-${summaryData?.dashboard_metrics?.token_trends?.length ?? 0}`,
+    traffic: `traffic-${appliedRangePreset}-${granularity}-${hourlyTrends?.account_totals?.length ?? 0}-${hourlyTrends?.account_totals?.[0]?.hour_start ?? 0}`,
+    token: `token-${appliedRangePreset}-${granularity}-${summaryData?.dashboard_metrics?.token_trends?.length ?? 0}`,
     model: `model-${modelDistribution.length}-${modelDistribution[0]?.requests ?? 0}`,
-  }), [granularity, hourlyTrends, modelDistribution, rangePreset, summaryData])
+  }), [appliedRangePreset, granularity, hourlyTrends, modelDistribution, summaryData])
 
   const requestSparkline = useMemo(() => trafficData.map((p) => p.accounts), [trafficData])
   const tokenSparkline = useMemo(
@@ -246,7 +280,7 @@ export default function Dashboard() {
         id: 'total_requests',
         title: t('dashboard.kpi.totalRequests'),
         rawValue: kpis.totalRequests,
-        format: formatNumber,
+        format: formatCompactNumber,
         description: rangeGranularitySummary,
         sparklineData: requestSparkline,
         sparklineTone: 'primary' as const,
@@ -257,7 +291,7 @@ export default function Dashboard() {
         id: 'total_tokens',
         title: t('dashboard.kpi.totalTokens'),
         rawValue: kpis.totalTokens,
-        format: formatNumber,
+        format: formatCompactNumber,
         description: rangeGranularitySummary,
         sparklineData: tokenSparkline,
         sparklineTone: 'warning' as const,
@@ -286,40 +320,130 @@ export default function Dashboard() {
     [kpis, rangeGranularitySummary, requestSparkline, t, tokenSparkline],
   )
 
-  const dashboardFilters = useMemo(
-    () => (
-      <>
-        <Select
-          aria-label={t('dashboard.filters.rangeAriaLabel', { defaultValue: 'Time range' })}
-          disallowEmptySelection
-          selectedKeys={[rangePreset]}
-          onChange={(event) => setRangePreset(event.target.value as DashboardRangePreset)}
-          size="sm"
-          className="min-w-[10rem]"
-        >
-          {DASHBOARD_RANGE_PRESETS.map((preset) => (
-            <SelectItem key={preset}>
-              {t(`dashboard.filters.ranges.${preset}`)}
-            </SelectItem>
-          ))}
-        </Select>
-        <Select
-          aria-label={t('dashboard.filters.granularityAriaLabel', { defaultValue: 'Trend granularity' })}
-          disallowEmptySelection
-          selectedKeys={[granularity]}
-          onChange={(event) => setGranularity(event.target.value as DashboardTrendGranularity)}
-          size="sm"
-          className="min-w-[10rem]"
-        >
-          {DASHBOARD_GRANULARITY_OPTIONS.map((option) => (
-            <SelectItem key={option}>
-              {t(`dashboard.filters.granularityOptions.${option}`)}
-            </SelectItem>
-          ))}
-        </Select>
-      </>
-    ),
-    [granularity, rangePreset, t],
+  const applyPresetRange = (nextPreset: Exclude<DashboardRangePreset, 'custom'>) => {
+    const nextRange = buildDashboardDateRangeValue(DASHBOARD_RANGE_PRESET_SECONDS[nextPreset])
+    setDraftDateRange(nextRange)
+    setAppliedCustomDateRange(nextRange)
+    setAppliedRangePreset(nextPreset)
+  }
+
+  const applyCustomRange = () => {
+    if (!draftDateRange?.start || !draftDateRange?.end) {
+      return
+    }
+
+    const startTs = Math.floor(draftDateRange.start.toDate().getTime() / 1000)
+    const endTs = Math.floor(draftDateRange.end.toDate().getTime() / 1000)
+    if (endTs <= startTs) {
+      return
+    }
+
+    setAppliedCustomDateRange(draftDateRange)
+    setAppliedRangePreset('custom')
+  }
+
+  const renderFilterDateRangePicker = (
+    className: string,
+    pickerRef?: Ref<HTMLElement>,
+  ) => (
+      <DateRangePicker
+        aria-label={t('dashboard.filters.dateRangeAriaLabel', { defaultValue: 'Date and time range' })}
+        size="sm"
+        granularity="second"
+        hourCycle={24}
+        hideTimeZone
+        calendarWidth={360}
+        showMonthAndYearPickers
+        value={draftDateRange}
+        onChange={(value) => {
+          setDraftDateRange(value as RangeValue<ZonedDateTime> | null)
+        }}
+        ref={pickerRef}
+        className={className}
+        CalendarBottomContent={(
+          <div className="flex flex-wrap items-center justify-between gap-2 border-t border-default-100 px-2 py-2">
+            <div className="flex flex-wrap gap-1.5">
+              {(['last24h', 'last7d', 'last30d'] as const).map((preset) => (
+                <Button
+                  key={preset}
+                  size="sm"
+                  variant={appliedRangePreset === preset ? 'solid' : 'flat'}
+                  color={appliedRangePreset === preset ? 'primary' : 'default'}
+                  onPress={() => applyPresetRange(preset)}
+                >
+                  {t(`dashboard.filters.ranges.${preset}`)}
+                </Button>
+              ))}
+            </div>
+            <Button
+              size="sm"
+              color="primary"
+              variant="flat"
+              isDisabled={!hasCompleteDraftRange || !hasPendingCustomRange}
+              onPress={applyCustomRange}
+            >
+              {t('dashboard.filters.apply', { defaultValue: 'Apply' })}
+            </Button>
+          </div>
+        )}
+      />
+  )
+
+  const dashboardFilters = (
+    <div className="flex items-center gap-2">
+      <Select
+        aria-label={t('dashboard.filters.granularityAriaLabel', { defaultValue: 'Trend granularity' })}
+        disallowEmptySelection
+        selectedKeys={[granularity]}
+        onChange={(event) => setGranularity(event.target.value as DashboardTrendGranularity)}
+        size="sm"
+        className="w-[7.25rem]"
+      >
+        {DASHBOARD_GRANULARITY_OPTIONS.map((option) => (
+          <SelectItem key={option}>
+            {t(`dashboard.filters.granularityOptions.${option}`)}
+          </SelectItem>
+        ))}
+      </Select>
+      {renderFilterDateRangePicker('w-[26rem]', topDateRangePickerRef)}
+    </div>
+  )
+
+  const dockedDashboardFilters = (
+    <div className="flex items-center gap-2">
+      <Select
+        aria-label={t('dashboard.filters.granularityAriaLabel', { defaultValue: 'Trend granularity' })}
+        disallowEmptySelection
+        selectedKeys={[granularity]}
+        onChange={(event) => setGranularity(event.target.value as DashboardTrendGranularity)}
+        size="sm"
+        className="w-[6.75rem]"
+      >
+        {DASHBOARD_GRANULARITY_OPTIONS.map((option) => (
+          <SelectItem key={option}>
+            {t(`dashboard.filters.granularityOptions.${option}`)}
+          </SelectItem>
+        ))}
+      </Select>
+      <Button
+        size="sm"
+        variant="flat"
+        startContent={<Icon icon="solar:calendar-bold" className="text-base" />}
+        className="justify-start"
+        onPress={() => {
+          const scrollRoot = document.querySelector('[data-app-scroll-root]') as HTMLDivElement | null
+          scrollRoot?.scrollTo({ top: 0 })
+          window.requestAnimationFrame(() => {
+            const selectorButton = topDateRangePickerRef.current?.querySelector(
+              '[data-slot="selector-button"]',
+            ) as HTMLButtonElement | null
+            selectorButton?.click()
+          })
+        }}
+      >
+        {dockedRangeLabel}
+      </Button>
+    </div>
   )
 
   const secondaryMetrics = useMemo(
@@ -352,7 +476,7 @@ export default function Dashboard() {
         id: 'tpm',
         title: t('dashboard.kpi.tpm'),
         rawValue: kpis.tpm,
-        format: formatNumber,
+        format: formatCompactNumber,
         description: t('dashboard.kpi.tpmDesc'),
       },
     ],
@@ -483,6 +607,9 @@ export default function Dashboard() {
         title={t('nav.dashboard')}
         description={t('dashboard.subtitle')}
         actions={dashboardFilters}
+        dockedActions={dockedDashboardFilters}
+        actionsClassName="lg:max-w-[36rem]"
+        dockedActionsClassName="max-w-[30rem]"
       />
 
       {/* ── Pool 数据概览（紧凑分组） ── */}
@@ -582,7 +709,7 @@ export default function Dashboard() {
                   {t('dashboard.poolOverview.totalLabel', { defaultValue: '总计' })}
                 </span>
                 <span className="tabular-nums text-2xl font-semibold leading-tight tracking-[-0.04em] text-foreground">
-                  {formatNumber(totalManagedPool)}
+                  {formatCompactNumber(totalManagedPool)}
                 </span>
               </div>
             </div>
@@ -603,7 +730,7 @@ export default function Dashboard() {
                       </Chip>
                     </div>
                     <div className="tabular-nums text-lg font-semibold leading-tight tracking-[-0.03em] text-foreground">
-                      {formatNumber(metric.value)}
+                      {formatCompactNumber(metric.value)}
                     </div>
                     <p className="text-[11px] leading-5 text-default-400">{metric.description}</p>
                   </div>
@@ -641,7 +768,7 @@ export default function Dashboard() {
                 </span>
                 <span className="w-12 shrink-0 text-xs font-medium text-default-600">{metric.title}</span>
                 <span className="w-10 shrink-0 text-right tabular-nums text-sm font-semibold text-foreground">
-                  {formatNumber(metric.value)}
+                  {formatCompactNumber(metric.value)}
                 </span>
                 <Progress
                   aria-label={metric.title}
@@ -739,9 +866,9 @@ export default function Dashboard() {
             {/* Inline KPI summary row */}
             <div className="flex flex-wrap gap-3">
               {[
-                { label: t('dashboard.kpi.totalRequests'), value: formatNumber(kpis.totalRequests), color: 'success' as const, active: true },
-                { label: t('dashboard.antigravity.accountTraffic', { defaultValue: 'Account traffic' }), value: formatNumber(trafficData.reduce((s, p) => s + p.accounts, 0)), color: 'success' as const, active: false },
-                { label: t('dashboard.antigravity.apiKeyTraffic', { defaultValue: 'API key traffic' }), value: formatNumber(trafficData.reduce((s, p) => s + p.apiKeys, 0)), color: 'danger' as const, active: false },
+                { label: t('dashboard.kpi.totalRequests'), value: formatCompactNumber(kpis.totalRequests), color: 'success' as const, active: true },
+                { label: t('dashboard.antigravity.accountTraffic', { defaultValue: 'Account traffic' }), value: formatCompactNumber(trafficData.reduce((s, p) => s + p.accounts, 0)), color: 'success' as const, active: false },
+                { label: t('dashboard.antigravity.apiKeyTraffic', { defaultValue: 'API key traffic' }), value: formatCompactNumber(trafficData.reduce((s, p) => s + p.apiKeys, 0)), color: 'danger' as const, active: false },
               ].map((item) => (
                 <div key={item.label} className={cn(
                   'rounded-large border-small px-3 py-2',
@@ -802,7 +929,7 @@ export default function Dashboard() {
                     <span className="h-2 w-2 rounded-full" style={{ backgroundColor: item.color }} />
                     <span className="text-[11px] font-medium text-default-500">{item.label}</span>
                   </div>
-                  <div className="text-base font-semibold tabular-nums leading-tight text-foreground">{formatNumber(item.value)}</div>
+                  <div className="text-base font-semibold tabular-nums leading-tight text-foreground">{formatCompactNumber(item.value)}</div>
                 </div>
               ))}
             </div>
@@ -822,11 +949,11 @@ export default function Dashboard() {
                 </defs>
                 <CartesianGrid strokeDasharray="3 3" stroke={chartGridColor} />
                 <XAxis dataKey="hour" tick={{ fill: chartTextColor, fontSize: 11 }} axisLine={false} tickLine={false} />
-                <YAxis tick={{ fill: chartTextColor, fontSize: 11 }} axisLine={false} tickLine={false} tickFormatter={(v) => formatNumber(v)} />
+                <YAxis tick={{ fill: chartTextColor, fontSize: 11 }} axisLine={false} tickLine={false} tickFormatter={(v) => formatCompactNumber(Number(v))} />
                 <Tooltip
                   contentStyle={chartTooltipStyle}
                   formatter={(value: number | string | readonly (number | string)[] | undefined) =>
-                    formatNumber(Number(Array.isArray(value) ? value[0] ?? 0 : value ?? 0))}
+                    formatCompactNumber(Number(Array.isArray(value) ? value[0] ?? 0 : value ?? 0))}
                 />
                 <Area type="monotone" dataKey="input" stroke={CHART_SERIES_COLORS.input} fill="url(#inputGradient)" strokeWidth={2} isAnimationActive={!prefersReducedMotion} animationDuration={1100} animationEasing="ease-out" animationBegin={0} />
                 <Area type="monotone" dataKey="cached" stroke={CHART_SERIES_COLORS.cached} fill="none" strokeWidth={1.5} strokeDasharray="4 4" isAnimationActive={!prefersReducedMotion} animationDuration={1100} animationEasing="ease-out" animationBegin={100} />
@@ -859,12 +986,12 @@ export default function Dashboard() {
               <ResponsiveContainer width="100%" height={280}>
                 <BarChart key={chartAnimKey.model} data={modelDistribution} layout="vertical">
                   <CartesianGrid strokeDasharray="3 3" stroke={chartGridColor} horizontal={false} />
-                  <XAxis type="number" tick={{ fill: chartTextColor, fontSize: 11 }} axisLine={false} tickLine={false} tickFormatter={(v) => formatNumber(v)} />
+                  <XAxis type="number" tick={{ fill: chartTextColor, fontSize: 11 }} axisLine={false} tickLine={false} tickFormatter={(v) => formatCompactNumber(Number(v))} />
                   <YAxis type="category" dataKey="model" tick={{ fill: chartTextColor, fontSize: 11 }} axisLine={false} tickLine={false} width={120} />
                   <Tooltip
                     contentStyle={chartTooltipStyle}
                     formatter={(value: number | string | readonly (number | string)[] | undefined) =>
-                      formatNumber(Number(Array.isArray(value) ? value[0] ?? 0 : value ?? 0))}
+                      formatCompactNumber(Number(Array.isArray(value) ? value[0] ?? 0 : value ?? 0))}
                   />
                   <Bar dataKey="requests" radius={[0, 6, 6, 0]} barSize={20} isAnimationActive={!prefersReducedMotion} animationDuration={900} animationEasing="ease-out" animationBegin={0}>
                     {modelDistribution.map((_, idx) => (
@@ -925,7 +1052,7 @@ export default function Dashboard() {
                         className="w-20 shrink-0"
                       />
                       <span className="w-14 shrink-0 text-right tabular-nums text-xs font-semibold text-foreground">
-                        {formatNumber(key.requests)}
+                        {formatCompactNumber(key.requests)}
                       </span>
                     </div>
                   )

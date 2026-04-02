@@ -680,8 +680,10 @@ export default {
     },
     currentScope: "当前：{{scope}}",
     filters: {
+      apply: "应用",
       apiKeyAriaLabel: "API 密钥筛选",
       apiKeyPlaceholder: "选择 API 密钥",
+      dateRangeAriaLabel: "日期和时间范围",
       description:
         "先看全局，再在告警、尖峰或成本波动需要解释时收窄到单个租户或 API 密钥。",
       eyebrow: "上下文",
@@ -701,6 +703,7 @@ export default {
         last24h: "最近 24 小时",
         last7d: "最近 7 天",
         last30d: "最近 30 天",
+        custom: "自定义范围",
       },
       scopeAriaLabel: "范围筛选",
       summary: "{{range}} · 按{{granularity}}聚合",

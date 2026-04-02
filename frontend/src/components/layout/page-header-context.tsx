@@ -6,6 +6,9 @@ export interface AppPageHeader {
   title: ReactNode
   description?: ReactNode
   actions?: ReactNode
+  dockedActions?: ReactNode
+  actionsClassName?: string
+  dockedActionsClassName?: string
   mode?: 'static-shell' | 'dock-on-scroll'
 }
 

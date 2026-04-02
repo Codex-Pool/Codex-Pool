@@ -25,6 +25,9 @@ export interface PageIntroProps extends Omit<HTMLAttributes<HTMLDivElement>, 'ti
   title: ReactNode
   description?: ReactNode
   actions?: ReactNode
+  dockedActions?: ReactNode
+  actionsClassName?: string
+  dockedActionsClassName?: string
 }
 
 export function PageIntro({
@@ -33,6 +36,7 @@ export function PageIntro({
   title,
   description,
   actions,
+  actionsClassName,
   className,
   ...props
 }: PageIntroProps) {
@@ -78,7 +82,11 @@ export function PageIntro({
           ) : null}
         </div>
       </div>
-      {actions ? <div className="flex shrink-0 flex-wrap items-center gap-2 lg:max-w-[24rem] lg:justify-end">{actions}</div> : null}
+      {actions ? (
+        <div className={cn('flex shrink-0 flex-wrap items-center gap-2 lg:max-w-[24rem] lg:justify-end', actionsClassName)}>
+          {actions}
+        </div>
+      ) : null}
     </div>
   )
 }
@@ -88,6 +96,9 @@ export function DockedPageIntro(props: PageIntroProps) {
     title,
     description,
     actions,
+    dockedActions,
+    actionsClassName,
+    dockedActionsClassName,
   } = props
   const introRef = usePageHeaderDocking()
   const pageHeader = useMemo(
@@ -96,8 +107,11 @@ export function DockedPageIntro(props: PageIntroProps) {
       title,
       description,
       actions,
+      dockedActions,
+      actionsClassName,
+      dockedActionsClassName,
     }),
-    [actions, description, title],
+    [actions, actionsClassName, description, dockedActions, dockedActionsClassName, title],
   )
 
   usePageHeader(pageHeader)
