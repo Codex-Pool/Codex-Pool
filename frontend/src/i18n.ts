@@ -3,11 +3,11 @@ import type { ResourceLanguage } from 'i18next'
 import { initReactI18next } from 'react-i18next'
 import LanguageDetector from 'i18next-browser-languagedetector'
 
-import en from './locales/en'
-import zhCN from './locales/zh-CN'
+import en from './locales/en.ts'
+import zhCN from './locales/zh-CN.ts'
 
 export const supportedLanguages = ['en', 'zh-CN'] as const
-const fallbackLanguage = 'zh-CN' as const
+export const fallbackLanguage = 'en' as const
 
 type SupportedLanguage = (typeof supportedLanguages)[number]
 const bundledResources: Record<SupportedLanguage, ResourceLanguage> = {
@@ -15,7 +15,7 @@ const bundledResources: Record<SupportedLanguage, ResourceLanguage> = {
   'zh-CN': zhCN,
 }
 
-function normalizeLanguage(rawLanguage?: string | null): SupportedLanguage {
+export function normalizeLanguage(rawLanguage?: string | null): SupportedLanguage {
   if (!rawLanguage) {
     return fallbackLanguage
   }
