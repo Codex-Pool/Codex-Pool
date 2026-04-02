@@ -337,7 +337,22 @@ export default function AdminApiKeys() {
                 <Button
                   startContent={<Copy className="h-4 w-4" />}
                   variant="flat"
-                  onPress={() => copyText(createdKey.plaintext_key)}
+                  onPress={() =>
+                    copyText(createdKey.plaintext_key, {
+                      successTitle: t("apiKeys.dialog.created.copyPlaintext", {
+                        defaultValue: "Copy plaintext key",
+                      }),
+                      successDescription: t("apiKeys.notifications.copyPlaintextSuccess", {
+                        defaultValue: "Copied plaintext key.",
+                      }),
+                      errorTitle: t("apiKeys.dialog.created.copyPlaintext", {
+                        defaultValue: "Copy plaintext key",
+                      }),
+                      errorDescription: t("apiKeys.notifications.copyPlaintextFailed", {
+                        defaultValue: "Failed to copy plaintext key.",
+                      }),
+                    })
+                  }
                 >
                   {t("apiKeys.dialog.created.copyPlaintext", {
                     defaultValue: "Copy plaintext key",
@@ -500,7 +515,18 @@ export default function AdminApiKeys() {
                             size="sm"
                             variant="light"
                             aria-label={t("apiKeys.actions.copyPrefix")}
-                            onPress={() => copyText(key.key_prefix)}
+                            onPress={() =>
+                              copyText(key.key_prefix, {
+                                successTitle: t("apiKeys.actions.copyPrefix"),
+                                successDescription: t("apiKeys.notifications.copyPrefixSuccess", {
+                                  defaultValue: "Copied key prefix.",
+                                }),
+                                errorTitle: t("apiKeys.actions.copyPrefix"),
+                                errorDescription: t("apiKeys.notifications.copyPrefixFailed", {
+                                  defaultValue: "Failed to copy key prefix.",
+                                }),
+                              })
+                            }
                           >
                             <Copy className="h-4 w-4" />
                           </Button>

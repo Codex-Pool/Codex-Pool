@@ -3382,6 +3382,14 @@ export default {
             tokenLabel: "Token:",
             title: "Admin Impersonation"
         },
+        notifications: {
+            copyPlaintextFailed: "Failed to copy plaintext key.",
+            copyPlaintextSuccess: "Copied plaintext key.",
+            copyPrefixFailed: "Failed to copy key prefix.",
+            copyPrefixSuccess: "Copied key prefix.",
+            copyTokenFailed: "Failed to copy token.",
+            copyTokenSuccess: "Copied token."
+        },
         keys: {
             create: {
                 fields: {
@@ -3693,6 +3701,12 @@ export default {
         messages: {
             createFailed: "Failed to create API key",
             missingName: "Please enter a key name"
+        },
+        notifications: {
+            copyPlaintextFailed: "Failed to copy plaintext key.",
+            copyPlaintextSuccess: "Copied plaintext key.",
+            copyPrefixFailed: "Failed to copy key prefix.",
+            copyPrefixSuccess: "Copied key prefix."
         },
         dialog: {
             create: {

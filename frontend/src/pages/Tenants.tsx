@@ -534,7 +534,22 @@ export default function Tenants() {
               size="sm"
               variant="light"
               isIconOnly
-              onClick={() => copyText(row.original.key_prefix)}
+              onClick={() =>
+                copyText(row.original.key_prefix, {
+                  successTitle: t('tenants.keys.list.copyPrefix', {
+                    defaultValue: 'Copy key prefix',
+                  }),
+                  successDescription: t('tenants.notifications.copyPrefixSuccess', {
+                    defaultValue: 'Copied key prefix.',
+                  }),
+                  errorTitle: t('tenants.keys.list.copyPrefix', {
+                    defaultValue: 'Copy key prefix',
+                  }),
+                  errorDescription: t('tenants.notifications.copyPrefixFailed', {
+                    defaultValue: 'Failed to copy key prefix.',
+                  }),
+                })
+              }
               aria-label={t('tenants.keys.list.copyPrefix', { defaultValue: 'Copy key prefix' })}
               title={t('tenants.keys.list.copyPrefix', { defaultValue: 'Copy key prefix' })}
             >
@@ -964,7 +979,22 @@ export default function Tenants() {
                         <Button
                           type="button"
                           size="sm"
-                          onClick={() => copyText(lastImpersonation.access_token)}
+                          onClick={() =>
+                            copyText(lastImpersonation.access_token, {
+                              successTitle: t('tenants.impersonation.copyToken', {
+                                defaultValue: 'Copy Token',
+                              }),
+                              successDescription: t('tenants.notifications.copyTokenSuccess', {
+                                defaultValue: 'Copied token.',
+                              }),
+                              errorTitle: t('tenants.impersonation.copyToken', {
+                                defaultValue: 'Copy Token',
+                              }),
+                              errorDescription: t('tenants.notifications.copyTokenFailed', {
+                                defaultValue: 'Failed to copy token.',
+                              }),
+                            })
+                          }
                         >
                           <Copy className="mr-2 h-4 w-4" />
                           {t('tenants.impersonation.copyToken', { defaultValue: 'Copy Token' })}
@@ -1026,7 +1056,22 @@ export default function Tenants() {
                         </SurfaceCode>
                         <Button
                           size="sm"
-                          onClick={() => copyText(createdKey.plaintext_key)}
+                          onClick={() =>
+                            copyText(createdKey.plaintext_key, {
+                              successTitle: t('tenants.keys.created.copyPlaintext', {
+                                defaultValue: 'Copy Plaintext Key',
+                              }),
+                              successDescription: t('tenants.notifications.copyPlaintextSuccess', {
+                                defaultValue: 'Copied plaintext key.',
+                              }),
+                              errorTitle: t('tenants.keys.created.copyPlaintext', {
+                                defaultValue: 'Copy Plaintext Key',
+                              }),
+                              errorDescription: t('tenants.notifications.copyPlaintextFailed', {
+                                defaultValue: 'Failed to copy plaintext key.',
+                              }),
+                            })
+                          }
                         >
                           <Copy className="mr-2 h-4 w-4" />
                           {t('tenants.keys.created.copyPlaintext', { defaultValue: 'Copy Plaintext Key' })}

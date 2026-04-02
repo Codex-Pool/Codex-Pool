@@ -1,4 +1,5 @@
 import { formatNumber, resolveLocale } from '@/lib/i18n-format'
+import { notify } from '@/lib/notification'
 
 export const LABEL_CLASS_NAME = 'text-xs font-medium text-muted-foreground'
 export const USAGE_API_KEY_FILTER_ALL = '__all__'
@@ -45,20 +46,58 @@ export function maskToken(token: string): string {
   return `${token.slice(0, 6)}...${token.slice(-4)}`
 }
 
-export async function copyText(value: string) {
+export interface CopyTextNotifications {
+  successTitle: string
+  successDescription: string
+  errorTitle: string
+  errorDescription: string
+}
+
+async function writeTextToClipboard(value: string) {
   try {
     await navigator.clipboard.writeText(value)
+    return true
   } catch {
+    if (typeof document === 'undefined' || !document.body) {
+      return false
+    }
+
     const textarea = document.createElement('textarea')
     textarea.value = value
     textarea.style.position = 'fixed'
     textarea.style.opacity = '0'
     document.body.appendChild(textarea)
-    textarea.focus()
-    textarea.select()
-    document.execCommand('copy')
-    document.body.removeChild(textarea)
+
+    try {
+      textarea.focus()
+      textarea.select()
+      return document.execCommand('copy')
+    } catch {
+      return false
+    } finally {
+      document.body.removeChild(textarea)
+    }
   }
+}
+
+export async function copyText(value: string, notifications: CopyTextNotifications) {
+  const didCopy = await writeTextToClipboard(value)
+
+  if (!didCopy) {
+    notify({
+      variant: 'error',
+      title: notifications.errorTitle,
+      description: notifications.errorDescription,
+    })
+    return false
+  }
+
+  notify({
+    variant: 'success',
+    title: notifications.successTitle,
+    description: notifications.successDescription,
+  })
+  return true
 }
 
 export function createDateTimeFormatter(locale?: string) {

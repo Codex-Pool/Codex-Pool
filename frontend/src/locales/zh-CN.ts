@@ -3382,6 +3382,14 @@ export default {
             tokenLabel: "令牌：",
             title: "管理员代操作"
         },
+        notifications: {
+            copyPlaintextFailed: "复制明文密钥失败。",
+            copyPlaintextSuccess: "已复制明文密钥。",
+            copyPrefixFailed: "复制 key 前缀失败。",
+            copyPrefixSuccess: "已复制 key 前缀。",
+            copyTokenFailed: "复制 token 失败。",
+            copyTokenSuccess: "已复制 token。"
+        },
         keys: {
             create: {
                 fields: {
@@ -3693,6 +3701,12 @@ export default {
         messages: {
             createFailed: "创建 API Key 失败",
             missingName: "请先填写 Key 名称"
+        },
+        notifications: {
+            copyPlaintextFailed: "复制明文密钥失败。",
+            copyPlaintextSuccess: "已复制明文密钥。",
+            copyPrefixFailed: "复制 key 前缀失败。",
+            copyPrefixSuccess: "已复制 key 前缀。"
         },
         dialog: {
             create: {
