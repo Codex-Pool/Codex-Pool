@@ -48,6 +48,10 @@ pub async fn anthropic_messages_handler(
         Ok(model) => model,
         Err(response) => return response,
     };
+    let expects_stream = request_value
+        .get("stream")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
     let translated_request =
         match translate_anthropic_messages_request(&request_value, target_model.as_str()) {
             Ok(value) => value,
@@ -71,7 +75,13 @@ pub async fn anthropic_messages_handler(
     }
 
     let response = proxy_handler(State(state.clone()), internal_request).await;
-    translate_proxy_response_to_anthropic(response, requested_model, header_locale.as_str()).await
+    translate_proxy_response_to_anthropic(
+        response,
+        requested_model,
+        header_locale.as_str(),
+        expects_stream,
+    )
+    .await
 }
 
 pub async fn anthropic_count_tokens_handler(
@@ -142,6 +152,7 @@ async fn translate_proxy_response_to_anthropic(
     response: Response,
     requested_model: String,
     _locale: &str,
+    expects_stream: bool,
 ) -> Response {
     let status = response.status();
     let headers = response.headers().clone();
@@ -162,7 +173,7 @@ async fn translate_proxy_response_to_anthropic(
         return anthropic_error_from_proxy(status, &body_bytes, request_id);
     }
 
-    if is_event_stream {
+    if expects_stream || is_event_stream {
         return translate_proxy_stream_to_anthropic(body, requested_model, request_id);
     }
 

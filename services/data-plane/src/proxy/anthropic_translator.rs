@@ -88,11 +88,10 @@ fn translate_anthropic_messages_request(
                     "each message must include a role",
                 )
             })?;
-        let content = translate_anthropic_message_content(message.get("content"))?;
-        input.push(serde_json::json!({
-            "role": role,
-            "content": content,
-        }));
+        input.extend(translate_anthropic_message_items(
+            role,
+            message.get("content"),
+        )?);
     }
 
     let mut object = serde_json::Map::new();
@@ -101,6 +100,9 @@ fn translate_anthropic_messages_request(
         Value::String(target_model.to_string()),
     );
     object.insert("input".to_string(), Value::Array(input));
+    // Claude Code expects stateless messages semantics, while the Codex upstream
+    // rejects persisted responses for this compatibility path.
+    object.insert("store".to_string(), Value::Bool(false));
     if let Some(instructions) = anthropic_system_to_instructions(request_value.get("system")) {
         object.insert("instructions".to_string(), Value::String(instructions));
     }
@@ -116,20 +118,11 @@ fn translate_anthropic_messages_request(
     if let Some(temperature) = request_value.get("temperature").cloned() {
         object.insert("temperature".to_string(), temperature);
     }
-    if let Some(metadata) = request_value.get("metadata").cloned() {
-        object.insert("metadata".to_string(), metadata);
-    }
-    if let Some(thinking) = request_value.get("thinking").cloned() {
-        object.insert("reasoning".to_string(), thinking);
-    }
-    if let Some(context_management) = request_value.get("context_management").cloned() {
-        object.insert("context_management".to_string(), context_management);
-    }
-    if let Some(output_config) = request_value.get("output_config").cloned() {
-        object.insert("output_config".to_string(), output_config);
-    }
-    if let Some(speed) = request_value.get("speed").cloned() {
-        object.insert("speed".to_string(), speed);
+    if let Some(reasoning) = translate_anthropic_reasoning(
+        request_value.get("thinking"),
+        request_value.get("output_config"),
+    ) {
+        object.insert("reasoning".to_string(), reasoning);
     }
     if let Some(tools) = request_value.get("tools").and_then(Value::as_array) {
         object.insert(
@@ -150,6 +143,53 @@ fn translate_anthropic_messages_request(
     }
 
     Ok(Value::Object(object))
+}
+
+enum AnthropicInputItem {
+    MessageContent(Value),
+    Standalone(Value),
+}
+
+fn translate_anthropic_reasoning(
+    thinking: Option<&Value>,
+    output_config: Option<&Value>,
+) -> Option<Value> {
+    let effort = output_config
+        .and_then(|value| value.get("effort"))
+        .and_then(Value::as_str)
+        .and_then(normalize_reasoning_effort)
+        .or_else(|| infer_reasoning_effort_from_thinking(thinking))?;
+
+    Some(serde_json::json!({ "effort": effort }))
+}
+
+fn normalize_reasoning_effort(value: &str) -> Option<&'static str> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "low" => Some("low"),
+        "medium" => Some("medium"),
+        "high" | "max" => Some("high"),
+        _ => None,
+    }
+}
+
+fn infer_reasoning_effort_from_thinking(thinking: Option<&Value>) -> Option<&'static str> {
+    let thinking = thinking?.as_object()?;
+    match thinking.get("type").and_then(Value::as_str) {
+        Some("adaptive") => Some("medium"),
+        Some("enabled") => {
+            let budget = thinking
+                .get("budget_tokens")
+                .and_then(Value::as_i64)
+                .unwrap_or_default()
+                .max(0);
+            Some(match budget {
+                0..=2048 => "low",
+                2049..=8192 => "medium",
+                _ => "high",
+            })
+        }
+        _ => None,
+    }
 }
 
 fn anthropic_system_to_instructions(system: Option<&Value>) -> Option<String> {
@@ -179,59 +219,132 @@ fn anthropic_system_to_instructions(system: Option<&Value>) -> Option<String> {
     }
 }
 
-fn translate_anthropic_message_content(content: Option<&Value>) -> Result<Vec<Value>, Response> {
+fn translate_anthropic_message_items(
+    role: &str,
+    content: Option<&Value>,
+) -> Result<Vec<Value>, Response> {
     match content {
-        Some(Value::String(text)) => Ok(vec![serde_json::json!({
-            "type": "input_text",
-            "text": text,
-        })]),
-        Some(Value::Array(blocks)) => blocks
-            .iter()
-            .map(translate_anthropic_content_block)
-            .collect(),
+        Some(Value::String(text)) => Ok(vec![message_input_item(
+            role,
+            vec![translate_text_block_for_role(role, text)],
+        )]),
+        Some(Value::Array(blocks)) => {
+            let mut items = Vec::new();
+            let mut pending_message_content = Vec::new();
+            for block in blocks {
+                match translate_anthropic_content_block(role, block)? {
+                    AnthropicInputItem::MessageContent(content) => {
+                        pending_message_content.push(content);
+                    }
+                    AnthropicInputItem::Standalone(item) => {
+                        flush_pending_message_item(
+                            role,
+                            &mut pending_message_content,
+                            &mut items,
+                        );
+                        items.push(item);
+                    }
+                }
+            }
+            flush_pending_message_item(role, &mut pending_message_content, &mut items);
+            Ok(items)
+        }
         Some(Value::Null) | None => Ok(Vec::new()),
-        Some(other) => Ok(vec![serde_json::json!({
-            "type": "input_text",
-            "text": other.to_string(),
-        })]),
+        Some(other) => Ok(vec![message_input_item(
+            role,
+            vec![translate_text_block_for_role(role, other.to_string())],
+        )]),
     }
 }
 
-fn translate_anthropic_content_block(block: &Value) -> Result<Value, Response> {
+fn flush_pending_message_item(role: &str, pending_content: &mut Vec<Value>, items: &mut Vec<Value>) {
+    if pending_content.is_empty() {
+        return;
+    }
+    let content = std::mem::take(pending_content);
+    items.push(message_input_item(role, content));
+}
+
+fn message_input_item(role: &str, content: Vec<Value>) -> Value {
+    serde_json::json!({
+        "role": role,
+        "content": content,
+    })
+}
+
+fn translate_anthropic_content_block(
+    role: &str,
+    block: &Value,
+) -> Result<AnthropicInputItem, Response> {
     let Some(block_type) = block.get("type").and_then(Value::as_str) else {
-        return Ok(serde_json::json!({
-            "type": "input_text",
-            "text": block.to_string(),
-        }));
+        return Ok(AnthropicInputItem::MessageContent(
+            translate_text_block_for_role(role, block.to_string()),
+        ));
     };
 
     match block_type {
-        "text" => Ok(serde_json::json!({
-            "type": "input_text",
-            "text": block.get("text").and_then(Value::as_str).unwrap_or_default(),
-        })),
-        "tool_result" => Ok(serde_json::json!({
+        "text" => Ok(AnthropicInputItem::MessageContent(
+            translate_text_block_for_role(
+                role,
+                block.get("text").and_then(Value::as_str).unwrap_or_default(),
+            ),
+        )),
+        "tool_result" => Ok(AnthropicInputItem::Standalone(serde_json::json!({
             "type": "function_call_output",
             "call_id": block.get("tool_use_id").and_then(Value::as_str).unwrap_or_default(),
             "output": block
                 .get("content")
                 .cloned()
                 .unwrap_or(Value::String(String::new())),
-        })),
-        "image" => Ok(translate_anthropic_image_block(block)),
-        _ => Ok(serde_json::json!({
-            "type": "input_text",
-            "text": block.to_string(),
-        })),
+        }))),
+        "tool_use" => Ok(AnthropicInputItem::Standalone(
+            translate_assistant_tool_use_block(block),
+        )),
+        "image" => Ok(AnthropicInputItem::MessageContent(
+            translate_anthropic_image_block(role, block),
+        )),
+        _ => Ok(AnthropicInputItem::MessageContent(
+            translate_text_block_for_role(role, block.to_string()),
+        )),
     }
 }
 
-fn translate_anthropic_image_block(block: &Value) -> Value {
-    let Some(source) = block.get("source").and_then(Value::as_object) else {
-        return serde_json::json!({
+fn translate_text_block_for_role(role: &str, text: impl Into<String>) -> Value {
+    let text = text.into();
+    if role.eq_ignore_ascii_case("assistant") {
+        serde_json::json!({
+            "type": "output_text",
+            "text": text,
+        })
+    } else {
+        serde_json::json!({
             "type": "input_text",
-            "text": block.to_string(),
-        });
+            "text": text,
+        })
+    }
+}
+
+fn translate_assistant_tool_use_block(block: &Value) -> Value {
+    let input = block
+        .get("input")
+        .cloned()
+        .unwrap_or_else(|| Value::Object(serde_json::Map::new()));
+    let arguments = serde_json::to_string(&input).unwrap_or_else(|_| "{}".to_string());
+    serde_json::json!({
+        "type": "function_call",
+        "call_id": block
+            .get("id")
+            .or_else(|| block.get("tool_use_id"))
+            .and_then(Value::as_str)
+            .unwrap_or_default(),
+        "name": block.get("name").and_then(Value::as_str).unwrap_or_default(),
+        "arguments": arguments,
+    })
+}
+
+fn translate_anthropic_image_block(role: &str, block: &Value) -> Value {
+    let Some(source) = block.get("source").and_then(Value::as_object) else {
+        return translate_text_block_for_role(role, block.to_string());
     };
 
     match source.get("type").and_then(Value::as_str) {
@@ -250,10 +363,7 @@ fn translate_anthropic_image_block(block: &Value) -> Value {
             "type": "input_image",
             "image_url": source.get("url").and_then(Value::as_str).unwrap_or_default(),
         }),
-        _ => serde_json::json!({
-            "type": "input_text",
-            "text": block.to_string(),
-        }),
+        _ => translate_text_block_for_role(role, block.to_string()),
     }
 }
 
@@ -586,6 +696,12 @@ impl AnthropicSseTranslator {
                         "type": "text",
                         "text": "",
                     }),
+                    "tool_use" => serde_json::json!({
+                        "type": "tool_use",
+                        "id": block.get("id").cloned().unwrap_or_else(|| Value::String(String::new())),
+                        "name": block.get("name").cloned().unwrap_or_else(|| Value::String(String::new())),
+                        "input": {},
+                    }),
                     _ => block.clone(),
                 }
             }),
@@ -604,6 +720,23 @@ impl AnthropicSseTranslator {
                     }),
                 ));
             }
+        } else if block_type == "tool_use" {
+            let input = block
+                .get("input")
+                .cloned()
+                .unwrap_or_else(|| Value::Object(serde_json::Map::new()));
+            let partial_json = serde_json::to_string(&input).unwrap_or_else(|_| "{}".to_string());
+            frames.push(build_sse_frame(
+                Some("content_block_delta"),
+                &serde_json::json!({
+                    "type": "content_block_delta",
+                    "index": index,
+                    "delta": {
+                        "type": "input_json_delta",
+                        "partial_json": partial_json,
+                    }
+                }),
+            ));
         }
         frames.push(build_sse_frame(
             Some("content_block_stop"),
