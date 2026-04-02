@@ -1,0 +1,20 @@
+changelog:
+  categories:
+    - title: Features
+      labels:
+        - feat
+        - feature
+    - title: Fixes
+      labels:
+        - fix
+        - bug
+        - bugfix
+    - title: Docs and DX
+      labels:
+        - docs
+        - chore
+        - ci
+        - refactor
+    - title: Other Changes
+      labels:
+        - "*"

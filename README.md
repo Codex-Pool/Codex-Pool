@@ -69,7 +69,7 @@ cp docker/.env.personal.example .env.personal
 - `ADMIN_PASSWORD`
 - `ADMIN_JWT_SECRET`
 
-默认镜像是：
+默认镜像是最近一次正式发布：
 
 ```bash
 PERSONAL_IMAGE=ghcr.io/codex-pool/codex-pool-personal:latest
@@ -79,6 +79,12 @@ PERSONAL_IMAGE=ghcr.io/codex-pool/codex-pool-personal:latest
 
 ```bash
 PERSONAL_IMAGE=ghcr.io/codex-pool/codex-pool-personal:v0.1.0
+```
+
+如果你想跟踪 `main` 上的最新未发版构建，可以改成：
+
+```bash
+PERSONAL_IMAGE=ghcr.io/codex-pool/codex-pool-personal:edge
 ```
 
 ### 3. 启动

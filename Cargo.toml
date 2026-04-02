@@ -11,6 +11,7 @@ edition = "2021"
 version = "0.1.0"
 license = "Apache-2.0"
 authors = ["Codex-Pool"]
+repository = "https://github.com/Codex-Pool/Codex-Pool"
 
 [workspace.dependencies]
 anyhow = "1"
@@ -56,3 +57,11 @@ version = "2"
 [patch.crates-io]
 higher-kinded-types = { path = "vendor/higher-kinded-types" }
 macro_rules_attribute = { path = "vendor/macro_rules_attribute" }
+
+# Config for `cargo release`
+[workspace.metadata.release]
+shared-version = true
+publish = false
+tag-name = "v{{version}}"
+allow-branch = ["main"]
+pre-release-commit-message = "chore: release {{version}}"

@@ -1,0 +1,122 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build-personal-bundles:
+    name: build-personal-bundles (${{ matrix.target }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            archive_ext: tar.gz
+            binary_name: codex-pool-personal
+          - runner: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+            archive_ext: tar.gz
+            binary_name: codex-pool-personal
+          - runner: macos-15-intel
+            target: x86_64-apple-darwin
+            archive_ext: tar.gz
+            binary_name: codex-pool-personal
+          - runner: macos-14
+            target: aarch64-apple-darwin
+            archive_ext: tar.gz
+            binary_name: codex-pool-personal
+          - runner: windows-latest
+            target: x86_64-pc-windows-msvc
+            archive_ext: zip
+            binary_name: codex-pool-personal.exe
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Build frontend bundle
+        working-directory: frontend
+        run: |
+          npm ci --legacy-peer-deps
+          npm run build
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Build personal binary
+        shell: bash
+        run: |
+          cargo build --release -p control-plane \
+            --no-default-features \
+            --features sqlite-backend \
+            --bin codex-pool-personal \
+            --target ${{ matrix.target }}
+
+      - name: Assemble Unix bundle
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME}"
+          bundle_root="release-bundle/codex-pool-personal-${version}-${{ matrix.target }}"
+          mkdir -p "${bundle_root}"
+          cp "target/${{ matrix.target }}/release/${{ matrix.binary_name }}" "${bundle_root}/"
+          cp README.md "${bundle_root}/README.md"
+          cp docker/.env.personal.example "${bundle_root}/.env.personal.example"
+          archive="codex-pool-personal-${version}-${{ matrix.target }}.${{ matrix.archive_ext }}"
+          tar -C release-bundle -czf "release-bundle/${archive}" "$(basename "${bundle_root}")"
+          shasum -a 256 "release-bundle/${archive}" > "release-bundle/${archive}.sha256"
+
+      - name: Assemble Windows bundle
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $version = "${env:GITHUB_REF_NAME}"
+          $bundleRoot = "release-bundle/codex-pool-personal-$version-${{ matrix.target }}"
+          New-Item -ItemType Directory -Force -Path $bundleRoot | Out-Null
+          Copy-Item "target/${{ matrix.target }}/release/${{ matrix.binary_name }}" "$bundleRoot/${{ matrix.binary_name }}"
+          Copy-Item "README.md" "$bundleRoot/README.md"
+          Copy-Item "docker/.env.personal.example" "$bundleRoot/.env.personal.example"
+          $archive = "codex-pool-personal-$version-${{ matrix.target }}.${{ matrix.archive_ext }}"
+          Compress-Archive -Path "$bundleRoot/*" -DestinationPath "release-bundle/$archive" -Force
+          $hash = (Get-FileHash "release-bundle/$archive" -Algorithm SHA256).Hash.ToLower()
+          Set-Content -Path "release-bundle/$archive.sha256" -Value "$hash  $archive"
+
+      - name: Upload release artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: personal-bundle-${{ matrix.target }}
+          path: release-bundle/*
+
+  publish-release:
+    needs: build-personal-bundles
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download release artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: personal-bundle-*
+          path: release-artifacts
+          merge-multiple: true
+
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release-artifacts/*
+          generate_release_notes: true
+          prerelease: ${{ contains(github.ref_name, '-') }}
