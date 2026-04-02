@@ -641,6 +641,8 @@ export default {
     },
     antigravity: {
       activeAccounts: "{{count}} 个活跃账号",
+      accountTraffic: "账号流量",
+      apiKeyTraffic: "API 密钥流量",
       last24Hours: "过去 24 小时",
       loading: "正在加载总览数据…",
       signal: "运行信号",
@@ -842,6 +844,7 @@ export default {
     title: "服务总览",
     topApiKeys: {
       empty: "暂无排名数据",
+      emptyHint: "产生请求后，这里会显示 API 密钥的使用情况。",
       scopeDescription: "范围：{{scope}} /选定的时间窗口",
       title: "热门 API 密钥",
     },
@@ -2112,6 +2115,13 @@ export default {
       actionPartialTitle: "{{action}}部分失败",
       actionFailedTitle: "{{action}}失败",
       actionFailed: "操作失败，请稍后重试。",
+      batchSuccessTitle: "已完成{{action}}",
+      batchSuccessDescription: "已更新 {{succeeded}} 条记录。",
+      batchPartialTitle: "{{action}}部分失败",
+      batchPartialDescription: "成功 {{succeeded}} 条，失败 {{failed}} 条{{error}}",
+      batchFailedTitle: "{{action}}失败",
+      batchDeleteTitle: "确认删除已选中的 {{count}} 条记录？",
+      batchDeleteDescription: "所选记录会从账号池中移除。",
     },
   },
   notifications: {
@@ -2305,6 +2315,22 @@ export default {
       capabilitiesDescription:
         "把 edition 能力边界和租户相关开关放在同一块里查看。",
       capabilitiesTitle: "能力边界",
+      components: {
+        controlPlane: {
+          name: "控制面",
+          description: "管理员 API 与编排控制面",
+        },
+        dataPlane: {
+          name: "数据面",
+          connected: "已连通，并正在上报运行时诊断状态",
+          waiting: "正在等待运行时诊断数据",
+        },
+        usageRepo: {
+          name: "用量仓库",
+          available: "用量分析存储当前可用",
+          unavailable: "用量分析存储当前不可用",
+        },
+      },
       category: {
         config: "配置",
         diagnostics: "诊断",

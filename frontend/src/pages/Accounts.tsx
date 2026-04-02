@@ -813,6 +813,7 @@ export default function Accounts() {
     && selectedRecords.every((record) => canRunAccountPoolAction(record, 'restore'))
   useEffect(() => {
     const validSet = new Set(filteredRecordIds)
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setSelectedIds((prev) => {
       const cleaned = new Set([...prev].filter((id) => validSet.has(id)))
       return cleaned.size === prev.size ? prev : cleaned
@@ -1007,11 +1008,13 @@ export default function Accounts() {
   }, [availableModels?.data, selectedRuntimeOAuthStatus?.supported_models])
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     resetResponsesTestState()
   }, [resetResponsesTestState, selectedRecordId])
 
   useEffect(() => {
     if (selectedRecord?.record_scope !== 'runtime') {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setSelectedTestModel('')
       return
     }
@@ -1068,7 +1071,11 @@ export default function Accounts() {
     setSelectedIds((prev) => {
       const next = new Set(prev)
       for (const id of currentPageRecordIds) {
-        value ? next.add(id) : next.delete(id)
+        if (value) {
+          next.add(id)
+        } else {
+          next.delete(id)
+        }
       }
       return next
     })
@@ -1078,7 +1085,11 @@ export default function Accounts() {
     setSelectedIds((prev) => {
       const next = new Set(prev)
       for (const id of filteredRecordIds) {
-        value ? next.add(id) : next.delete(id)
+        if (value) {
+          next.add(id)
+        } else {
+          next.delete(id)
+        }
       }
       return next
     })
@@ -1378,7 +1389,7 @@ export default function Accounts() {
             'w-full overflow-hidden transition-all duration-200',
             selectedIds.size > 0 ? 'max-h-14 opacity-100' : 'max-h-0 opacity-0 pointer-events-none',
           )}>
-            <div className="w-full rounded-large bg-default-100/80 px-3.5 py-2">
+            <div className="w-full rounded-large border border-default-200 bg-default-100/80 px-3.5 py-2">
               <div className="flex w-full flex-wrap items-center gap-2.5">
                 {canSelectAcrossPages ? (
                   <>
@@ -1471,8 +1482,8 @@ export default function Accounts() {
               </TableColumn>
               <TableColumn key="account" allowsSorting>{t('accountPool.columns.account')}</TableColumn>
               <TableColumn key="operationalStatus" allowsSorting>{t('accountPool.columns.operationalStatus')}</TableColumn>
-              <TableColumn key="quota" allowsSorting width={276}>{t('accountPool.columns.quota')}</TableColumn>
-              <TableColumn key="recentSignal" allowsSorting width={216}>{t('accountPool.columns.recentSignal')}</TableColumn>
+              <TableColumn key="quota" allowsSorting>{t('accountPool.columns.quota')}</TableColumn>
+              <TableColumn key="recentSignal" allowsSorting>{t('accountPool.columns.recentSignal')}</TableColumn>
               <TableColumn key="actions">{t('accountPool.columns.actions')}</TableColumn>
             </TableHeader>
             <TableBody
@@ -1504,7 +1515,11 @@ export default function Accounts() {
                         onCheckedChange={(value) => {
                           setSelectedIds((prev) => {
                             const next = new Set(prev)
-                            value ? next.add(record.id) : next.delete(record.id)
+                            if (value) {
+                              next.add(record.id)
+                            } else {
+                              next.delete(record.id)
+                            }
                             return next
                           })
                         }}

@@ -348,7 +348,11 @@ export function DataTable<T, TValue = unknown>({
             checked={resolvedSelectedKeys.has(rowId)}
             onCheckedChange={(value) => {
               const next = new Set(resolvedSelectedKeys)
-              value ? next.add(rowId) : next.delete(rowId)
+              if (value) {
+                next.add(rowId)
+              } else {
+                next.delete(rowId)
+              }
               setSelectedKeys(next)
             }}
             aria-label={t("common.table.selectRow", { defaultValue: "Select row" })}
@@ -502,7 +506,11 @@ export function DataTable<T, TValue = unknown>({
   const toggleCurrentPageSelection = (value: boolean) => {
     const next = new Set(resolvedSelectedKeys)
     for (const id of currentPageRowIds) {
-      value ? next.add(id) : next.delete(id)
+      if (value) {
+        next.add(id)
+      } else {
+        next.delete(id)
+      }
     }
     setSelectedKeys(next)
   }
@@ -510,7 +518,11 @@ export function DataTable<T, TValue = unknown>({
   const toggleFilteredSelection = (value: boolean) => {
     const next = new Set(resolvedSelectedKeys)
     for (const id of filteredRowIds) {
-      value ? next.add(id) : next.delete(id)
+      if (value) {
+        next.add(id)
+      } else {
+        next.delete(id)
+      }
     }
     setSelectedKeys(next)
   }
@@ -542,7 +554,7 @@ export function DataTable<T, TValue = unknown>({
               "w-full overflow-hidden transition-all duration-200",
               selectionCount > 0 ? "max-h-14 opacity-100" : "max-h-0 opacity-0 pointer-events-none",
             )}>
-              <div className="w-full rounded-large bg-default-100/80 px-3.5 py-2">
+              <div className="w-full rounded-large border border-default-200 bg-default-100/80 px-3.5 py-2">
                 <div className="flex w-full flex-wrap items-center gap-2.5">
                   {canSelectAcrossPages ? (
                     <>

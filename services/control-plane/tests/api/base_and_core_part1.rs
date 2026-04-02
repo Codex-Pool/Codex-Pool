@@ -429,28 +429,17 @@ async fn create_and_list_tenants() {
 
 #[tokio::test]
 async fn create_and_list_api_keys() {
-    let app = build_app();
+    let store = Arc::new(InMemoryStore::default());
+    let app = build_app_with_store(store.clone());
     let admin_token = login_admin_token(&app).await;
 
-    let tenant_response = app
-        .clone()
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri("/api/v1/tenants")
-                .header("content-type", "application/json")
-                .header("authorization", format!("Bearer {admin_token}"))
-                .body(Body::from(r#"{"name":"tenant-k"}"#))
-                .unwrap(),
-        )
+    let tenant = store
+        .create_tenant(CreateTenantRequest {
+            name: "tenant-k".to_string(),
+        })
         .await
         .unwrap();
-
-    let tenant_body = to_bytes(tenant_response.into_body(), usize::MAX)
-        .await
-        .unwrap();
-    let tenant_json: Value = serde_json::from_slice(&tenant_body).unwrap();
-    let tenant_id = tenant_json["id"].as_str().unwrap();
+    let tenant_id = tenant.id.to_string();
 
     let create_response = app
         .clone()

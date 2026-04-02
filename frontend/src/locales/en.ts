@@ -658,6 +658,8 @@ export default {
     },
     antigravity: {
       activeAccounts: "{{count}} active",
+      accountTraffic: "Account traffic",
+      apiKeyTraffic: "API key traffic",
       last24Hours: "Last 24 hours",
       loading: "Loading dashboard data…",
       signal: "Operational signal",
@@ -866,6 +868,7 @@ export default {
     title: "Overview",
     topApiKeys: {
       empty: "No ranking data yet",
+      emptyHint: "API key usage will appear here once requests are made.",
       scopeDescription: "Scope: {{scope}} / selected time window",
       title: "Top API Keys",
     },
@@ -2194,6 +2197,15 @@ export default {
       actionPartialTitle: "{{action}} partially failed",
       actionFailedTitle: "{{action}} failed",
       actionFailed: "Please try again later.",
+      batchSuccessTitle: "{{action}} completed",
+      batchSuccessDescription: "{{succeeded}} records were updated.",
+      batchPartialTitle: "{{action}} partially failed",
+      batchPartialDescription:
+        "{{succeeded}} succeeded, {{failed}} failed{{error}}",
+      batchFailedTitle: "{{action}} failed",
+      batchDeleteTitle: "Delete {{count}} selected records?",
+      batchDeleteDescription:
+        "The selected records will be removed from the account pool.",
     },
   },
   notifications: {
@@ -2403,6 +2415,22 @@ export default {
       componentsDescription:
         "Verify that control-plane, data-plane, and usage storage are all responding as expected.",
       componentsTitle: "Core Components",
+      components: {
+        controlPlane: {
+          name: "Control Plane",
+          description: "Admin API and orchestration surface",
+        },
+        dataPlane: {
+          name: "Data Plane",
+          connected: "Connected and reporting runtime debug state",
+          waiting: "Waiting for runtime diagnostics",
+        },
+        usageRepo: {
+          name: "Usage Repository",
+          available: "Usage analytics storage is available",
+          unavailable: "Usage analytics storage is unavailable",
+        },
+      },
       config: {
         authValidateUrl: "Auth Validate URL",
         controlPlaneListen: "Control Plane Listen",

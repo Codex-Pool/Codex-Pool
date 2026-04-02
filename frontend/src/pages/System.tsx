@@ -35,7 +35,7 @@ export default function System() {
     refetchInterval: 15_000,
   })
 
-  const componentRows = useMemo(() => resolveSystemComponentRows(data), [data])
+  const componentRows = useMemo(() => resolveSystemComponentRows(data, t), [data, t])
   const dataPlaneActiveRatio = useMemo(() => {
     const total = data?.data_plane_debug?.account_total ?? 0
     const active = data?.data_plane_debug?.active_account_total ?? 0
@@ -78,7 +78,7 @@ export default function System() {
     },
     {
       label: t('system.columns.uptime'),
-      value: formatDurationFromSeconds(data?.uptime_sec),
+      value: formatDurationFromSeconds(data?.uptime_sec, t('system.status.unknown')),
       hint: t('system.antigravity.summary.uptimeHint'),
       icon: Server,
       toneClassName: 'border-success-200 bg-success-50 text-success-700 dark:bg-success/10 dark:text-success-300',

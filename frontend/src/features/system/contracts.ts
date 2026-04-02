@@ -16,17 +16,18 @@ type SystemStateLike = Pick<
 
 export function resolveSystemComponentRows(
   state: SystemStateLike | undefined,
+  t: (key: string) => string,
 ): SystemComponentRow[] {
   return [
     {
       id: 'control-plane',
-      name: 'Control Plane',
+      name: t('system.antigravity.components.controlPlane.name'),
       status: 'healthy',
-      description: 'Admin API and orchestration surface',
+      description: t('system.antigravity.components.controlPlane.description'),
     },
     {
       id: 'data-plane',
-      name: 'Data Plane',
+      name: t('system.antigravity.components.dataPlane.name'),
       status: state?.data_plane_error
         ? 'degraded'
         : state?.data_plane_debug
@@ -35,23 +36,26 @@ export function resolveSystemComponentRows(
       description: state?.data_plane_error
         ? state.data_plane_error
         : state?.data_plane_debug
-          ? 'Connected and reporting runtime debug state'
-          : 'Waiting for runtime diagnostics',
+          ? t('system.antigravity.components.dataPlane.connected')
+          : t('system.antigravity.components.dataPlane.waiting'),
     },
     {
       id: 'usage-repo',
-      name: 'Usage Repository',
+      name: t('system.antigravity.components.usageRepo.name'),
       status: state?.usage_repo_available ? 'healthy' : 'degraded',
       description: state?.usage_repo_available
-        ? 'Usage analytics storage is available'
-        : 'Usage analytics storage is unavailable',
+        ? t('system.antigravity.components.usageRepo.available')
+        : t('system.antigravity.components.usageRepo.unavailable'),
     },
   ]
 }
 
-export function formatDurationFromSeconds(totalSeconds: number | undefined): string {
+export function formatDurationFromSeconds(
+  totalSeconds: number | undefined,
+  unknownLabel: string,
+): string {
   if (typeof totalSeconds !== 'number' || !Number.isFinite(totalSeconds) || totalSeconds < 0) {
-    return 'Unknown'
+    return unknownLabel
   }
 
   const days = Math.floor(totalSeconds / 86400)

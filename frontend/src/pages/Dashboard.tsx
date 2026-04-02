@@ -867,8 +867,8 @@ export default function Dashboard() {
             <div className="flex flex-wrap gap-3">
               {[
                 { label: t('dashboard.kpi.totalRequests'), value: formatCompactNumber(kpis.totalRequests), color: 'success' as const, active: true },
-                { label: t('dashboard.antigravity.accountTraffic', { defaultValue: 'Account traffic' }), value: formatCompactNumber(trafficData.reduce((s, p) => s + p.accounts, 0)), color: 'success' as const, active: false },
-                { label: t('dashboard.antigravity.apiKeyTraffic', { defaultValue: 'API key traffic' }), value: formatCompactNumber(trafficData.reduce((s, p) => s + p.apiKeys, 0)), color: 'danger' as const, active: false },
+                { label: t('dashboard.antigravity.accountTraffic'), value: formatCompactNumber(trafficData.reduce((s, p) => s + p.accounts, 0)), color: 'success' as const, active: false },
+                { label: t('dashboard.antigravity.apiKeyTraffic'), value: formatCompactNumber(trafficData.reduce((s, p) => s + p.apiKeys, 0)), color: 'danger' as const, active: false },
               ].map((item) => (
                 <div key={item.label} className={cn(
                   'rounded-large border-small px-3 py-2',
@@ -919,10 +919,10 @@ export default function Dashboard() {
             {/* Token component KPI legend row */}
             <div className="flex flex-wrap gap-3">
               {([
-                { key: 'input', label: t('dashboard.tokenComponent.input', { defaultValue: 'Input' }), value: tokenTrend.reduce((s, p) => s + p.input, 0), color: CHART_SERIES_COLORS.input },
-                { key: 'cached', label: t('dashboard.tokenComponent.cached', { defaultValue: 'Cached' }), value: tokenTrend.reduce((s, p) => s + p.cached, 0), color: CHART_SERIES_COLORS.cached },
-                { key: 'output', label: t('dashboard.tokenComponent.output', { defaultValue: 'Output' }), value: tokenTrend.reduce((s, p) => s + p.output, 0), color: CHART_SERIES_COLORS.output },
-                { key: 'reasoning', label: t('dashboard.tokenComponent.reasoning', { defaultValue: 'Reasoning' }), value: tokenTrend.reduce((s, p) => s + p.reasoning, 0), color: CHART_SERIES_COLORS.reasoning },
+                { key: 'input', label: t('dashboard.tokenComponents.input'), value: tokenTrend.reduce((s, p) => s + p.input, 0), color: CHART_SERIES_COLORS.input },
+                { key: 'cached', label: t('dashboard.tokenComponents.cached'), value: tokenTrend.reduce((s, p) => s + p.cached, 0), color: CHART_SERIES_COLORS.cached },
+                { key: 'output', label: t('dashboard.tokenComponents.output'), value: tokenTrend.reduce((s, p) => s + p.output, 0), color: CHART_SERIES_COLORS.output },
+                { key: 'reasoning', label: t('dashboard.tokenComponents.reasoning'), value: tokenTrend.reduce((s, p) => s + p.reasoning, 0), color: CHART_SERIES_COLORS.reasoning },
               ] as const).map((item) => (
                 <div key={item.key} className="rounded-large border-small border-default-200 px-3 py-2">
                   <div className="flex items-center gap-1.5">
@@ -1025,7 +1025,7 @@ export default function Dashboard() {
                   {t('dashboard.topApiKeys.empty')}
                 </p>
                 <p className="text-xs text-default-400">
-                  {t('dashboard.topApiKeys.emptyHint', { defaultValue: 'API key usage will appear here once requests are made.' })}
+                  {t('dashboard.topApiKeys.emptyHint')}
                 </p>
               </div>
             ) : (
